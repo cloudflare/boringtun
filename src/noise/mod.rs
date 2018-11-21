@@ -397,7 +397,8 @@ impl Tunn {
                     q.push_back(packet.to_vec());
                 }
                 Ok(true)
-            }).unwrap();
+            })
+            .unwrap();
     }
 
     fn requeue_packet(&self, packet: Vec<u8>) {
@@ -409,7 +410,8 @@ impl Tunn {
                     q.push_front(packet);
                 }
                 Ok(true)
-            }).unwrap();
+            })
+            .unwrap();
     }
 
     fn dequeue_packet(&self) -> Option<Vec<u8>> {

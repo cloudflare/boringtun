@@ -408,8 +408,10 @@ PublicKey = {}
 AllowedIPs = 192.168.2.2/32
 Endpoint = :{}",
                     ip, port, key_pair.0, public_key, endpoint,
-                ).as_bytes(),
-            ).unwrap();
+                )
+                .as_bytes(),
+            )
+            .unwrap();
 
             // Start wireguard
             Command::new("wg-quick")
