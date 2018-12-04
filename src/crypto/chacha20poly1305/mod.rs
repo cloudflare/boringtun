@@ -161,7 +161,7 @@ impl Vec4 {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ChaCha20Poly1305 {
     key: [u32; 8],
 }

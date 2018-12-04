@@ -11,9 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 // static CONSTRUCTION: &'static [u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
 // static IDENTIFIER: &'static [u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
 static LABEL_MAC1: &'static [u8] = b"mac1----";
-
 static LABEL_COOKIE: &'static [u8] = b"cookie--";
-
 const KEY_LEN: usize = 32;
 
 // initiator.chaining_key = HASH(CONSTRUCTION)
@@ -58,11 +56,13 @@ macro_rules! OPEN {
     };
 }
 
+#[derive(Debug)]
 struct Tai64N {
     secs: u64,
     nano: u32,
 }
 
+#[derive(Debug)]
 struct TimeStamper {
     duration_at_start: Duration,
     instant_at_start: Instant,
@@ -116,6 +116,7 @@ impl Tai64N {
     }
 }
 
+#[derive(Debug)]
 struct NoiseParams {
     static_public: [u8; KEY_LEN],
     static_private: [u8; KEY_LEN],
@@ -125,6 +126,7 @@ struct NoiseParams {
     receiving_mac1_key: [u8; KEY_LEN],
 }
 
+#[derive(Debug)]
 pub enum HandshakeState {
     None, // No handshake in process
     InitSent {
@@ -143,6 +145,7 @@ pub enum HandshakeState {
     }, // Handshake initiated by peer
 }
 
+#[derive(Debug)]
 pub struct Handshake {
     params: NoiseParams,
     next_index: u32,
@@ -153,8 +156,90 @@ pub struct Handshake {
     stamper: TimeStamper,
 }
 
+#[derive(Debug)]
+pub struct HalfHandshake {
+    pub peer_index: u32,
+    pub peer_static_public: [u8; 32],
+}
+
+pub fn parse_handshake_anon(
+    static_private: &[u8],
+    static_public: &[u8],
+    src: &[u8],
+) -> Result<HalfHandshake, WireGuardError> {
+    const MSG_TYPE_OFF: usize = 0;
+    const MSG_TYPE_SZ: usize = 4;
+    const SND_IDX_OFF: usize = MSG_TYPE_OFF + MSG_TYPE_SZ;
+    const SND_IDX_SZ: usize = 4;
+    const EPH_OFF: usize = SND_IDX_OFF + SND_IDX_SZ;
+    const EPH_SZ: usize = 32;
+    const E_STAT_OFF: usize = EPH_OFF + EPH_SZ;
+    const E_STAT_SZ: usize = 32 + 16;
+    const ENC_TIME_OFF: usize = E_STAT_OFF + E_STAT_SZ;
+    const ENC_TIME_SZ: usize = 12 + 16;
+    const MAC1_OFF: usize = ENC_TIME_OFF + ENC_TIME_SZ;
+    const MAC1_SZ: usize = 16;
+    const MAC2_OFF: usize = MAC1_OFF + MAC1_SZ;
+    const MAC2_SZ: usize = 16;
+    const BUF_SZ: usize = MAC2_OFF + MAC2_SZ;
+
+    let receiving_mac1_key = HASH!(LABEL_MAC1, static_public);
+
+    if src.len() != BUF_SZ {
+        return Err(WireGuardError::IncorrectPacketLength);
+    }
+    // msg.message_type = 1
+    // msg.reserved_zero = { 0, 0, 0 }
+    let message_type = read_u32(&src[MSG_TYPE_OFF..MSG_TYPE_OFF + MSG_TYPE_SZ]);
+    if message_type != 1 {
+        return Err(WireGuardError::WrongPacketType);
+    }
+    // Validating the MAC
+    // msg.mac1 = MAC(HASH(LABEL_MAC1 || responder.static_public), msg[0:offsetof(msg.mac1)])
+    let msg_mac = Blake2s::new_mac(&receiving_mac1_key)
+        .hash(&src[0..MAC1_OFF])
+        .finalize();
+    constant_time_mac_check(&msg_mac[0..MAC1_SZ], &src[MAC1_OFF..MAC1_OFF + MAC1_SZ])?;
+    // initiator.chaining_key = HASH(CONSTRUCTION)
+    let mut chaining_key = INITIAL_CHAIN_KEY;
+    // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
+    let mut hash = INITIAL_CHAIN_HASH;
+    hash = HASH!(hash, static_public);
+    // msg.sender_index = little_endian(initiator.sender_index)
+    let peer_index = read_u32(&src[SND_IDX_OFF..SND_IDX_OFF + SND_IDX_SZ]);
+    // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
+    let peer_ephemeral_public = &src[EPH_OFF..EPH_OFF + EPH_SZ];
+    // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
+    hash = HASH!(hash, src[EPH_OFF..EPH_OFF + EPH_SZ]);
+    // temp = HMAC(initiator.chaining_key, msg.unencrypted_ephemeral)
+    // initiator.chaining_key = HMAC(temp, 0x1)
+    chaining_key = HMAC!(HMAC!(chaining_key, src[EPH_OFF..EPH_OFF + EPH_SZ]), [0x01]);
+    // temp = HMAC(initiator.chaining_key, DH(initiator.ephemeral_private, responder.static_public))
+    let epehemeral_shared = x25519_shared_key(peer_ephemeral_public, static_private);
+    let temp = HMAC!(chaining_key, epehemeral_shared);
+    // initiator.chaining_key = HMAC(temp, 0x1)
+    chaining_key = HMAC!(temp, [0x01]);
+    // key = HMAC(temp, initiator.chaining_key || 0x2)
+    let key = HMAC!(temp, chaining_key, [0x02]);
+
+    let mut peer_static_public = [0u8; KEY_LEN];
+    // msg.encrypted_static = AEAD(key, 0, initiator.static_public, initiator.hash)
+    OPEN!(
+        peer_static_public,
+        key,
+        0,
+        src[E_STAT_OFF..E_STAT_OFF + E_STAT_SZ],
+        hash
+    )?;
+
+    Ok(HalfHandshake {
+        peer_index,
+        peer_static_public,
+    })
+}
+
 impl Handshake {
-    pub fn new(static_private: &[u8], peer_static_public: &[u8]) -> Handshake {
+    pub fn new(static_private: &[u8], peer_static_public: &[u8], global_idx: u32) -> Handshake {
         let static_public = x25519_public_key(static_private);
 
         if constant_time_zero_key_check(&static_public) {
@@ -172,7 +257,7 @@ impl Handshake {
 
         Handshake {
             params: params,
-            next_index: 0,
+            next_index: global_idx,
             rng: OsRng::new().unwrap(),
             state: HandshakeState::None,
             cookie: None,
@@ -207,7 +292,18 @@ impl Handshake {
         self.cookie = None;
     }
 
-    pub fn format_handshake_initiation(&mut self, dst: &mut [u8]) -> Result<usize, WireGuardError> {
+    // The index used is 24 bits for peer index, allowing for 16M active peers per server and 8 bits for cyclic session index
+    fn inc_index(&mut self) -> u32 {
+        let index = self.next_index;
+        let idx8 = index as u8;
+        self.next_index = (index & !0xff) | (idx8.wrapping_add(1)) as u32;
+        index
+    }
+
+    pub fn format_handshake_initiation<'a>(
+        &mut self,
+        dst: &'a mut [u8],
+    ) -> Result<&'a mut [u8], WireGuardError> {
         const MSG_TYPE_OFF: usize = 0;
         const MSG_TYPE_SZ: usize = 4;
         const SND_IDX_OFF: usize = MSG_TYPE_OFF + MSG_TYPE_SZ;
@@ -229,8 +325,7 @@ impl Handshake {
         }
 
         self.state = HandshakeState::None;
-        let local_index = self.next_index;
-        self.next_index += 1;
+        let local_index = self.inc_index();
 
         // initiator.chaining_key = HASH(CONSTRUCTION)
         let mut chaining_key = INITIAL_CHAIN_KEY;
@@ -310,7 +405,7 @@ impl Handshake {
             mac1: msg_mac,
         };
 
-        Ok(BUF_SZ)
+        Ok(&mut dst[..BUF_SZ])
     }
 
     pub fn receive_handshake_response(&mut self, src: &[u8]) -> Result<Session, WireGuardError> {
@@ -427,11 +522,11 @@ impl Handshake {
         Ok(Session::new(local_index, peer_index, temp3, temp2))
     }
 
-    pub fn receive_cookie_reply(
+    pub fn receive_cookie_reply<'a>(
         &mut self,
         src: &[u8],
-        mut dst: &mut [u8],
-    ) -> Result<usize, WireGuardError> {
+        dst: &'a mut [u8],
+    ) -> Result<&'a mut [u8], WireGuardError> {
         const MSG_TYPE_OFF: usize = 0;
         const MSG_TYPE_SZ: usize = 4;
         const RCV_IDX_OFF: usize = MSG_TYPE_OFF + MSG_TYPE_SZ;
@@ -480,14 +575,14 @@ impl Handshake {
         )?;
         assert_eq!(n, 16);
         self.cookie = Some(cookie);
-        self.format_handshake_initiation(&mut dst)
+        self.format_handshake_initiation(dst)
     }
 
-    pub fn receive_handshake_initialization(
+    pub fn receive_handshake_initialization<'a>(
         &mut self,
         src: &[u8],
-        dst: &mut [u8],
-    ) -> Result<(usize, Session), WireGuardError> {
+        dst: &'a mut [u8],
+    ) -> Result<(&'a mut [u8], Session), WireGuardError> {
         const MSG_TYPE_OFF: usize = 0;
         const MSG_TYPE_SZ: usize = 4;
         const SND_IDX_OFF: usize = MSG_TYPE_OFF + MSG_TYPE_SZ;
@@ -598,10 +693,10 @@ impl Handshake {
         return self.format_handshake_response(dst);
     }
 
-    fn format_handshake_response(
+    fn format_handshake_response<'a>(
         &mut self,
-        dst: &mut [u8],
-    ) -> Result<(usize, Session), WireGuardError> {
+        dst: &'a mut [u8],
+    ) -> Result<(&'a mut [u8], Session), WireGuardError> {
         const MSG_TYPE_OFF: usize = 0;
         const MSG_TYPE_SZ: usize = 4;
         const SND_IDX_OFF: usize = MSG_TYPE_OFF + MSG_TYPE_SZ;
@@ -635,8 +730,7 @@ impl Handshake {
         };
         // responder.ephemeral_private = DH_GENERATE()
         let mut ephemeral_private = [0u8; KEY_LEN];
-        let local_index = self.next_index;
-        self.next_index += 1;
+        let local_index = self.inc_index();
         self.rng.fill_bytes(&mut ephemeral_private[..]);
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
@@ -716,7 +810,10 @@ impl Handshake {
 
         self.state = HandshakeState::None;
 
-        Ok((BUF_SZ, Session::new(local_index, peer_index, temp2, temp3)))
+        Ok((
+            &mut dst[..BUF_SZ],
+            Session::new(local_index, peer_index, temp2, temp3),
+        ))
     }
 }
 

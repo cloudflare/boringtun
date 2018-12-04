@@ -1,5 +1,7 @@
-use noise::{result_type, wireguard_result, Tunn, Verbosity};
+use noise::{Tunn, TunnResult, Verbosity};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+//use std::sync::Arc;
+use super::errors::WireGuardError;
 use std::time::Instant;
 
 /*
@@ -16,6 +18,7 @@ const REJECT_AFTER_TIME: usize = 180;
 const REKEY_ATTEMPT_TIME: usize = 90;
 const COOKIE_EXPIRATION_TIME: usize = 120;
 
+#[derive(Debug)]
 pub enum TimerName {
     TimeCurrent,
     TimeSessionEstablished,
@@ -26,6 +29,7 @@ pub enum TimerName {
     Top,
 }
 
+#[derive(Debug)]
 pub struct Timers {
     is_initiator: AtomicBool, // Is the owner of the timer the initiator or the responder for the last handshake?
     time_started: Instant,    // Start time of the tunnel
@@ -61,12 +65,12 @@ impl Tunn {
             .store(is_initiator, Ordering::Relaxed)
     }
 
-    pub fn update_timers(&self, dst: &mut [u8]) -> wireguard_result {
+    pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
         let time = Instant::now();
         let timers = &self.timers;
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded
-        // to a second, because there is no real benefit to having highly accurate timers.
+        // to a second, there is no real benefit to having highly accurate timers.
         let time_current = time.duration_since(timers.time_started).as_secs() as usize;
         timers.timers[TimerName::TimeCurrent as usize].store(time_current, Ordering::Relaxed);
 
@@ -76,17 +80,16 @@ impl Tunn {
         let mut hanshake_initiation_required = false;
 
         {
-            if let Ok(mut handshake) = self.handshake.try_lock() {
-                // Clear cookie after two minutes
+            if let Some(mut handshake) = self.handshake.try_lock() {
+                // Clear cookie after COOKIE_EXPIRATION_TIME
                 if handshake.has_cookie() {
                     let time_cookie_received = self.timer(TimerName::TimeCookieReceived);
-
                     if time_current - time_cookie_received >= COOKIE_EXPIRATION_TIME {
                         handshake.clear_cookie();
                     }
                 }
 
-                // If can't lock, then something is being upated anyway.
+                // If can't lock, then something is being upated anyway
                 if handshake.is_in_progress() {
                     if let Some(time_init_sent) = handshake.timer() {
                         let time_since_init_sent =
@@ -100,18 +103,18 @@ impl Tunn {
                             // this timer is reset.
                             handshake.clear();
 
-                            let mut cur_session = self.current_session.write().unwrap();
-                            *cur_session = None;
+                            for session in &self.sessions {
+                                *session.write() = None;
+                            }
 
-                            let mut queued = self.packet_queue.lock().unwrap();
-                            queued.clear();
+                            {
+                                let mut queued = self.packet_queue.lock();
+                                queued.clear();
+                            }
 
                             self.log(Verbosity::Debug, "HANDSHAKE(REKEY_ATTEMPT_TIME)");
 
-                            return wireguard_result {
-                                op: result_type::WIREGUARD_ERROR,
-                                size: 0,
-                            };
+                            return TunnResult::Err(WireGuardError::ConnectionExpired);
                         }
 
                         if time_since_init_sent >= REKEY_TIMEOUT {
@@ -159,17 +162,7 @@ impl Tunn {
         // Packets are dropped if the session counter is greater than
         // REJECT_AFTER_MESSAGES or if its key is older than REJECT_AFTER_TIME.
         if time_current - time_session_established >= REJECT_AFTER_TIME {
-            let mut cur_session = self.current_session.write().unwrap();
-            match *cur_session {
-                Some(_) => {
-                    self.log(
-                        Verbosity::Debug,
-                        "CANCEL_SESSION(REJECT_AFTER_TIME_TIMEOUT)",
-                    );
-                    *cur_session = None;
-                }
-                _ => {}
-            }
+            // The way our ring buffer of sessions works, all sessions live for at most 2 * REJECT_AFTER_TIME
         }
 
         if hanshake_initiation_required {
@@ -182,7 +175,7 @@ impl Tunn {
         // packet.
         if time_current - time_last_packet_sent >= KEEPALIVE_TIMEOUT {
             self.log(Verbosity::Debug, "KEEPALIVE_TIMEOUT");
-            return self.format_packet_data(&[], dst);
+            return self.tunnel_to_network(&[], dst);
         }
 
         // All ephemeral private keys and symmetric session keys are zeroed
@@ -202,9 +195,6 @@ impl Tunn {
         // Handshakes are only initiated once every REKEY_TIMEOUT ms, with this
         // strict rate limiting enforced.
 
-        wireguard_result {
-            op: result_type::WIREGUARD_DONE,
-            size: 0,
-        }
+        TunnResult::Done
     }
 }

@@ -1,6 +1,6 @@
 use super::super::crypto::blake2s::*;
-use super::super::crypto::chacha20poly1305::*;
 use super::super::crypto::x25519::*;
+use ring::aead::*;
 use std::time::Instant;
 
 fn bench_blake2s(name: bool, n: usize) -> String {
@@ -37,17 +37,19 @@ fn bench_chacha20poly1305(name: bool, n: usize) -> String {
         return format!("AEAD Seal {}B: ", n);
     }
 
-    let buf_in = vec![0u8; n];
+    let _buf_in = vec![0u8; n];
     let mut buf_out = vec![0u8; n + 16];
     let mut enced = 0;
 
     let start_time = Instant::now();
 
-    let aead = ChaCha20Poly1305::new_aead(&[0u8; 32]);
+    //let aead = ChaCha20Poly1305::new_aead(&[0u8; 32]);
+    let key = SealingKey::new(&CHACHA20_POLY1305, &[0u8; 32]).unwrap();
 
     loop {
         for _i in 0..100 {
-            enced += aead.seal_wg(0, &[], &buf_in, &mut buf_out) - 16;
+            //enced += aead.seal_wg(0, &[], &buf_in, &mut buf_out) - 16;
+            enced += seal_in_place(&key, &[0u8; 12], &[], &mut buf_out, 16).unwrap();
         }
 
         if Instant::now().duration_since(start_time).as_secs() >= 3 {

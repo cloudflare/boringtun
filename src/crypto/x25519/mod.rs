@@ -1,20 +1,73 @@
 mod tests;
 
+use base64::decode;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
+use std::str::FromStr;
 
-#[repr(C)]
-pub struct wireguard_keypair {
-    pub private_key: [u8; 32],
-    pub public_key: [u8; 32],
-}
+#[derive(Debug, Eq, PartialEq, Hash, Default, Clone)]
+// TODO: implement Hash
+pub struct X25519Key([u8; 32]);
 
 #[derive(Clone, Copy)]
 struct Felem([u64; 4]);
 struct Felem2([u64; 8]);
+
+impl FromStr for X25519Key {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut key = X25519Key([0u8; 32]);
+        if s.len() != 64 {
+            if let Ok(decoded_key) = decode(s) {
+                if decoded_key.len() != key.0.len() {
+                    return Err("Illegal key size".to_owned());
+                } else {
+                    &key.0[..].copy_from_slice(&decoded_key);
+                    return Ok(key);
+                }
+            }
+            // Try to parse as base 64
+
+            return Err("Illegal key size".to_owned());
+        }
+
+        for i in 0..32 {
+            key.0[i] = u8::from_str_radix(&s[i * 2..=i * 2 + 1], 16)
+                .map_err(|_| "Illegal character in key".to_owned())?;
+        }
+
+        Ok(key)
+    }
+}
+
+/// Will panic if the slice.len() != 32
+impl<'a> From<&'a [u8]> for X25519Key {
+    fn from(slice: &[u8]) -> Self {
+        let mut key = [0u8; 32];
+        &key[..].copy_from_slice(slice);
+        X25519Key(key)
+    }
+}
+
+impl From<[u8; 32]> for X25519Key {
+    fn from(arr: [u8; 32]) -> Self {
+        X25519Key(arr)
+    }
+}
+
+impl X25519Key {
+    pub fn public_key(&self) -> X25519Key {
+        X25519Key(x25519_public_key(&self.0))
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 impl Add for Felem {
     type Output = Felem;

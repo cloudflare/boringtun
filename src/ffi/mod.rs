@@ -12,6 +12,69 @@ use std::os::raw::c_char;
 use std::ptr;
 use std::slice;
 
+#[allow(non_camel_case_types)]
+#[repr(u32)]
+/// Indicates the operation required from the caller
+pub enum result_type {
+    /// No operation is required.
+    WIREGUARD_DONE = 0,
+    /// Write dst buffer to network. Size indicates the number of bytes to write.
+    WRITE_TO_NETWORK = 1,
+    /// Some error occured, no operation is required. Size indicates error code.
+    WIREGUARD_ERROR = 2,
+    /// Write dst buffer to the interface as an ipv4 packet. Size indicates the number of bytes to write.
+    WRITE_TO_TUNNEL_IPV4 = 4,
+    /// Write dst buffer to the interface as an ipv6 packet. Size indicates the number of bytes to write.
+    WRITE_TO_TUNNEL_IPV6 = 6,
+}
+
+/// The return type of WireGuard functions
+#[repr(C)]
+pub struct wireguard_result {
+    /// The operation to be performed by the caller
+    pub op: result_type,
+    /// Additional information, required to perform the operation
+    pub size: usize,
+}
+
+impl<'a> From<TunnResult<'a>> for wireguard_result {
+    fn from(res: TunnResult<'a>) -> wireguard_result {
+        match res {
+            TunnResult::Done => wireguard_result {
+                op: result_type::WIREGUARD_DONE,
+                size: 0,
+            },
+            TunnResult::Err(e) => wireguard_result {
+                op: result_type::WIREGUARD_ERROR,
+                size: e as _,
+            },
+            TunnResult::WriteToNetwork(b) => wireguard_result {
+                op: result_type::WRITE_TO_NETWORK,
+                size: b.len(),
+            },
+            TunnResult::WriteToTunnelV4(b, _) => wireguard_result {
+                op: result_type::WRITE_TO_TUNNEL_IPV4,
+                size: b.len(),
+            },
+            TunnResult::WriteToTunnelV6(b, _) => wireguard_result {
+                op: result_type::WRITE_TO_TUNNEL_IPV6,
+                size: b.len(),
+            },
+        }
+    }
+}
+
+impl From<u32> for Verbosity {
+    fn from(num: u32) -> Self {
+        match num {
+            0 => Verbosity::None,
+            1 => Verbosity::Info,
+            2 => Verbosity::Debug,
+            _ => Verbosity::All,
+        }
+    }
+}
+
 #[repr(C)]
 pub struct x25519_key {
     pub key: [u8; 32],
@@ -63,9 +126,7 @@ pub extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> i32 {
         Ok(string) => string,
     };
 
-    let decoded_key = decode(&utf8_key);
-
-    if let Ok(key) = decoded_key {
+    if let Ok(key) = decode(&utf8_key) {
         let len = key.len();
         let mut zero = 0u8;
         for b in key {
@@ -102,13 +163,23 @@ pub extern "C" fn new_tunnel(
         Ok(string) => string,
     };
 
-    let mut tunnel = match Tunn::new(static_private, server_static_public) {
+    let private_key = match static_private.parse() {
+        Err(_) => return ptr::null_mut(),
+        Ok(key) => key,
+    };
+
+    let public_key = match server_static_public.parse() {
+        Err(_) => return ptr::null_mut(),
+        Ok(key) => key,
+    };
+
+    let mut tunnel = match Tunn::new(&private_key, &public_key, 0) {
         Ok(t) => t,
         Err(_) => return ptr::null_mut(),
     };
 
     if log_level > 0 {
-        tunnel.set_log(log_printer, log_level);
+        tunnel.set_log(log_printer, Verbosity::from(log_level));
     }
 
     return Box::into_raw(tunnel);
@@ -130,7 +201,7 @@ pub extern "C" fn wireguard_write(
     let dst = unsafe { slice::from_raw_parts_mut(dst, dst_size as usize) };
     let res = tunnel.tunnel_to_network(src, dst);
     mem::forget(tunnel); // Don't let Rust free the tunnel
-    res
+    wireguard_result::from(res)
 }
 
 /// Read a UDP packet from the server.
@@ -149,7 +220,7 @@ pub extern "C" fn wireguard_read(
     let dst = unsafe { slice::from_raw_parts_mut(dst, dst_size as usize) };
     let res = tunnel.network_to_tunnel(src, dst);
     mem::forget(tunnel); // Don't let Rust free the tunnel
-    res
+    wireguard_result::from(res)
 }
 
 /// This is a state keeping function, that need to be called preriodically.
@@ -165,7 +236,7 @@ pub extern "C" fn wireguard_tick(
     let dst = unsafe { slice::from_raw_parts_mut(dst, dst_size as usize) };
     let res = tunnel.update_timers(dst);
     mem::forget(tunnel); // Don't let Rust free the tunnel
-    res
+    wireguard_result::from(res)
 }
 
 /// Performs an iternal benchmark, and returns its result as a C-string.

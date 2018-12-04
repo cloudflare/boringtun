@@ -15,4 +15,5 @@ pub enum WireGuardError {
     InvalidPacket,
     NoCurrentSession,
     LockFailed,
+    ConnectionExpired,
 }

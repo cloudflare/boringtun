@@ -1,148 +1,84 @@
 pub mod errors;
-mod h2n;
-mod handshake;
+pub mod h2n;
+pub mod handshake;
 mod session;
 mod tests;
 mod timers;
 
-use base64::decode;
+use crypto::x25519::X25519Key;
 use noise::errors::WireGuardError;
-use noise::h2n::read_u16_be;
+use noise::h2n::*;
 use noise::handshake::Handshake;
 use noise::timers::{TimerName, Timers};
 use std::collections::VecDeque;
 use std::ffi::CString;
+use std::net::*;
 use std::os::raw::c_char;
-use std::sync::{Mutex, RwLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 const IPV4_MIN_HEADER_SIZE: usize = 20;
 const IPV4_LEN_OFF: usize = 2;
 const IPV4_LEN_SZ: usize = 2;
+const IPV4_SRC_IP_OFF: usize = 12;
+pub const IPV4_DST_IP_OFF: usize = 16;
 
 const IPV6_MIN_HEADER_SIZE: usize = 40;
 const IPV6_LEN_OFF: usize = 4;
 const IPV6_LEN_SZ: usize = 2;
-
-const KEY_LEN: usize = 32;
+const IPV6_SRC_IP_OFF: usize = 8;
+pub const IPV6_DST_IP_OFF: usize = 24;
 
 const MAX_QUEUE_DEPTH: usize = 256;
+const N_SESSIONS: usize = 4; // number of sessions in the ring, better keep a PoT
 
-#[allow(non_camel_case_types)]
-#[derive(PartialEq, Debug)]
-#[repr(u32)]
-/// Indicates the operation required from the caller
-pub enum result_type {
-    /// No operation is required.
-    WIREGUARD_DONE = 0,
-    /// Write dst buffer to network. Size indicates the number of bytes to write.
-    WRITE_TO_NETWORK = 1,
-    /// Some error occured, no operation is required. Size indicates error code.
-    WIREGUARD_ERROR = 2,
-    /// Write dst buffer to the interface as an ipv4 packet. Size indicates the number of bytes to write.
-    WRITE_TO_TUNNEL_IPV4 = 4,
-    /// Write dst buffer to the interface as an ipv6 packet. Size indicates the number of bytes to write.
-    WRITE_TO_TUNNEL_IPV6 = 6,
+#[derive(Debug)]
+pub enum TunnResult<'a> {
+    Done,
+    Err(WireGuardError),
+    WriteToNetwork(&'a mut [u8]),
+    WriteToTunnelV4(&'a mut [u8], Ipv4Addr),
+    WriteToTunnelV6(&'a mut [u8], Ipv6Addr),
 }
 
-/// The return type of WireGuard functions
-#[repr(C)]
-pub struct wireguard_result {
-    /// The operation to be performed by the caller
-    pub op: result_type,
-    /// Additional information required to perform the operation
-    pub size: u32,
-}
-
-#[derive(Eq, PartialEq, PartialOrd)]
-#[repr(u32)]
+#[derive(Eq, PartialEq, PartialOrd, Debug)]
 pub enum Verbosity {
-    None = 0,
-    Info = 1,
-    Debug = 2,
-    All = 3,
-}
-
-impl From<u32> for Verbosity {
-    fn from(num: u32) -> Self {
-        match num {
-            0 => Verbosity::None,
-            1 => Verbosity::Info,
-            2 => Verbosity::Debug,
-            _ => Verbosity::All,
-        }
-    }
-}
-
-// Convinience macros to generate wireguard_result return values
-macro_rules! DONE {
-    () => {
-        wireguard_result {
-            op: result_type::WIREGUARD_DONE,
-            size: 0,
-        }
-    };
-}
-
-macro_rules! ERR {
-    ($v:expr) => {
-        wireguard_result {
-            op: result_type::WIREGUARD_ERROR,
-            size: $v as u32,
-        }
-    };
-}
-
-macro_rules! TO_NETWORK {
-    ($v:expr) => {
-        wireguard_result {
-            op: result_type::WRITE_TO_NETWORK,
-            size: $v as u32,
-        }
-    };
+    None,
+    Info,
+    Debug,
+    All,
 }
 
 /// Tunnel represents a point-to-point WireGuard connection
+#[derive(Debug)]
 pub struct Tunn {
-    handshake: Mutex<handshake::Handshake>, // The handshake currently in progress
-    past_session: RwLock<Option<session::Session>>,
-    current_session: RwLock<Option<session::Session>>,
-    future_session: RwLock<Option<session::Session>>,
-    packet_queue: Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
-    timers: timers::Timers,
-
+    handshake: spin::Mutex<handshake::Handshake>, // The handshake currently in progress
+    sessions: [Arc<spin::RwLock<Option<session::Session>>>; N_SESSIONS], // The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
+    current: AtomicUsize, // Index of most recently used session
+    packet_queue: spin::Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
+    timers: timers::Timers, // Keeps tabs on the expiring timers
     log: Option<extern "C" fn(*const c_char)>, // Pointer to an external log function
     verbosity: Verbosity,
 }
 
 impl Tunn {
-    /// Create a new tunnel using the client private key and the peer public key, base64 encoded
-    /// # Errors
-    /// Fails if keys are too short, or incorrectly encoded
-    pub fn new(static_private: &str, peer_static_public: &str) -> Result<Box<Tunn>, &'static str> {
-        let peer_static_public = match decode(peer_static_public) {
-            Ok(key) => key,
-            Err(_) => return Err("Failed to decode public key"),
-        };
-
-        if peer_static_public.len() != KEY_LEN {
-            return Err("Incorrect public key size");
-        }
-
-        let static_private = match decode(static_private) {
-            Ok(key) => key,
-            Err(_) => return Err("Failed to decode private key"),
-        };
-
-        if static_private.len() != KEY_LEN {
-            return Err("Incorrect private key size");
-        }
-
+    /// Create a new tunnel using own private key and the peer public key
+    pub fn new(
+        static_private: &X25519Key,
+        peer_static_public: &X25519Key,
+        index: u32,
+    ) -> Result<Box<Tunn>, &'static str> {
         let tunn = Tunn {
-            handshake: Mutex::new(Handshake::new(&static_private, &peer_static_public)),
-            past_session: RwLock::new(None),
-            current_session: RwLock::new(None),
-            future_session: RwLock::new(None),
-            packet_queue: Mutex::new(VecDeque::new()),
+            handshake: spin::Mutex::new(Handshake::new(
+                static_private.as_bytes(),
+                peer_static_public.as_bytes(),
+                index << 8,
+            )),
+
+            sessions: Default::default(),
+            current: Default::default(),
+
+            packet_queue: spin::Mutex::new(VecDeque::new()),
             timers: Timers::new(),
 
             log: None,
@@ -152,10 +88,10 @@ impl Tunn {
         Ok(Box::new(tunn))
     }
 
-    /// Set the external forfunction pointer for the logging function.
-    pub fn set_log(&mut self, log: Option<extern "C" fn(*const c_char)>, verbosity: u32) {
+    /// Set the external logging function.
+    pub fn set_log(&mut self, log: Option<extern "C" fn(*const c_char)>, verbosity: Verbosity) {
         self.log = log;
-        self.verbosity = Verbosity::from(verbosity);
+        self.verbosity = verbosity;
     }
 
     /// Receives an IP packet from the tunnel interface and encapsulates it.
@@ -163,260 +99,240 @@ impl Tunn {
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
-    pub fn tunnel_to_network(&self, src: &[u8], dst: &mut [u8]) -> wireguard_result {
-        // Try to send the packet using an establsihed session
-        let try_packet_res = self.format_packet_data(src, dst);
-        if try_packet_res.op != result_type::WIREGUARD_ERROR {
-            return try_packet_res;
+    pub fn tunnel_to_network<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+        let current = self.current.load(Ordering::Acquire);
+        if let Some(ref session) = *self.sessions[current % N_SESSIONS].read() {
+            // Send the packet using an established session
+            let packet = session.format_packet_data(src, dst);
+            self.timer_tick(TimerName::TimeLastPacketSent);
+            TunnResult::WriteToNetwork(packet)
+        } else {
+            // If there is no session, queue the packet for future retry
+            self.queue_packet(src);
+            // Initiate a new handshake if none is in progress
+            self.format_handshake_initiation(dst, false)
         }
-        // No session? Queue the packet
-        self.queue_packet(src);
-        // Initiate a new handshake if none is in progress
-        self.format_handshake_initiation(dst, false)
     }
 
     /// Receives a UDP packet from the network and parses it.
     /// Returns wireguard_result.
-    /// If wireguard_results is WRITE_TO_NETWORK, must repeat the call with empty src,
-    /// until WIREGUARD_DONE is returned.
-    pub fn network_to_tunnel(&self, src: &[u8], dst: &mut [u8]) -> wireguard_result {
-        if src.len() == 0 {
-            // A repeat call indicates we may send something from the buffer
-            return if let Some(packet) = self.dequeue_packet() {
-                let try_packet_res = self.format_packet_data(&packet, dst);
-                if try_packet_res.op == result_type::WIREGUARD_ERROR {
-                    // If failed to send the packet, put it back in the queue
-                    self.requeue_packet(packet);
-                }
-                try_packet_res
-            } else {
-                DONE!()
-            };
+    /// If the result is of type TunnResult::WriteToNetwork, must repeat the call with empty src,
+    /// until TunnResult::Done is returned.
+    pub fn network_to_tunnel<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+        if src.is_empty() {
+            // Indicates a repeated call
+            return self.send_queued_packet(dst);
         }
 
         match src[0] {
             1 => {
                 self.log(Verbosity::Debug, "Received handhsake_initiation");
-                match self
-                    .handshake
-                    .lock()
-                    .map_err(|_| WireGuardError::LockFailed)
-                    .and_then(|mut hs| hs.receive_handshake_initialization(src, dst))
-                {
-                    Ok((n, new_session)) => {
+                let mut handshake = self.handshake.lock();
+                match handshake.receive_handshake_initialization(src, dst) {
+                    Ok((packet, session)) => {
                         self.log(Verbosity::Debug, "Sending handshake_reponse");
-                        {
-                            let mut future_session = self.future_session.write().unwrap();
-                            *future_session = Some(new_session);
-                        }
+                        let index = session.local_index();
+                        *self.sessions[index % N_SESSIONS].write() = Some(session);
+                        self.timer_tick_session_established(false);
                         self.timer_tick(TimerName::TimeLastPacketReceived);
                         self.timer_tick(TimerName::TimeLastPacketSent);
-                        TO_NETWORK!(n)
+                        TunnResult::WriteToNetwork(packet)
                     }
-                    Err(e) => ERR!(e),
+                    Err(e) => TunnResult::Err(e),
                 }
             }
             2 => {
                 self.log(Verbosity::Debug, "Received handhsake_response");
-                match self
-                    .handshake
-                    .lock()
-                    .map_err(|_| WireGuardError::LockFailed)
-                    .and_then(|mut hs| hs.receive_handshake_response(src))
-                {
-                    Ok(new_session) => {
-                        {
-                            let mut cur_session = self.current_session.write().unwrap();
-                            let mut past_session = self.past_session.write().unwrap();
-                            *past_session = cur_session.clone();
-                            *cur_session = Some(new_session);
-                        }
+                let mut handshake = self.handshake.lock();
+                match handshake.receive_handshake_response(src) {
+                    Ok(session) => {
+                        let keepalive_packet = session.format_packet_data(&[], dst);
+                        let index = session.local_index();
+                        *self.sessions[index % N_SESSIONS].write() = Some(session);
+                        // Make session the current session
+                        self.current.store(index, Ordering::Release);
                         self.timer_tick_session_established(true);
                         self.timer_tick(TimerName::TimeLastPacketReceived);
-                        self.format_packet_data(&[], dst) // Send a keepalive as response
+                        TunnResult::WriteToNetwork(keepalive_packet) // Send a keepalive as a response
                     }
-                    Err(e) => ERR!(e),
+                    Err(e) => TunnResult::Err(e),
                 }
             }
             3 => {
                 self.log(Verbosity::Debug, "Received cookie_reply");
-                match self
-                    .handshake
-                    .lock()
-                    .map_err(|_| WireGuardError::LockFailed)
-                    .and_then(|mut hs| hs.receive_cookie_reply(src, dst))
-                {
-                    Ok(n) => {
+                let mut handshake = self.handshake.lock();
+                match handshake.receive_cookie_reply(src, dst) {
+                    Ok(packet) => {
                         self.log(Verbosity::Debug, "Sending handhsake_initiation with cookie");
                         self.timer_tick(TimerName::TimeCookieReceived);
                         self.timer_tick(TimerName::TimeLastPacketReceived);
                         self.timer_tick(TimerName::TimeLastPacketSent);
-                        TO_NETWORK!(n)
+                        TunnResult::WriteToNetwork(packet)
                     }
-                    Err(e) => ERR!(e),
+                    Err(e) => TunnResult::Err(e),
                 }
             }
             4 => self.receive_packet_data(src, dst),
             _ => {
                 self.log(Verbosity::Debug, &format!("Illegal packet {}", src[0]));
-                ERR!(WireGuardError::InvalidPacket)
+                TunnResult::Err(WireGuardError::InvalidPacket)
             }
         }
+    }
+
+    fn send_queued_packet<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
+        if let Some(packet) = self.dequeue_packet() {
+            match self.tunnel_to_network(&packet, dst) {
+                TunnResult::Err(_) => {
+                    // On error, return packet to the queue
+                    self.requeue_packet(packet);
+                }
+                r @ _ => return r,
+            }
+        }
+        TunnResult::Done
     }
 
     // Formats a new handhsake initiation message and store it in dst.
-    fn format_handshake_initiation(&self, dst: &mut [u8], resend: bool) -> wireguard_result {
-        let mut handshake = self.handshake.lock().unwrap();
+    fn format_handshake_initiation<'a>(&self, dst: &'a mut [u8], resend: bool) -> TunnResult<'a> {
+        let mut handshake = self.handshake.lock();
         if handshake.is_in_progress() && !resend {
-            return DONE!();
+            return TunnResult::Done;
         }
 
         match handshake.format_handshake_initiation(dst) {
-            Ok(n) => {
+            Ok(packet) => {
                 self.log(Verbosity::Debug, "Sending handshake_initiation");
                 self.timer_tick(TimerName::TimeLastHandshakeStarted);
                 self.timer_tick(TimerName::TimeLastPacketSent);
-                TO_NETWORK!(n)
+                TunnResult::WriteToNetwork(packet)
             }
-            Err(e) => ERR!(e),
-        }
-    }
-
-    // Encapsulates a data packet and stores in dst.
-    fn format_packet_data(&self, src: &[u8], dst: &mut [u8]) -> wireguard_result {
-        if let Some(ref session) = *self.current_session.read().unwrap() {
-            let n = session.format_packet_data(src, dst);
-            self.timer_tick(TimerName::TimeLastPacketSent);
-            TO_NETWORK!(n)
-        } else {
-            ERR!(WireGuardError::NoCurrentSession)
+            Err(e) => TunnResult::Err(e),
         }
     }
 
     // Decrypts a data packet, and stores the decapsulated packet in dst.
-    fn receive_packet_data(&self, src: &[u8], dst: &mut [u8]) -> wireguard_result {
-        // Try to decrypt using the current session. This is the common scenario.
-        if let Some(ref session) = *self.current_session.read().unwrap() {
+    fn receive_packet_data<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+        if src.len() < session::IDX_OFF + session::IDX_SZ {
+            return TunnResult::Err(WireGuardError::InvalidPacket);
+        }
+        // Extract the reciever index
+        let idx = read_u32(&src[session::IDX_OFF..session::IDX_OFF + session::IDX_SZ]) as usize;
+        // Get the (possibly) right session
+        if let Some(ref session) = *self.sessions[idx % N_SESSIONS].read() {
             match session.receive_packet_data(src, dst) {
-                Ok(n) => {
+                Ok(packet) => {
+                    self.current.store(idx, Ordering::Relaxed); // The exact session we use is not important as long as it is valid
                     self.timer_tick(TimerName::TimeLastPacketReceived);
-                    return self.check_decapsulated_packet(&dst[..n]);
+                    self.check_decapsulated_packet(packet)
                 }
-                Err(WireGuardError::WrongIndex) => {}
-                Err(e) => return ERR!(e),
+                Err(e) => TunnResult::Err(e),
             }
+        } else {
+            // No session for that index exists (any longer?)
+            TunnResult::Err(WireGuardError::NoCurrentSession)
         }
-
-        // Try to decrypt with the previous session.
-        // This happen when packets are sent during a handshake.
-        if let Some(ref session) = *self.past_session.read().unwrap() {
-            match session.receive_packet_data(src, dst) {
-                Ok(n) => {
-                    self.timer_tick(TimerName::TimeLastPacketReceived);
-                    return self.check_decapsulated_packet(&dst[..n]);
-                }
-                Err(WireGuardError::WrongIndex) => {}
-                Err(e) => return ERR!(e),
-            }
-        }
-
-        // Try to decrypt using the future session. This will happen when we are the responder.
-        let mut swap_session = false;
-        let mut len = 0;
-        if let Ok(mut future_session) = self.future_session.try_write() {
-            if let Some(ref session) = *future_session {
-                if let Ok(n) = session.receive_packet_data(src, dst) {
-                    // Upon success, future session becomes the current session
-                    let mut past_session = self.past_session.write().unwrap();
-                    let mut current_session = self.current_session.write().unwrap();
-                    *past_session = current_session.clone();
-                    *current_session = Some((*session).clone());
-                    swap_session = true;
-                    len = n;
-                    self.timer_tick(TimerName::TimeLastPacketReceived);
-                    self.timer_tick_session_established(false);
-                }
-            }
-            if swap_session {
-                *future_session = None;
-                return self.check_decapsulated_packet(&dst[..len]);
-            }
-        }
-
-        return DONE!();
     }
 
-    fn check_decapsulated_packet(&self, packet: &[u8]) -> wireguard_result {
-        let len = packet.len();
-
-        if len < IPV4_MIN_HEADER_SIZE {
-            return DONE!(); // Invalid ip packet or keepalive
+    pub fn dst_address(packet: &[u8]) -> Option<IpAddr> {
+        if packet.is_empty() {
+            return None;
         }
 
         match packet[0] >> 4 {
-            4 => {
-                // This is IPv4 packet
-                let packet_len =
-                    read_u16_be(&packet[IPV4_LEN_OFF..IPV4_LEN_OFF + IPV4_LEN_SZ]) as usize;
-                if packet_len > len {
-                    DONE!()
-                } else {
-                    wireguard_result {
-                        op: result_type::WRITE_TO_TUNNEL_IPV4,
-                        size: packet_len as u32,
-                    }
-                }
-            }
-            6 => {
-                // This is IPv6 packet
-                if len < IPV6_MIN_HEADER_SIZE {
-                    DONE!()
-                } else {
-                    let packet_len =
-                        read_u16_be(&packet[IPV6_LEN_OFF..IPV6_LEN_OFF + IPV6_LEN_SZ]) as usize;
-                    if packet_len > len {
-                        DONE!()
-                    } else {
-                        wireguard_result {
-                            op: result_type::WRITE_TO_TUNNEL_IPV6,
-                            size: packet_len as u32,
-                        }
-                    }
-                }
-            }
-            _ => DONE!(),
+            4 if packet.len() >= IPV4_MIN_HEADER_SIZE => Some(IpAddr::from([
+                packet[IPV4_DST_IP_OFF + 0],
+                packet[IPV4_DST_IP_OFF + 1],
+                packet[IPV4_DST_IP_OFF + 2],
+                packet[IPV4_DST_IP_OFF + 3],
+            ])),
+            6 if packet.len() >= IPV6_MIN_HEADER_SIZE => Some(IpAddr::from([
+                packet[IPV6_DST_IP_OFF + 0],
+                packet[IPV6_DST_IP_OFF + 1],
+                packet[IPV6_DST_IP_OFF + 2],
+                packet[IPV6_DST_IP_OFF + 3],
+                packet[IPV6_DST_IP_OFF + 4],
+                packet[IPV6_DST_IP_OFF + 5],
+                packet[IPV6_DST_IP_OFF + 6],
+                packet[IPV6_DST_IP_OFF + 7],
+                packet[IPV6_DST_IP_OFF + 8],
+                packet[IPV6_DST_IP_OFF + 9],
+                packet[IPV6_DST_IP_OFF + 10],
+                packet[IPV6_DST_IP_OFF + 11],
+                packet[IPV6_DST_IP_OFF + 12],
+                packet[IPV6_DST_IP_OFF + 13],
+                packet[IPV6_DST_IP_OFF + 14],
+                packet[IPV6_DST_IP_OFF + 15],
+            ])),
+            _ => None,
+        }
+    }
+
+    fn check_decapsulated_packet<'a>(&self, packet: &'a mut [u8]) -> TunnResult<'a> {
+        let (packet_len, src_ip_address) = match packet.len() {
+            0 => return TunnResult::Done, // This is keepalive, and not an error
+            _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => (
+                read_u16_be(&packet[IPV4_LEN_OFF..IPV4_LEN_OFF + IPV4_LEN_SZ]) as usize,
+                IpAddr::from([
+                    packet[IPV4_SRC_IP_OFF + 0],
+                    packet[IPV4_SRC_IP_OFF + 1],
+                    packet[IPV4_SRC_IP_OFF + 2],
+                    packet[IPV4_SRC_IP_OFF + 3],
+                ]),
+            ),
+            _ if packet[0] >> 4 == 6 && packet.len() >= IPV6_MIN_HEADER_SIZE => (
+                read_u16_be(&packet[IPV6_LEN_OFF..IPV6_LEN_OFF + IPV6_LEN_SZ]) as usize,
+                IpAddr::from([
+                    packet[IPV6_SRC_IP_OFF + 0],
+                    packet[IPV6_SRC_IP_OFF + 1],
+                    packet[IPV6_SRC_IP_OFF + 2],
+                    packet[IPV6_SRC_IP_OFF + 3],
+                    packet[IPV6_SRC_IP_OFF + 4],
+                    packet[IPV6_SRC_IP_OFF + 5],
+                    packet[IPV6_SRC_IP_OFF + 6],
+                    packet[IPV6_SRC_IP_OFF + 7],
+                    packet[IPV6_SRC_IP_OFF + 8],
+                    packet[IPV6_SRC_IP_OFF + 9],
+                    packet[IPV6_SRC_IP_OFF + 10],
+                    packet[IPV6_SRC_IP_OFF + 11],
+                    packet[IPV6_SRC_IP_OFF + 12],
+                    packet[IPV6_SRC_IP_OFF + 13],
+                    packet[IPV6_SRC_IP_OFF + 14],
+                    packet[IPV6_SRC_IP_OFF + 15],
+                ]),
+            ),
+            _ => return TunnResult::Err(WireGuardError::InvalidPacket),
+        };
+
+        if packet_len > packet.len() {
+            return TunnResult::Err(WireGuardError::InvalidPacket);
+        }
+
+        match src_ip_address {
+            IpAddr::V4(addr) => TunnResult::WriteToTunnelV4(&mut packet[..packet_len], addr),
+            IpAddr::V6(addr) => TunnResult::WriteToTunnelV6(&mut packet[..packet_len], addr),
         }
     }
 
     fn queue_packet(&self, packet: &[u8]) {
-        self.packet_queue
-            .lock()
-            .and_then(|mut q| {
-                if q.len() < MAX_QUEUE_DEPTH {
-                    // Drop if too many are already in queue
-                    q.push_back(packet.to_vec());
-                }
-                Ok(true)
-            }).unwrap();
+        let mut q = self.packet_queue.lock();
+        if q.len() < MAX_QUEUE_DEPTH {
+            // Drop if too many are already in queue
+            q.push_back(packet.to_vec());
+        }
     }
 
     fn requeue_packet(&self, packet: Vec<u8>) {
-        self.packet_queue
-            .lock()
-            .and_then(|mut q| {
-                if q.len() < MAX_QUEUE_DEPTH {
-                    // Drop if too many are already in queue
-                    q.push_front(packet);
-                }
-                Ok(true)
-            }).unwrap();
+        let mut q = self.packet_queue.lock();
+        if q.len() < MAX_QUEUE_DEPTH {
+            // Drop if too many are already in queue
+            q.push_front(packet);
+        }
     }
 
     fn dequeue_packet(&self) -> Option<Vec<u8>> {
-        self.packet_queue
-            .lock()
-            .and_then(|mut q| Ok(q.pop_front()))
-            .unwrap()
+        let mut q = self.packet_queue.lock();
+        q.pop_front()
     }
 
     fn log(&self, lvl: Verbosity, entry: &str) {

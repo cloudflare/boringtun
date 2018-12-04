@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::super::{result_type, Tunn, IPV4_LEN_OFF, IPV4_MIN_HEADER_SIZE};
+    use super::super::*;
     use base64::encode;
     use crypto::x25519::*;
     use noise::h2n::{read_u16_be, write_u32_be};
@@ -186,8 +186,11 @@ mod tests {
         log: extern "C" fn(*const c_char),
         close: Arc<AtomicBool>,
     ) -> UdpSocket {
-        let mut peer = Tunn::new(static_private, peer_static_public).unwrap();
-        peer.set_log(Some(log), 3);
+        let static_private = static_private.parse().unwrap();
+        let peer_static_public = peer_static_public.parse().unwrap();
+
+        let mut peer = Tunn::new(&static_private, &peer_static_public, 100).unwrap();
+        peer.set_log(Some(log), Verbosity::Debug);
 
         let peer: Arc<Box<Tunn>> = Arc::from(peer);
 
@@ -225,28 +228,29 @@ mod tests {
                     }
                 };
 
-                let mut r = peer.network_to_tunnel(&recv_buf[..n], &mut send_buf);
-                // The loop is because a network packet may trigger a series of writes
-                // back to the network
-                loop {
-                    match r.op {
-                        result_type::WRITE_TO_NETWORK => {
-                            network_socket.send(&send_buf[..r.size as usize]).unwrap();
-                        }
-                        result_type::WRITE_TO_TUNNEL_IPV4 => {
-                            iface_socket.send(&send_buf[..r.size as usize]).unwrap();
-                            break;
-                        }
-                        result_type::WRITE_TO_TUNNEL_IPV6 => {
-                            iface_socket.send(&send_buf[..r.size as usize]).unwrap();
-                            break;
-                        }
-                        _ => {
-                            break;
+                match peer.network_to_tunnel(&recv_buf[..n], &mut send_buf) {
+                    TunnResult::WriteToNetwork(packet) => {
+                        network_socket.send(packet).unwrap();
+                        // Send form queue?
+                        loop {
+                            let mut send_buf = [0u8; MAX_PACKET];
+                            match peer.network_to_tunnel(&[], &mut send_buf) {
+                                TunnResult::WriteToNetwork(packet) => {
+                                    network_socket.send(packet).unwrap();
+                                }
+                                _ => {
+                                    break;
+                                }
+                            }
                         }
                     }
-                    // Repeat with empty src buffer
-                    r = peer.network_to_tunnel(&[], &mut send_buf);
+                    TunnResult::WriteToTunnelV4(packet, _) => {
+                        iface_socket.send(packet).unwrap();
+                    }
+                    TunnResult::WriteToTunnelV6(packet, _) => {
+                        iface_socket.send(packet).unwrap();
+                    }
+                    _ => {}
                 }
             });
         }
@@ -271,10 +275,9 @@ mod tests {
                     }
                 };
 
-                let r = peer.tunnel_to_network(&recv_buf[..n], &mut send_buf);
-                match r.op {
-                    result_type::WRITE_TO_NETWORK => {
-                        network_socket.send(&send_buf[..r.size as usize]).unwrap();
+                match peer.tunnel_to_network(&recv_buf[..n], &mut send_buf) {
+                    TunnResult::WriteToNetwork(packet) => {
+                        network_socket.send(packet).unwrap();
                     }
                     _ => {}
                 }
@@ -287,16 +290,13 @@ mod tests {
             }
 
             let mut send_buf = [0u8; MAX_PACKET];
-            let r = peer.update_timers(&mut send_buf);
-
-            match r.op {
-                result_type::WRITE_TO_NETWORK => {
-                    network_socket.send(&send_buf[..r.size as usize]).unwrap();
+            match peer.update_timers(&mut send_buf) {
+                TunnResult::WriteToNetwork(packet) => {
+                    network_socket.send(packet).unwrap();
                 }
-                _ => {
-                    break;
-                }
+                _ => {}
             }
+
             thread::sleep(Duration::from_millis(200));
         });
 
@@ -408,8 +408,10 @@ PublicKey = {}
 AllowedIPs = 192.168.2.2/32
 Endpoint = :{}",
                     ip, port, key_pair.0, public_key, endpoint,
-                ).as_bytes(),
-            ).unwrap();
+                )
+                .as_bytes(),
+            )
+            .unwrap();
 
             // Start wireguard
             Command::new("wg-quick")
@@ -468,7 +470,7 @@ Endpoint = :{}",
             .set_read_timeout(Some(Duration::from_millis(50)))
             .unwrap();
 
-        for i in 0..1000 {
+        for i in 0..10000 {
             write_ipv4_ping(&c_iface, b"test_ping", i as u16, wg.ip);
             assert_eq!(read_ipv4_ping(&c_iface, i as u16), b"test_ping",);
             thread::sleep(Duration::from_millis(30));
@@ -510,7 +512,7 @@ Endpoint = :{}",
         test_socket.connect("192.168.2.2:30000").unwrap();
 
         thread::spawn(move || {
-            for i in 0..1000 {
+            for i in 0..10000 {
                 test_socket
                     .send(format!("This is a test message {}", i).as_bytes())
                     .unwrap();
@@ -520,7 +522,7 @@ Endpoint = :{}",
 
         let mut src = [0u8; MAX_PACKET];
 
-        for i in 0..1000 {
+        for i in 0..10000 {
             let m = c_iface.recv(&mut src).unwrap();
             assert_eq!(
                 &src[28..m], // Strip ip and udp headers
