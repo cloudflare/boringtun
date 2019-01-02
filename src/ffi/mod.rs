@@ -35,7 +35,7 @@ pub extern "C" fn x25519_public_key(private_key: x25519_key) -> x25519_key {
 
 /// Returns the base64 encoding of a key as a UTF8 C-string.
 #[no_mangle]
-pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const i8 {
+pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const c_char {
     let encoded_key = encode(&key.key);
     let c_string = CString::new(encoded_key).unwrap();
     let ptr = c_string.as_ptr();
@@ -45,7 +45,7 @@ pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const i8 {
 
 /// Returns the hex encoding of a key as a UTF8 C-string.
 #[no_mangle]
-pub extern "C" fn x25519_key_to_hex(key: x25519_key) -> *const i8 {
+pub extern "C" fn x25519_key_to_hex(key: x25519_key) -> *const c_char {
     let encoded_key = encode_hex(&key.key);
     let c_string = CString::new(encoded_key).unwrap();
     let ptr = c_string.as_ptr();
@@ -170,7 +170,7 @@ pub extern "C" fn wireguard_tick(
 
 /// Performs an iternal benchmark, and returns its result as a C-string.
 #[no_mangle]
-pub extern "C" fn benchmark(name: i32, idx: u32) -> *const i8 {
+pub extern "C" fn benchmark(name: i32, idx: u32) -> *const c_char {
     if let Some(s) = do_benchmark(name != 0, idx as usize) {
         let s = CString::new(s).unwrap();
         let v = s.as_ptr();
