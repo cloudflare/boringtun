@@ -5,4 +5,5 @@ extern crate rand;
 
 pub mod crypto;
 pub mod ffi;
+pub mod jni;
 pub mod noise;

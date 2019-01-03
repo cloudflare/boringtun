@@ -1,0 +1,242 @@
+/// JNI bindings for WireGuard library
+
+#[cfg(target_os="android")]
+#[allow(non_snake_case)]
+
+extern crate jni;
+
+use std::ffi::{CStr};
+use std::ptr;
+use std::os::raw::c_char;
+
+use self::jni::JNIEnv;
+use self::jni::objects::{JClass, JString, JByteBuffer};
+use self::jni::strings::JNIStr;
+use self::jni::sys::{jbyteArray, jint, jlong, jstring};
+
+use ffi::new_tunnel;
+use ffi::wireguard_read;
+use ffi::wireguard_tick;
+use ffi::wireguard_write;
+use ffi::x25519_key_to_hex;
+use ffi::x25519_key_to_base64;
+use ffi::x25519_key;
+use ffi::x25519_public_key;
+use ffi::x25519_secret_key;
+
+use noise::wireguard_result;
+use noise::Tunn;
+
+pub extern fn log_print(log_string: *const c_char) {
+    unsafe {
+        let _c_string = CStr::from_ptr(log_string);
+
+        /*
+           XXX:
+              Define callback function in app.
+         */
+        //java_env.call_static_method(java_class, "printLog", "(Ljava/lang/String;)Ljava/lang/String;", c_string);
+    }
+}
+
+// Generates new x25519 secret key and converts into java byte array.
+#[no_mangle]
+pub extern fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1secret_1key(env: JNIEnv,
+                                                                                      _class: JClass)
+                                                                                     -> jbyteArray {
+    let output = match env.byte_array_from_slice(&x25519_secret_key().key) {
+                    Ok(v) => v,
+                    Err(_) => return ptr::null_mut(),
+                 };
+    output
+}
+
+// Computes public x25519 key from secret key and converts into java byte array.
+#[no_mangle]
+pub unsafe extern fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1public_1key(env: JNIEnv,
+                                                                                             _class: JClass,
+                                                                                             arg_secret_key: jbyteArray)
+                                                                                            -> jbyteArray {
+    let mut secret_key = [0; 32];
+
+    if env.get_byte_array_region(arg_secret_key, 0, &mut secret_key).is_err() {
+       return ptr::null_mut();
+    }
+
+    let x25519_secret_key = x25519_key {
+                                key: std::mem::transmute::<[i8; 32], [u8; 32]>(secret_key)
+                            };
+
+    let output = match env.byte_array_from_slice(&x25519_public_key(x25519_secret_key).key) {
+                    Ok(v) => v,
+                    Err(_) => return ptr::null_mut(),
+                 };
+
+    output
+}
+
+// Converts x25519 key to hex string.
+#[no_mangle]
+pub unsafe extern fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1key_1to_1hex(env: JNIEnv,
+                                                                                              _class: JClass,
+                                                                                              arg_key: jbyteArray)
+                                                                                               -> jstring {
+    let mut key = [0; 32];
+
+    if env.get_byte_array_region(arg_key, 0, &mut key).is_err() {
+        return ptr::null_mut();
+    }
+
+    let x25519_key = x25519_key {
+                         key: std::mem::transmute::<[i8; 32], [u8; 32]>(key)
+                     };
+
+    let output = match env.new_string(JNIStr::from_ptr(x25519_key_to_hex(x25519_key)).to_owned()) {
+                    Ok(v) => v,
+                    Err(_) => return ptr::null_mut(),
+                 };
+
+    output.into_inner()
+}
+
+// Converts x25519 key to base64 string.
+#[no_mangle]
+pub unsafe extern fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1key_1to_1base64(env: JNIEnv,
+                                                                                                 _class: JClass,
+                                                                                                 arg_key: jbyteArray)
+                                                                                                 -> jstring {
+    let mut key = [0; 32];
+
+    if env.get_byte_array_region(arg_key, 0, &mut key).is_err() {
+        return ptr::null_mut();
+    }
+
+    let x25519_key = x25519_key {
+                         key: std::mem::transmute::<[i8; 32], [u8; 32]>(key)
+                     };
+
+    let output = match env.new_string(JNIStr::from_ptr(x25519_key_to_base64(x25519_key)).to_owned()) {
+                    Ok(v) => v,
+                    Err(_) => return ptr::null_mut(),
+                 };
+
+    output.into_inner()
+}
+
+// Creates new tunnel
+#[no_mangle]
+pub unsafe extern fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_new_1tunnel(env: JNIEnv,
+                                                                                                 _class: JClass,
+                                                                                                 arg_secret_key: JString,
+                                                                                                 arg_public_key: JString)
+                                                                                                -> jlong {
+    let secret_key = match env.get_string_utf_chars(arg_secret_key) {
+                        Ok(v) => v,
+                        Err(_) => return 0,
+                     };
+
+    let public_key = match env.get_string_utf_chars(arg_public_key) {
+                        Ok(v) => v,
+                        Err(_) => return 0,
+                     };
+
+    let tunnel = new_tunnel(secret_key,
+                            public_key,
+                            Some(log_print),
+                            3);
+
+    if tunnel.is_null() {
+        return 0;
+    }
+
+    tunnel as jlong
+}
+
+// Encrypts raw IP packets into WG formatted packets.
+#[no_mangle]
+pub unsafe extern fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1write(env: JNIEnv,
+                                                                                                      _class: JClass,
+                                                                                                      tunnel: jlong,
+                                                                                                      src: jbyteArray,
+                                                                                                      src_size: jint,
+                                                                                                      dst: JByteBuffer,
+                                                                                                      dst_size: jint,
+                                                                                                      op: JByteBuffer)
+                                                                                                     -> jint {
+    let dst_ptr: *mut u8 = match env.get_direct_buffer_address(dst) {
+                              Ok(v) => v.as_mut_ptr(),
+                              Err(_) => return 0,
+                           };
+
+    let op_ptr: *mut u8 = match env.get_direct_buffer_address(op) {
+                             Ok(v) => v.as_mut_ptr(),
+                             Err(_) => return 0,
+                          };
+
+    let output:wireguard_result = wireguard_write(tunnel as *mut Tunn,
+                                                  env.convert_byte_array(src).unwrap().as_mut_ptr(),
+                                                  src_size as u32,
+                                                  dst_ptr,
+                                                  dst_size as u32);
+    *op_ptr = output.op as u8;
+
+    output.size as i32
+}
+
+// Decrypts WG formatted packets into raw IP packets.
+#[no_mangle]
+pub unsafe extern fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1read(env: JNIEnv,
+                                                                                                     _class: JClass,
+                                                                                                     tunnel: jlong,
+                                                                                                     src: jbyteArray,
+                                                                                                     src_size: jint,
+                                                                                                     dst: JByteBuffer,
+                                                                                                     dst_size: jint,
+                                                                                                     op: JByteBuffer)
+                                                                                                    -> jint {
+    let dst_ptr: *mut u8 = match env.get_direct_buffer_address(dst) {
+                              Ok(v) => v.as_mut_ptr(),
+                              Err(_) => return 0,
+                           };
+
+    let op_ptr: *mut u8 = match env.get_direct_buffer_address(op) {
+                             Ok(v) => v.as_mut_ptr(),
+                             Err(_) => return 0,
+                          };
+
+    let output:wireguard_result = wireguard_read(tunnel as *mut Tunn,
+                                                 env.convert_byte_array(src).unwrap().as_mut_ptr(),
+                                                 src_size as u32,
+                                                 dst_ptr,
+                                                 dst_size as u32);
+
+    *op_ptr = output.op as u8;
+
+    output.size as i32
+}
+
+// Periodic function that writes WG formatted packets into destination buffer
+#[no_mangle]
+pub unsafe extern fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1tick(env: JNIEnv,
+                                                                                                     _class: JClass,
+                                                                                                     tunnel: jlong,
+                                                                                                     dst: JByteBuffer,
+                                                                                                     dst_size: jint,
+                                                                                                     op: JByteBuffer)
+                                                                                                    -> jint {
+    let dst_ptr: *mut u8 = match env.get_direct_buffer_address(dst) {
+                              Ok(v) => v.as_mut_ptr(),
+                              Err(_) => return 0,
+                           };
+
+    let op_ptr: *mut u8 = match env.get_direct_buffer_address(op) {
+                             Ok(v) => v.as_mut_ptr(),
+                             Err(_) => return 0,
+                          };
+
+    let output:wireguard_result = wireguard_tick(tunnel as *mut Tunn, dst_ptr, dst_size as u32);
+
+    *op_ptr = output.op as u8;
+
+    output.size as i32
+}
