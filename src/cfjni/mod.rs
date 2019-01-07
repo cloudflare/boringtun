@@ -29,11 +29,8 @@ pub extern "C" fn log_print(_log_string: *const c_char) {
 
 /// Generates new x25519 secret key and converts into java byte array.
 #[no_mangle]
-#[allow(non_snake_case)]
-pub extern "C" fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1secret_1key(
-    env: JNIEnv,
-    _class: JClass,
-) -> jbyteArray {
+#[link_name = "Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1secret_1key"]
+pub extern "C" fn generate_secret_key(env: JNIEnv, _class: JClass) -> jbyteArray {
     match env.byte_array_from_slice(&x25519_secret_key().key) {
         Ok(v) => v,
         Err(_) => ptr::null_mut(),
@@ -42,8 +39,8 @@ pub extern "C" fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1se
 
 /// Computes public x25519 key from secret key and converts into java byte array.
 #[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1public_1key(
+#[link_name = "Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1public_1key"]
+pub unsafe extern "C" fn generate_public_key(
     env: JNIEnv,
     _class: JClass,
     arg_secret_key: jbyteArray,
@@ -69,8 +66,8 @@ pub unsafe extern "C" fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25
 
 /// Converts x25519 key to hex string.
 #[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1key_1to_1hex(
+#[link_name = "Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1key_1to_1hex"]
+pub unsafe extern "C" fn convert_x25519_key_to_hex(
     env: JNIEnv,
     _class: JClass,
     arg_key: jbyteArray,
@@ -95,8 +92,8 @@ pub unsafe extern "C" fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25
 
 /// Converts x25519 key to base64 string.
 #[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1key_1to_1base64(
+#[link_name = "Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1key_1to_1base64"]
+pub unsafe extern "C" fn convert_x25519_key_to_base64(
     env: JNIEnv,
     _class: JClass,
     arg_key: jbyteArray,
@@ -122,8 +119,8 @@ pub unsafe extern "C" fn Java_com_cloudflare_app_wireguard_WireGuardActivity_x25
 
 /// Creates new tunnel
 #[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_new_1tunnel(
+#[link_name = "Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_new_1tunnel"]
+pub unsafe extern "C" fn create_new_tunnel(
     env: JNIEnv,
     _class: JClass,
     arg_secret_key: JString,
@@ -150,8 +147,8 @@ pub unsafe extern "C" fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardT
 
 /// Encrypts raw IP packets into WG formatted packets.
 #[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1write(
+#[link_name = "Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1write"]
+pub unsafe extern "C" fn encrypt_raw_packet(
     env: JNIEnv,
     _class: JClass,
     tunnel: jlong,
@@ -185,8 +182,8 @@ pub unsafe extern "C" fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardT
 
 /// Decrypts WG formatted packets into raw IP packets.
 #[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1read(
+#[link_name = "Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1read"]
+pub unsafe extern "C" fn decrypt_to_raw_packet(
     env: JNIEnv,
     _class: JClass,
     tunnel: jlong,
@@ -221,8 +218,8 @@ pub unsafe extern "C" fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardT
 
 /// Periodic function that writes WG formatted packets into destination buffer
 #[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1tick(
+#[link_name = "Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1tick"]
+pub unsafe extern "C" fn run_periodic_task(
     env: JNIEnv,
     _class: JClass,
     tunnel: jlong,
