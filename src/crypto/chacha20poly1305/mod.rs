@@ -1368,8 +1368,8 @@ impl ChaCha20Poly1305 {
             return Ok(n);
         }
 
-        for i in 0..plaintext.len() {
-            plaintext[i] = 0;
+        for p in plaintext {
+            *p = 0;
         }
 
         return Err(WireGuardError::InvalidAeadTag);
@@ -1401,8 +1401,8 @@ impl ChaCha20Poly1305 {
             return Ok(n);
         }
 
-        for i in 0..plaintext.len() {
-            plaintext[i] = 0;
+        for p in plaintext {
+            *p = 0;
         }
 
         Err(WireGuardError::InvalidAeadTag)

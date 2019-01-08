@@ -41,10 +41,12 @@ struct x25519_key
 struct x25519_key x25519_secret_key();
 // Computes an x25519 public key from a secret key
 struct x25519_key x25519_public_key(struct x25519_key private_key);
-// Encodes a public or private x25519 key to base64
+// Encodes a public or private x25519 key to base64. Must be freed with x25519_key_to_str_free.
 const char *x25519_key_to_base64(struct x25519_key key);
-// Encodes a public or private x25519 key to hex
+// Encodes a public or private x25519 key to hex. Must be freed with x25519_key_to_str_free.
 const char *x25519_key_to_hex(struct x25519_key key);
+// Free string pointer obtained from either x25519_key_to_base64 or x25519_key_to_hex
+void x25519_key_to_str_free(const char *key_str);
 // Check if a null terminated string represents a valid x25519 key
 // Returns 0 if not
 int check_base64_encoded_x25519_key(const char *key);
@@ -54,6 +56,9 @@ struct wireguard_tunnel *new_tunnel(const char *static_private,
                                     const char *server_static_public,
                                     void (*log_printer)(const char *),
                                     enum log_level log_level);
+
+// Deallocate the tunnel
+void tunnel_free(struct wireguard_tunnel *);
 
 struct wireguard_result wireguard_write(struct wireguard_tunnel *tunnel,
                                         const uint8_t *src,

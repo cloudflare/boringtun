@@ -160,15 +160,11 @@ impl Tunn {
         // REJECT_AFTER_MESSAGES or if its key is older than REJECT_AFTER_TIME.
         if time_current - time_session_established >= REJECT_AFTER_TIME {
             let mut cur_session = self.current_session.write().unwrap();
-            match *cur_session {
-                Some(_) => {
-                    self.log(
-                        Verbosity::Debug,
-                        "CANCEL_SESSION(REJECT_AFTER_TIME_TIMEOUT)",
-                    );
-                    *cur_session = None;
-                }
-                _ => {}
+            if cur_session.take().is_some() {
+                self.log(
+                    Verbosity::Debug,
+                    "CANCEL_SESSION(REJECT_AFTER_TIME_TIMEOUT)",
+                );
             }
         }
 

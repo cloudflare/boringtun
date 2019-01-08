@@ -110,7 +110,7 @@ pub struct Tunn {
     packet_queue: Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
     timers: timers::Timers,
 
-    log: Option<extern "C" fn(*const c_char)>, // Pointer to an external log function
+    log: Option<unsafe extern "C" fn(*const c_char)>, // Pointer to an external log function
     verbosity: Verbosity,
 }
 
@@ -153,7 +153,7 @@ impl Tunn {
     }
 
     /// Set the external forfunction pointer for the logging function.
-    pub fn set_log(&mut self, log: Option<extern "C" fn(*const c_char)>, verbosity: u32) {
+    pub fn set_log(&mut self, log: Option<unsafe extern "C" fn(*const c_char)>, verbosity: u32) {
         self.log = log;
         self.verbosity = Verbosity::from(verbosity);
     }
@@ -180,7 +180,7 @@ impl Tunn {
     /// If wireguard_results is WRITE_TO_NETWORK, must repeat the call with empty src,
     /// until WIREGUARD_DONE is returned.
     pub fn network_to_tunnel(&self, src: &[u8], dst: &mut [u8]) -> wireguard_result {
-        if src.len() == 0 {
+        if src.is_empty() {
             // A repeat call indicates we may send something from the buffer
             return if let Some(packet) = self.dequeue_packet() {
                 let try_packet_res = self.format_packet_data(&packet, dst);
@@ -424,7 +424,10 @@ impl Tunn {
     fn log(&self, lvl: Verbosity, entry: &str) {
         if let Some(p) = self.log {
             if self.verbosity >= lvl {
-                p(CString::new(entry).unwrap().as_ptr());
+                let cstr = CString::new(entry).unwrap();
+                unsafe {
+                    p(cstr.as_ptr());
+                }
             }
         }
     }
