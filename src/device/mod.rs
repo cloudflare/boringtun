@@ -1,9 +1,9 @@
+pub mod allowed_ips;
 pub mod api;
 pub mod dev_lock;
 #[cfg_attr(any(target_os = "macos", target_os = "ios"), path = "kqueue.rs")]
 #[cfg_attr(target_os = "linux", path = "epoll.rs")]
 pub mod events;
-pub mod ip_map;
 pub mod peer;
 #[cfg_attr(unix, path = "sock_unix.rs")]
 pub mod sock;
@@ -22,10 +22,10 @@ use std::net::*;
 use std::os::unix::io::RawFd;
 use std::sync::Arc;
 
+use allowed_ips::*;
 use api::*;
 use dev_lock::*;
 use events::*;
-use ip_map::*;
 use peer::*;
 use sock::*;
 use tun::*;
@@ -94,8 +94,7 @@ pub struct Device {
 
     peers: HashMap<X25519Key, Arc<Peer>>,
     peers_by_idx: HashMap<u32, Arc<Peer>>,
-    peers_by_ipv4: IPv4Map<Ipv4Addr, Arc<Peer>>,
-    peers_by_ipv6: IPv6Map<Ipv6Addr, Arc<Peer>>,
+    peers_by_ip: AllowedIps<Arc<Peer>>,
 }
 
 // Event handler function
@@ -168,12 +167,12 @@ const CONNECTED_SOCKET_HANDLER: HandlerFunction =
                         }
                     }
                     TunnResult::WriteToTunnelV4(packet, addr) => {
-                        if peer.allowed_ip_v4(addr) {
+                        if peer.is_allowed_ip(IpAddr::from(addr)) {
                             peer.add_rx_bytes(iface.write4(packet))
                         }
                     }
                     TunnResult::WriteToTunnelV6(packet, addr) => {
-                        if peer.allowed_ip_v6(addr) {
+                        if peer.is_allowed_ip(IpAddr::from(addr)) {
                             peer.add_rx_bytes(iface.write6(packet))
                         }
                     }
@@ -197,8 +196,7 @@ const IFACE_HANDLER: HandlerFunction =
         let mut dst = [0u8; 1536];
         let mut iter = 64;
         {
-            let peer_map_v4 = &device.peers_by_ipv4;
-            let peer_map_v6 = &device.peers_by_ipv6;
+            let peer_map = &device.peers_by_ip;
             let iface = &device.iface;
 
             while let Ok(src) = iface.read(&mut src[..]) {
@@ -207,15 +205,9 @@ const IFACE_HANDLER: HandlerFunction =
                     None => continue,
                 };
 
-                let peer = match addr {
-                    IpAddr::V4(addr) => match peer_map_v4.find(addr) {
-                        Some(ref peer) => Arc::clone(peer),
-                        None => continue,
-                    },
-                    IpAddr::V6(addr) => match peer_map_v6.find(addr) {
-                        Some(ref peer) => Arc::clone(peer),
-                        None => continue,
-                    },
+                let peer = match peer_map.find(addr) {
+                    Some(ref peer) => Arc::clone(peer),
+                    None => continue,
                 };
 
                 let endpoint = peer.connected_endpoint(device, &peer).unwrap();
@@ -226,12 +218,12 @@ const IFACE_HANDLER: HandlerFunction =
                     TunnResult::Err(e) => println!("Error({:?})", e),
                     TunnResult::WriteToNetwork(packet) => peer.add_tx_bytes(udp_conn.write(packet)),
                     TunnResult::WriteToTunnelV4(packet, addr) => {
-                        if peer.allowed_ip_v4(addr) {
+                        if peer.is_allowed_ip(IpAddr::from(addr)) {
                             peer.add_rx_bytes(iface.write4(packet))
                         }
                     }
                     TunnResult::WriteToTunnelV6(packet, addr) => {
-                        if peer.allowed_ip_v6(addr) {
+                        if peer.is_allowed_ip(IpAddr::from(addr)) {
                             peer.add_rx_bytes(iface.write6(packet))
                         }
                     }
@@ -319,12 +311,12 @@ const LISTEN_SOCKET_HANDLER: HandlerFunction = |_: RawFd,
             }
             TunnResult::WriteToNetwork(packet) => peer.add_tx_bytes(udp_conn.sendto(packet, addr)),
             TunnResult::WriteToTunnelV4(packet, addr) => {
-                if peer.allowed_ip_v4(addr) {
+                if peer.is_allowed_ip(IpAddr::from(addr)) {
                     peer.add_rx_bytes(iface.write4(packet))
                 }
             }
             TunnResult::WriteToTunnelV6(packet, addr) => {
-                if peer.allowed_ip_v6(addr) {
+                if peer.is_allowed_ip(IpAddr::from(addr)) {
                     peer.add_rx_bytes(iface.write6(packet))
                 }
             }
@@ -365,14 +357,7 @@ impl Device {
         self.peers_by_idx.insert(next_index, Arc::clone(&peer));
 
         for AllowedIP { addr, cidr } in allowed_ips {
-            match addr {
-                IpAddr::V4(addr) => self
-                    .peers_by_ipv4
-                    .insert(addr, cidr as _, Arc::clone(&peer)),
-                IpAddr::V6(addr) => self
-                    .peers_by_ipv6
-                    .insert(addr, cidr as _, Arc::clone(&peer)),
-            }
+            self.peers_by_ip.insert(addr, cidr as _, Arc::clone(&peer));
         }
     }
 
@@ -464,7 +449,6 @@ impl Device {
     fn clear_peers(&mut self) {
         self.peers.clear();
         self.peers_by_idx.clear();
-        self.peers_by_ipv4.clear();
-        self.peers_by_ipv6.clear();
+        self.peers_by_ip.clear();
     }
 }

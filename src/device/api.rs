@@ -77,6 +77,10 @@ fn api_get(writer: &mut BufWriter<&File>, d: &Device) {
             writer.write(format!("endpoint={}\n", addr).as_ref());
         }
 
+        for (_, ip, cidr) in p.allowed_ips() {
+            writer.write(format!("allowed_ip={}/{}\n", ip, cidr).as_ref());
+        }
+
         writer.write(format!("rx_bytes={}\n", p.get_rx_bytes()).as_ref());
         writer.write(format!("tx_bytes={}\n", p.get_tx_bytes()).as_ref());
     }

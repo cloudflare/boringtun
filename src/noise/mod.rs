@@ -7,23 +7,20 @@ mod timers;
 
 use crypto::x25519::X25519Key;
 use noise::errors::WireGuardError;
-use noise::h2n::{read_u16_be, read_u32};
 use noise::handshake::Handshake;
 use noise::timers::{TimerName, Timers};
 use std::collections::VecDeque;
-use std::net::*;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 const IPV4_MIN_HEADER_SIZE: usize = 20;
 const IPV4_LEN_OFF: usize = 2;
-const IPV4_LEN_SZ: usize = 2;
 const IPV4_SRC_IP_OFF: usize = 12;
 pub const IPV4_DST_IP_OFF: usize = 16;
 
 const IPV6_MIN_HEADER_SIZE: usize = 40;
 const IPV6_LEN_OFF: usize = 4;
-const IPV6_LEN_SZ: usize = 2;
 const IPV6_SRC_IP_OFF: usize = 8;
 pub const IPV6_DST_IP_OFF: usize = 24;
 
@@ -214,7 +211,13 @@ impl Tunn {
             return TunnResult::Err(WireGuardError::InvalidPacket);
         }
         // Extract the reciever index
-        let idx = read_u32(&src[session::IDX_OFF..session::IDX_OFF + session::IDX_SZ]) as usize;
+        let idx = u32::from_le_bytes([
+            src[session::IDX_OFF + 0],
+            src[session::IDX_OFF + 1],
+            src[session::IDX_OFF + 2],
+            src[session::IDX_OFF + 3],
+        ]) as usize;
+
         // Get the (possibly) right session
         if let Some(ref session) = *self.sessions[idx % N_SESSIONS].read() {
             match session.receive_packet_data(src, dst) {
@@ -269,7 +272,7 @@ impl Tunn {
         let (packet_len, src_ip_address) = match packet.len() {
             0 => return TunnResult::Done, // This is keepalive, and not an error
             _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => (
-                read_u16_be(&packet[IPV4_LEN_OFF..IPV4_LEN_OFF + IPV4_LEN_SZ]) as usize,
+                u16::from_be_bytes([packet[IPV4_LEN_OFF + 0], packet[IPV4_LEN_OFF + 1]]) as usize,
                 IpAddr::from([
                     packet[IPV4_SRC_IP_OFF + 0],
                     packet[IPV4_SRC_IP_OFF + 1],
@@ -278,7 +281,7 @@ impl Tunn {
                 ]),
             ),
             _ if packet[0] >> 4 == 6 && packet.len() >= IPV6_MIN_HEADER_SIZE => (
-                read_u16_be(&packet[IPV6_LEN_OFF..IPV6_LEN_OFF + IPV6_LEN_SZ]) as usize,
+                u16::from_be_bytes([packet[IPV6_LEN_OFF + 0], packet[IPV6_LEN_OFF + 1]]) as usize,
                 IpAddr::from([
                     packet[IPV6_SRC_IP_OFF + 0],
                     packet[IPV6_SRC_IP_OFF + 1],

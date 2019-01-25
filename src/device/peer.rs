@@ -17,8 +17,7 @@ pub struct Peer {
     rx_bytes: AtomicUsize,
     tx_bytes: AtomicUsize,
     endpoint: spin::RwLock<Endpoint>,
-    allowed_ips_v4: IPv4Map<Ipv4Addr, bool>,
-    allowed_ips_v6: IPv6Map<Ipv6Addr, bool>,
+    allowed_ips: AllowedIps<()>,
 }
 
 #[derive(Debug)]
@@ -61,15 +60,11 @@ impl Peer {
                 addr: endpoint,
                 conn: None,
             }),
-            allowed_ips_v4: Default::default(),
-            allowed_ips_v6: Default::default(),
+            allowed_ips: Default::default(),
         };
 
         for AllowedIP { addr, cidr } in allowed_ips {
-            match addr {
-                IpAddr::V4(addr) => peer.allowed_ips_v4.insert(*addr, *cidr as _, true),
-                IpAddr::V6(addr) => peer.allowed_ips_v6.insert(*addr, *cidr as _, true),
-            }
+            peer.allowed_ips.insert(*addr, *cidr as _, ());
         }
 
         peer
@@ -163,23 +158,14 @@ impl Peer {
         self.tx_bytes.load(Ordering::Relaxed)
     }
 
-    pub fn allowed_ips<'a>(&'a self) -> (&'a IPv4Map<Ipv4Addr, bool>, &'a IPv6Map<Ipv6Addr, bool>) {
-        (&self.allowed_ips_v4, &self.allowed_ips_v6)
-    }
-
-    pub fn allowed_ip_v4(&self, addr: Ipv4Addr) -> bool {
-        if let Some(_) = self.allowed_ips_v4.find(addr) {
-            true
-        } else {
-            false
+    pub fn is_allowed_ip(&self, addr: IpAddr) -> bool {
+        match self.allowed_ips.find(addr) {
+            Some(_) => true,
+            None => false,
         }
     }
 
-    pub fn allowed_ip_v6(&self, addr: Ipv6Addr) -> bool {
-        if let Some(_) = self.allowed_ips_v6.find(addr) {
-            true
-        } else {
-            false
-        }
+    pub fn allowed_ips(&self) -> Iter<(())> {
+        self.allowed_ips.iter()
     }
 }
