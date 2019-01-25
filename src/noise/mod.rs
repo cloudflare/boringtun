@@ -7,13 +7,11 @@ mod timers;
 
 use crypto::x25519::X25519Key;
 use noise::errors::WireGuardError;
-use noise::h2n::*;
+use noise::h2n::{read_u16_be, read_u32};
 use noise::handshake::Handshake;
 use noise::timers::{TimerName, Timers};
 use std::collections::VecDeque;
-use std::ffi::CString;
 use std::net::*;
-use std::os::raw::c_char;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -50,14 +48,14 @@ pub enum Verbosity {
 }
 
 /// Tunnel represents a point-to-point WireGuard connection
-#[derive(Debug)]
 pub struct Tunn {
     handshake: spin::Mutex<handshake::Handshake>, // The handshake currently in progress
     sessions: [Arc<spin::RwLock<Option<session::Session>>>; N_SESSIONS], // The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
     current: AtomicUsize, // Index of most recently used session
     packet_queue: spin::Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
     timers: timers::Timers, // Keeps tabs on the expiring timers
-    log: Option<extern "C" fn(*const c_char)>, // Pointer to an external log function
+
+    logger: Option<spin::Mutex<Box<Fn(&str) + Send>>>,
     verbosity: Verbosity,
 }
 
@@ -81,16 +79,15 @@ impl Tunn {
             packet_queue: spin::Mutex::new(VecDeque::new()),
             timers: Timers::new(),
 
-            log: None,
+            logger: None,
             verbosity: Verbosity::None,
         };
 
         Ok(Box::new(tunn))
     }
 
-    /// Set the external logging function.
-    pub fn set_log(&mut self, log: Option<extern "C" fn(*const c_char)>, verbosity: Verbosity) {
-        self.log = log;
+    pub fn set_logger(&mut self, logger: Box<Fn(&str) + Send>, verbosity: Verbosity) {
+        self.logger = Some(spin::Mutex::new(logger));
         self.verbosity = verbosity;
     }
 
@@ -336,9 +333,9 @@ impl Tunn {
     }
 
     fn log(&self, lvl: Verbosity, entry: &str) {
-        if let Some(p) = self.log {
+        if let Some(ref logger) = self.logger {
             if self.verbosity >= lvl {
-                p(CString::new(entry).unwrap().as_ptr());
+                logger.lock()(entry)
             }
         }
     }

@@ -11,7 +11,6 @@ pub struct Endpoint {
     pub conn: Option<UDPSocket>,
 }
 
-#[derive(Debug)]
 pub struct Peer {
     tunnel: Box<Tunn>,      // The associated tunnel struct
     keepalive: Option<u16>, // Optional keepalive

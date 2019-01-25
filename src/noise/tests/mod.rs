@@ -4,12 +4,10 @@ mod tests {
     use base64::encode;
     use crypto::x25519::*;
     use noise::h2n::{read_u16_be, write_u32_be};
-    use std::ffi::CStr;
     use std::fs;
     use std::fs::File;
     use std::io::prelude::Write;
     use std::net::UdpSocket;
-    use std::os::raw::c_char;
     use std::process::Command;
     use std::str;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -64,22 +62,6 @@ mod tests {
     static WG_LOCK: SpinLock = SpinLock {
         lock: AtomicBool::new(true),
     };
-
-    fn log_line(prefix: &str, entry: *const c_char) {
-        let c_str = unsafe { CStr::from_ptr(entry) };
-        match c_str.to_str() {
-            Err(_) => return,
-            Ok(string) => println!("{}: {}", prefix, string),
-        };
-    }
-
-    extern "C" fn log_server(entry: *const c_char) {
-        log_line("server", entry);
-    }
-
-    extern "C" fn log_client(entry: *const c_char) {
-        log_line("client", entry);
-    }
 
     // Reads a decapsulated packet and strips its IPv4 header
     fn read_ipv4_packet(socket: &UdpSocket) -> Vec<u8> {
@@ -183,14 +165,14 @@ mod tests {
         network_socket: UdpSocket,
         static_private: &str,
         peer_static_public: &str,
-        log: extern "C" fn(*const c_char),
+        logger: Box<Fn(&str) + Send>,
         close: Arc<AtomicBool>,
     ) -> UdpSocket {
         let static_private = static_private.parse().unwrap();
         let peer_static_public = peer_static_public.parse().unwrap();
 
         let mut peer = Tunn::new(&static_private, &peer_static_public, 100).unwrap();
-        peer.set_log(Some(log), Verbosity::Debug);
+        peer.set_logger(logger, Verbosity::Debug);
 
         let peer: Arc<Box<Tunn>> = Arc::from(peer);
 
@@ -329,7 +311,7 @@ mod tests {
             s_sock,
             &server_pair.0,
             &client_pair.1,
-            log_server,
+            Box::new(|e: &str| eprintln!("server: {}", e)),
             close.clone(),
         );
 
@@ -337,7 +319,7 @@ mod tests {
             c_sock,
             &client_pair.0,
             &server_pair.1,
-            log_client,
+            Box::new(|e: &str| eprintln!("client: {}", e)),
             close.clone(),
         );
 
@@ -462,7 +444,7 @@ Endpoint = :{}",
             client_socket,
             &c_key_pair.0,
             &wg.public_key,
-            log_client,
+            Box::new(|e: &str| eprintln!("client: {}", e)),
             close.clone(),
         );
 
@@ -499,7 +481,7 @@ Endpoint = :{}",
             client_socket,
             &c_key_pair.0,
             &wg.public_key,
-            log_client,
+            Box::new(|e: &str| eprintln!("client: {}", e)),
             close.clone(),
         );
 

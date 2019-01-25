@@ -1,12 +1,8 @@
-use std::fmt::*;
-
-#[derive(Debug)]
 pub struct IPv4Map<K: Into<u32>, D> {
     root: Option<Node32<D>>,
     phantom: std::marker::PhantomData<K>,
 }
 
-#[derive(Debug)]
 pub struct IPv6Map<K: Into<u128>, D> {
     root: Option<Node128<D>>,
     phantom: std::marker::PhantomData<K>,
@@ -24,13 +20,12 @@ macro_rules! mask_key {
 
 macro_rules! build_node {
     ($name: ident, $find: ident, $insert: ident, $keyt: ty) => {
-        #[derive(Debug)]
         enum $name<D> {
             Node($keyt, usize, Box<Option<$name<D>>>, Box<Option<$name<D>>>),
             Leaf($keyt, usize, D), // Leaf node, keyt: part of the key to match, usize: how much to match, D: data on match
         }
 
-        fn $find<D: Debug>(node: &Option<$name<D>>, key: $keyt) -> Option<&D> {
+        fn $find<D>(node: &Option<$name<D>>, key: $keyt) -> Option<&D> {
             const BM1: usize = std::mem::size_of::<$keyt>() * 8 - 1; // Bits in key minus one
 
             match node {
@@ -66,7 +61,7 @@ macro_rules! build_node {
             }
         }
 
-        fn $insert<D: Debug>(node: &mut Option<$name<D>>, key: $keyt, bits: usize, data: D) {
+        fn $insert<D>(node: &mut Option<$name<D>>, key: $keyt, bits: usize, data: D) {
             const BITS: usize = std::mem::size_of::<$keyt>() * 8; // Bits in key
             const BM1: usize = BITS - 1; // Bits in key minus one
             const ZERO: $keyt = 0;
@@ -228,7 +223,7 @@ where
     }
 }
 
-impl<K: Into<u32>, D: Debug> IPv4Map<K, D> {
+impl<K: Into<u32>, D> IPv4Map<K, D> {
     pub fn clear(&mut self) {
         self.root = None;
     }
@@ -261,7 +256,7 @@ where
     }
 }
 
-impl<K: Into<u128>, D: Debug> IPv6Map<K, D> {
+impl<K: Into<u128>, D> IPv6Map<K, D> {
     pub fn clear(&mut self) {
         self.root = None;
     }

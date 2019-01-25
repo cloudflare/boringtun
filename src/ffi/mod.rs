@@ -178,8 +178,11 @@ pub extern "C" fn new_tunnel(
         Err(_) => return ptr::null_mut(),
     };
 
-    if log_level > 0 {
-        tunnel.set_log(log_printer, Verbosity::from(log_level));
+    if let Some(logger) = log_printer {
+        tunnel.set_logger(
+            Box::new(move |e: &str| logger(CString::new(e).unwrap().as_ptr())),
+            Verbosity::from(log_level),
+        );
     }
 
     return Box::into_raw(tunnel);
