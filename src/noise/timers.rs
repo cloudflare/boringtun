@@ -1,8 +1,7 @@
+use super::errors::WireGuardError;
 use noise::{Tunn, TunnResult, Verbosity};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-//use std::sync::Arc;
-use super::errors::WireGuardError;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /*
 static MAX_TIMER_HANDSHAKES: u32 = 90 / 5;
@@ -196,5 +195,19 @@ impl Tunn {
         // strict rate limiting enforced.
 
         TunnResult::Done
+    }
+
+    pub fn time_since_last_handshake(&self) -> Option<Duration> {
+        let current_session = self.current.load(Ordering::Acquire);
+        if let Some(_) = *self.sessions[current_session % super::N_SESSIONS].read() {
+            let time_current = Instant::now().duration_since(self.timers.time_started);
+            let time_session_established =
+                Duration::from_secs(self.timer(TimerName::TimeSessionEstablished) as u64);
+            let epoch_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+
+            Some(epoch_time - (time_current - time_session_established))
+        } else {
+            None
+        }
     }
 }

@@ -168,4 +168,8 @@ impl Peer {
     pub fn allowed_ips(&self) -> Iter<(())> {
         self.allowed_ips.iter()
     }
+
+    pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
+        self.tunnel.time_since_last_handshake()
+    }
 }

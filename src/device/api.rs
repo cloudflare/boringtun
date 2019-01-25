@@ -81,6 +81,11 @@ fn api_get(writer: &mut BufWriter<&File>, d: &Device) {
             writer.write(format!("allowed_ip={}/{}\n", ip, cidr).as_ref());
         }
 
+        if let Some(time) = p.time_since_last_handshake() {
+            writer.write(format!("last_handshake_time_sec={}\n", time.as_secs()).as_ref());
+            writer.write(format!("last_handshake_time_nsec={}\n", time.subsec_nanos()).as_ref());
+        }
+
         writer.write(format!("rx_bytes={}\n", p.get_rx_bytes()).as_ref());
         writer.write(format!("tx_bytes={}\n", p.get_tx_bytes()).as_ref());
     }
