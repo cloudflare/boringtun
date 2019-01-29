@@ -117,7 +117,7 @@ impl EventQueue {
     }
 
     pub fn enable_event(&self, mut ev: Event) -> Result<(), Error> {
-        ev.event.flags = EV_ENABLE;
+        ev.event.flags = EV_ENABLE | EV_DISPATCH;
         match unsafe {
             kevent(
                 self.kq,

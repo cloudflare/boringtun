@@ -134,6 +134,7 @@ impl EventQueue {
     }
 
     pub fn enable_event(&self, mut ev: Event) -> Result<(), Error> {
+        ev.event.events = (EPOLLIN | EPOLLONESHOT) as _;
         match unsafe { epoll_ctl(self.epoll, EPOLL_CTL_MOD, ev.data().fd, &mut ev.event) } {
             0 => Ok(()),
             -1 => Err(Error::EventQueue(errno_str())),
