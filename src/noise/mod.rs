@@ -335,7 +335,7 @@ impl Tunn {
         q.pop_front()
     }
 
-    fn log(&self, lvl: Verbosity, entry: &str) {
+    pub fn log(&self, lvl: Verbosity, entry: &str) {
         if let Some(ref logger) = self.logger {
             if self.verbosity >= lvl {
                 logger.lock()(entry)

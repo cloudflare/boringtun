@@ -1,13 +1,13 @@
+use crypto::chacha20poly1305::*;
 use noise::errors::WireGuardError;
 use noise::h2n::*;
-use ring::aead::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct Session {
     receiving_index: u32,
     sending_index: u32,
-    receiver: OpeningKey,
-    sender: SealingKey,
+    receiver: ChaCha20Poly1305,
+    sender: ChaCha20Poly1305,
     sending_key_counter: AtomicUsize,
     receiving_key_counter: spin::Mutex<ReceivingKeyCounterValidator>,
 }
@@ -132,8 +132,8 @@ impl Session {
         Session {
             receiving_index: local_index,
             sending_index: peer_index,
-            receiver: OpeningKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(), // ChaCha20Poly1305::new_aead(&sending_key),
-            sender: SealingKey::new(&CHACHA20_POLY1305, &sending_key).unwrap(), // ChaCha20Poly1305::new_aead(&sending_key),
+            receiver: ChaCha20Poly1305::new_aead(&receiving_key),
+            sender: ChaCha20Poly1305::new_aead(&sending_key),
             sending_key_counter: AtomicUsize::new(0),
             receiving_key_counter: spin::Mutex::new(Default::default()),
         }
@@ -175,19 +175,12 @@ impl Session {
         write_u32(self.sending_index, &mut dst[IDX_OFF..IDX_OFF + IDX_SZ]);
         write_u64(sending_key_counter, &mut dst[CTR_OFF..CTR_OFF + CTR_SZ]);
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
-
-        let mut nonce = [0u8; 12];
-        write_u64(sending_key_counter, &mut nonce[4..12]);
-
-        dst[DATA_OFF..DATA_OFF + src.len()].copy_from_slice(src);
-        let n = seal_in_place(
-            &self.sender,
-            &nonce,
+        let n = self.sender.seal_wg(
+            sending_key_counter,
             &[],
+            src,
             &mut dst[DATA_OFF..DATA_OFF + src.len() + AEAD_SIZE],
-            AEAD_SIZE,
-        )
-        .unwrap();
+        );
 
         &mut dst[..DATA_OFF + n]
     }
@@ -217,21 +210,12 @@ impl Session {
         // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
         self.receiving_counter_quick_check(receiving_key_counter)?;
 
-        let mut nonce = [0u8; 12];
-        write_u64(receiving_key_counter, &mut nonce[4..12]);
-        dst[..src.len() - DATA_OFF].copy_from_slice(&src[DATA_OFF..]);
-        open_in_place(
-            &self.receiver,
-            &nonce,
-            &[],
-            0,
-            &mut dst[..src.len() - DATA_OFF],
-        )
-        .map_err(|_| WireGuardError::InvalidAeadTag)
-        .and_then(|packet| {
-            // After decryption is done, check counter again, and mark as recieved
-            self.receiving_counter_mark(receiving_key_counter)?;
-            Ok(packet)
-        })
+        self.receiver
+            .open_wg(receiving_key_counter, &[], &src[DATA_OFF..], dst)
+            .and_then(move |n| {
+                // After decryption is done, check counter again, and mark
+                self.receiving_counter_mark(receiving_key_counter)?;
+                Ok(&mut dst[..n])
+            })
     }
 }

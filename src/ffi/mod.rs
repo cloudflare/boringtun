@@ -13,7 +13,7 @@ use std::ptr;
 use std::slice;
 
 #[allow(non_camel_case_types)]
-#[repr(u32)]
+#[repr(C)]
 /// Indicates the operation required from the caller
 pub enum result_type {
     /// No operation is required.
