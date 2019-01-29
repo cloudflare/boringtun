@@ -263,7 +263,7 @@ fn poly_step_u8_slice(acc: Felem1305, x: &[u8], k: Poly1305R) -> Felem1305 {
 }
 
 #[inline(always)]
-fn poly_len(acc: Felem1305, aad_len: usize, pt_len: usize, k: Poly1305R) -> Felem1305 {
+fn poly_len(acc: Felem1305, aad_len: u64, pt_len: u64, k: Poly1305R) -> Felem1305 {
     let x = [
         aad_len as u32,
         (aad_len >> 32) as u32,
@@ -274,13 +274,7 @@ fn poly_len(acc: Felem1305, aad_len: usize, pt_len: usize, k: Poly1305R) -> Fele
 }
 
 #[inline(always)]
-fn poly_final(
-    acc: Felem1305,
-    aad_len: usize,
-    pt_len: usize,
-    k: Poly1305R,
-    e: Poly1305S,
-) -> (u64, u64) {
+fn poly_final(acc: Felem1305, aad_len: u64, pt_len: u64, k: Poly1305R, e: Poly1305S) -> (u64, u64) {
     let x = [
         aad_len as u32,
         (aad_len >> 32) as u32,
@@ -571,9 +565,9 @@ impl ChaCha20Poly1305 {
             acc,
             [
                 hashed as u32,
-                (hashed >> 32) as u32,
+                ((hashed as u64) >> 32) as u32,
                 enced as u32,
-                (enced >> 32) as u32,
+                ((enced as u64) >> 32) as u32,
             ],
             poly_key,
         );
@@ -799,9 +793,9 @@ impl ChaCha20Poly1305 {
             acc,
             [
                 hashed as u32,
-                (hashed >> 32) as u32,
+                ((hashed as u64) >> 32) as u32,
                 enced as u32,
-                (enced >> 32) as u32,
+                ((enced as u64) >> 32) as u32,
             ],
             poly_key,
         );
@@ -1141,7 +1135,7 @@ impl ChaCha20Poly1305 {
                 ct_block_8[15 * 4..16 * 4].copy_from_slice(&u32_to_le(ct_block[15]));
                 ct[out..out + 64].copy_from_slice(&ct_block_8);
                 out += 64;
-                acc = poly_len(acc, hashed, out, poly_key);
+                acc = poly_len(acc, hashed as u64, out as u64, poly_key);
 
                 let mut t0 = acc.0[0] as u128;
                 let mut t1 = acc.0[1] as u128;
@@ -1247,7 +1241,7 @@ impl ChaCha20Poly1305 {
             }
         }
 
-        let (a0, a1) = poly_final(acc, hashed, out, poly_key, poly_enc);
+        let (a0, a1) = poly_final(acc, hashed as u64, out as u64, poly_key, poly_enc);
         assert!(ct.len() >= out + 16);
         ct[out..out + 8].copy_from_slice(&u64_to_le(a0));
         ct[out + 8..out + 16].copy_from_slice(&u64_to_le(a1));
@@ -1374,8 +1368,8 @@ impl ChaCha20Poly1305 {
             return Ok(n);
         }
 
-        for i in 0..plaintext.len() {
-            plaintext[i] = 0;
+        for p in plaintext {
+            *p = 0;
         }
 
         return Err(WireGuardError::InvalidAeadTag);
@@ -1407,8 +1401,8 @@ impl ChaCha20Poly1305 {
             return Ok(n);
         }
 
-        for i in 0..plaintext.len() {
-            plaintext[i] = 0;
+        for p in plaintext {
+            *p = 0;
         }
 
         Err(WireGuardError::InvalidAeadTag)

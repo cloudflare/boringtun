@@ -435,8 +435,8 @@ Endpoint = :{}",
         let wg = WireGuardExt::start(endpoint, &c_key_pair.1);
         let c_addr = format!("localhost:{}", endpoint);
         let w_addr = format!("localhost:{}", wg.port);
-        let client_socket = UdpSocket::bind(c_addr).unwrap();
-        client_socket.connect(w_addr).unwrap();
+        let client_socket = UdpSocket::bind(&c_addr).unwrap_or_else(|e| panic!("UdpSocket {}: {}", c_addr, e));
+        client_socket.connect(&w_addr).unwrap_or_else(|e| panic!("connect {}: {}", w_addr, e));
 
         let close = Arc::new(AtomicBool::new(false));
 

@@ -13,7 +13,7 @@ use std::ptr;
 use std::slice;
 
 #[allow(non_camel_case_types)]
-#[repr(C)]
+#[repr(u32)]
 /// Indicates the operation required from the caller
 pub enum result_type {
     /// No operation is required.
@@ -97,30 +97,34 @@ pub extern "C" fn x25519_public_key(private_key: x25519_key) -> x25519_key {
 }
 
 /// Returns the base64 encoding of a key as a UTF8 C-string.
+///
+/// The memory has to be freed by calling `x25519_key_to_str_free`
 #[no_mangle]
-pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const i8 {
+pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const c_char {
     let encoded_key = encode(&key.key);
-    let c_string = CString::new(encoded_key).unwrap();
-    let ptr = c_string.as_ptr();
-    mem::forget(c_string);
-    ptr
+    CString::into_raw(CString::new(encoded_key).unwrap())
 }
 
 /// Returns the hex encoding of a key as a UTF8 C-string.
+///
+/// The memory has to be freed by calling `x25519_key_to_str_free`
 #[no_mangle]
-pub extern "C" fn x25519_key_to_hex(key: x25519_key) -> *const i8 {
+pub extern "C" fn x25519_key_to_hex(key: x25519_key) -> *const c_char {
     let encoded_key = encode_hex(&key.key);
-    let c_string = CString::new(encoded_key).unwrap();
-    let ptr = c_string.as_ptr();
-    mem::forget(c_string);
-    ptr
+    CString::into_raw(CString::new(encoded_key).unwrap())
+}
+
+/// Frees memory of the string given by `x25519_key_to_hex` or `x25519_key_to_base64`
+#[no_mangle]
+pub unsafe extern "C" fn x25519_key_to_str_free(stringified_key: *mut c_char) {
+    CString::from_raw(stringified_key);
 }
 
 /// Check if the input C-string represents a valid base64 encoded x25519 key.
 /// Return 1 if valid 0 otherwise.
 #[no_mangle]
-pub extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> i32 {
-    let c_str = unsafe { CStr::from_ptr(key) };
+pub unsafe extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> i32 {
+    let c_str = CStr::from_ptr(key);
     let utf8_key = match c_str.to_str() {
         Err(_) => return 0,
         Ok(string) => string,
@@ -145,19 +149,19 @@ pub extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> i32 {
 /// Allocate a new tunnel, return NULL on failure.
 /// Keys must be valid base64 encoded 32-byte keys.
 #[no_mangle]
-pub extern "C" fn new_tunnel(
+pub unsafe extern "C" fn new_tunnel(
     static_private: *const c_char,
     server_static_public: *const c_char,
-    log_printer: Option<extern "C" fn(*const c_char)>,
+    log_printer: Option<unsafe extern "C" fn(*const c_char)>,
     log_level: u32,
 ) -> *mut Tunn {
-    let c_str = unsafe { CStr::from_ptr(static_private) };
+    let c_str = CStr::from_ptr(static_private);
     let static_private = match c_str.to_str() {
         Err(_) => return ptr::null_mut(),
         Ok(string) => string,
     };
 
-    let c_str = unsafe { CStr::from_ptr(server_static_public) };
+    let c_str = CStr::from_ptr(server_static_public);
     let server_static_public = match c_str.to_str() {
         Err(_) => return ptr::null_mut(),
         Ok(string) => string,
@@ -185,66 +189,66 @@ pub extern "C" fn new_tunnel(
         );
     }
 
-    return Box::into_raw(tunnel);
+    Box::into_raw(tunnel)
+}
+
+/// Drops the Tunn object
+#[no_mangle]
+pub unsafe extern "C" fn tunnel_free(tunnel: *mut Tunn) {
+    Box::from_raw(tunnel);
 }
 
 /// Write an IP packet from the tunnel interface.
 /// For more details check noise::tunnel_to_network functions.
 #[no_mangle]
-pub extern "C" fn wireguard_write(
+pub unsafe extern "C" fn wireguard_write(
     tunnel: *mut Tunn,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let tunnel = unsafe { Box::from_raw(tunnel) };
+    let tunnel = tunnel.as_ref().unwrap();
     // Slices are not owned, and therefore will not be freed by Rust
-    let src = unsafe { slice::from_raw_parts(src, src_size as usize) };
-    let dst = unsafe { slice::from_raw_parts_mut(dst, dst_size as usize) };
-    let res = tunnel.tunnel_to_network(src, dst);
-    mem::forget(tunnel); // Don't let Rust free the tunnel
-    wireguard_result::from(res)
+    let src = slice::from_raw_parts(src, src_size as usize);
+    let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
+    wireguard_result::from(tunnel.tunnel_to_network(src, dst))
 }
 
 /// Read a UDP packet from the server.
 /// For more details check noise::network_to_tunnel functions.
 #[no_mangle]
-pub extern "C" fn wireguard_read(
+pub unsafe extern "C" fn wireguard_read(
     tunnel: *mut Tunn,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let tunnel = unsafe { Box::from_raw(tunnel) };
+    let tunnel = tunnel.as_ref().unwrap();
     // Slices are not owned, and therefore will not be freed by Rust
-    let src = unsafe { slice::from_raw_parts(src, src_size as usize) };
-    let dst = unsafe { slice::from_raw_parts_mut(dst, dst_size as usize) };
-    let res = tunnel.network_to_tunnel(src, dst);
-    mem::forget(tunnel); // Don't let Rust free the tunnel
-    wireguard_result::from(res)
+    let src = slice::from_raw_parts(src, src_size as usize);
+    let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
+    wireguard_result::from(tunnel.network_to_tunnel(src, dst))
 }
 
 /// This is a state keeping function, that need to be called preriodically.
 /// Recommended interavl: 100ms.
 #[no_mangle]
-pub extern "C" fn wireguard_tick(
+pub unsafe extern "C" fn wireguard_tick(
     tunnel: *mut Tunn,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let tunnel = unsafe { Box::from_raw(tunnel) };
+    let tunnel = tunnel.as_ref().unwrap();
     // Slices are not owned, and therefore will not be freed by Rust
-    let dst = unsafe { slice::from_raw_parts_mut(dst, dst_size as usize) };
-    let res = tunnel.update_timers(dst);
-    mem::forget(tunnel); // Don't let Rust free the tunnel
-    wireguard_result::from(res)
+    let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
+    wireguard_result::from(tunnel.update_timers(dst))
 }
 
 /// Performs an iternal benchmark, and returns its result as a C-string.
 #[no_mangle]
-pub extern "C" fn benchmark(name: i32, idx: u32) -> *const i8 {
+pub extern "C" fn benchmark(name: i32, idx: u32) -> *const c_char {
     if let Some(s) = do_benchmark(name != 0, idx as usize) {
         let s = CString::new(s).unwrap();
         let v = s.as_ptr();
