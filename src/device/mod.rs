@@ -446,8 +446,9 @@ impl Device {
 
     fn set_key(&mut self, private_key: X25519Key) {
         if let Some(..) = &self.key_pair {
-            // TODO: handle key change - iterate over the peers, close all sessions and update keys
-            panic!("Changing the private key is not allowed yet");
+            for (_, ref p) in &self.peers {
+                p.set_static_private(private_key.as_bytes());
+            }
         }
         let public_key = private_key.public_key();
         self.key_pair = Some((private_key, public_key));

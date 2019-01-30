@@ -241,11 +241,16 @@ pub fn parse_handshake_anon(
 
 impl NoiseParams {
     fn new(
-        static_public: [u8; 32],
         static_private: &[u8],
         peer_static_public: &[u8],
         preshared_key: Option<[u8; 32]>,
     ) -> NoiseParams {
+        let static_public = x25519_public_key(static_private);
+
+        if constant_time_zero_key_check(&static_public) {
+            panic!("Zero key");
+        }
+
         NoiseParams {
             static_public,
             static_private: make_array(static_private),
@@ -256,6 +261,14 @@ impl NoiseParams {
             preshared_key,
         }
     }
+
+    fn set_static_private(&mut self, static_private: &[u8]) {
+        let static_public = x25519_public_key(static_private);
+        self.static_public = static_public;
+        self.static_private = make_array(static_private);
+        self.static_shared = x25519_shared_key(&self.peer_static_public, &static_private);
+        self.receiving_mac1_key = HASH!(LABEL_MAC1, static_public);
+    }
 }
 
 impl Handshake {
@@ -265,18 +278,7 @@ impl Handshake {
         global_idx: u32,
         preshared_key: Option<[u8; 32]>,
     ) -> Handshake {
-        let static_public = x25519_public_key(static_private);
-
-        if constant_time_zero_key_check(&static_public) {
-            panic!("Zero key");
-        }
-
-        let params = NoiseParams::new(
-            static_public,
-            static_private,
-            peer_static_public,
-            preshared_key,
-        );
+        let params = NoiseParams::new(static_private, peer_static_public, preshared_key);
 
         Handshake {
             params: params,
@@ -321,6 +323,10 @@ impl Handshake {
         let idx8 = index as u8;
         self.next_index = (index & !0xff) | (idx8.wrapping_add(1)) as u32;
         index
+    }
+
+    pub fn set_static_private(&mut self, key: &[u8]) {
+        self.params.set_static_private(key)
     }
 
     pub fn format_handshake_initiation<'a>(

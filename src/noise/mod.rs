@@ -85,6 +85,7 @@ impl Tunn {
         Ok(Box::new(tunn))
     }
 
+    /// Set the log function and logging level for the tunnel
     pub fn set_logger(&mut self, logger: Box<Fn(&str) + Send>, verbosity: Verbosity) {
         self.logger = Some(spin::Mutex::new(logger));
         self.verbosity = verbosity;
@@ -176,6 +177,7 @@ impl Tunn {
         }
     }
 
+    // Get a packet from the queue, and try to encapsulate it
     fn send_queued_packet<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
         if let Some(packet) = self.dequeue_packet() {
             match self.tunnel_to_network(&packet, dst) {
@@ -342,6 +344,14 @@ impl Tunn {
             if self.verbosity >= lvl {
                 logger.lock()(entry)
             }
+        }
+    }
+
+    /// Update the private key and clear existing sessions
+    pub fn set_static_private(&self, static_private: &[u8]) {
+        self.handshake.lock().set_static_private(static_private);
+        for s in &self.sessions {
+            *s.write() = None;
         }
     }
 }

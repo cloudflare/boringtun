@@ -179,4 +179,8 @@ impl Peer {
     pub fn preshared_key<'a>(&'a self) -> Option<&'a [u8; 32]> {
         self.preshared_key.as_ref()
     }
+
+    pub fn set_static_private(&self, static_private: &[u8]) {
+        self.tunnel.set_static_private(static_private)
+    }
 }
