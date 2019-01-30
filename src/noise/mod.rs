@@ -61,6 +61,7 @@ impl Tunn {
     pub fn new(
         static_private: &X25519Key,
         peer_static_public: &X25519Key,
+        preshared_key: Option<[u8; 32]>,
         index: u32,
     ) -> Result<Box<Tunn>, &'static str> {
         let tunn = Tunn {
@@ -68,6 +69,7 @@ impl Tunn {
                 static_private.as_bytes(),
                 peer_static_public.as_bytes(),
                 index << 8,
+                preshared_key,
             )),
 
             sessions: Default::default(),

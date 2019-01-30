@@ -171,7 +171,7 @@ mod tests {
         let static_private = static_private.parse().unwrap();
         let peer_static_public = peer_static_public.parse().unwrap();
 
-        let mut peer = Tunn::new(&static_private, &peer_static_public, 100).unwrap();
+        let mut peer = Tunn::new(&static_private, &peer_static_public, None, 100).unwrap();
         peer.set_logger(logger, Verbosity::Debug);
 
         let peer: Arc<Box<Tunn>> = Arc::from(peer);
@@ -435,8 +435,11 @@ Endpoint = :{}",
         let wg = WireGuardExt::start(endpoint, &c_key_pair.1);
         let c_addr = format!("localhost:{}", endpoint);
         let w_addr = format!("localhost:{}", wg.port);
-        let client_socket = UdpSocket::bind(&c_addr).unwrap_or_else(|e| panic!("UdpSocket {}: {}", c_addr, e));
-        client_socket.connect(&w_addr).unwrap_or_else(|e| panic!("connect {}: {}", w_addr, e));
+        let client_socket =
+            UdpSocket::bind(&c_addr).unwrap_or_else(|e| panic!("UdpSocket {}: {}", c_addr, e));
+        client_socket
+            .connect(&w_addr)
+            .unwrap_or_else(|e| panic!("connect {}: {}", w_addr, e));
 
         let close = Arc::new(AtomicBool::new(false));
 

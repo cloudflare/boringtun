@@ -177,7 +177,7 @@ pub unsafe extern "C" fn new_tunnel(
         Ok(key) => key,
     };
 
-    let mut tunnel = match Tunn::new(&private_key, &public_key, 0) {
+    let mut tunnel = match Tunn::new(&private_key, &public_key, None, 0) {
         Ok(t) => t,
         Err(_) => return ptr::null_mut(),
     };

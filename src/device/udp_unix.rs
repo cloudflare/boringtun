@@ -71,6 +71,27 @@ impl UDPSocket {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
+        match unsafe {
+            setsockopt(
+                self.fd,
+                SOL_SOCKET,
+                SO_MARK,
+                &mark as *const u32 as *const c_void,
+                std::mem::size_of_val(&mark) as _,
+            )
+        } {
+            -1 => Err(Error::SetSockOpt(errno_str())),
+            _ => Ok(()),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
+        Ok(())
+    }
+
     pub fn bind(self, port: u16) -> Result<UDPSocket, Error> {
         if self.version == 6 {
             return self.bind6(port);
@@ -268,61 +289,6 @@ impl UDPSocket {
             n @ _ => Ok(&mut dst[..n as usize]),
         }
     }
-
-    /*
-    pub fn read_32<'a>(
-        &self,
-        dst: &'a mut [([u8; 1536], usize)],
-    ) -> Result<&'a mut [([u8; 1536], usize)], Error> {
-        assert!(dst.len() >= 32);
-
-        let mut iovec: [iovec; 32] = unsafe { std::mem::zeroed() };
-        let mut msgvec: [mmsghdr; 32] = unsafe { std::mem::zeroed() };
-
-        for (
-            i,
-            mmsghdr {
-                msg_hdr:
-                    msghdr {
-                        msg_iov,
-                        msg_iovlen,
-                        ..
-                    },
-                ..
-            },
-        ) in msgvec.iter_mut().enumerate()
-        {
-            iovec[i] = iovec {
-                iov_base: &mut dst[i].0[0] as *mut u8 as _,
-                iov_len: dst[i].0.len(),
-            };
-            *msg_iovlen = 1;
-            *msg_iov = &mut iovec[i];
-        }
-
-        let n = unsafe {
-            recvmmsg(
-                self.fd,
-                &mut msgvec[0],
-                msgvec.len() as _,
-                0,
-                std::ptr::null_mut(),
-            )
-        };
-
-        if n == -1 {
-            return Err(Error::UDPRead(errno_str()));
-        }
-
-        let n = n as usize;
-
-        for i in 0..n {
-            dst[i].1 = msgvec[i].msg_len as usize;
-        }
-
-        Ok(&mut dst[..n])
-    }
-    */
 
     pub fn write(&self, src: &[u8]) -> usize {
         UDPSocket::write_fd(self.fd, src)

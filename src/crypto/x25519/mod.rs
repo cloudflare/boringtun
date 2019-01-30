@@ -67,6 +67,10 @@ impl X25519Key {
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
+
+    pub fn inner(self) -> [u8; 32] {
+        self.0
+    }
 }
 
 impl Add for Felem {

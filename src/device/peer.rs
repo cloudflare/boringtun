@@ -18,6 +18,7 @@ pub struct Peer {
     tx_bytes: AtomicUsize,
     endpoint: spin::RwLock<Endpoint>,
     allowed_ips: AllowedIps<()>,
+    preshared_key: Option<[u8; 32]>,
 }
 
 #[derive(Debug)]
@@ -50,6 +51,7 @@ impl Peer {
         endpoint: Option<SocketAddr>,
         allowed_ips: &Vec<AllowedIP>,
         keepalive: Option<u16>,
+        preshared_key: Option<[u8; 32]>,
     ) -> Peer {
         let mut peer = Peer {
             tunnel,
@@ -61,6 +63,7 @@ impl Peer {
                 conn: None,
             }),
             allowed_ips: Default::default(),
+            preshared_key,
         };
 
         for AllowedIP { addr, cidr } in allowed_ips {
@@ -171,5 +174,9 @@ impl Peer {
 
     pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
         self.tunnel.time_since_last_handshake()
+    }
+
+    pub fn preshared_key<'a>(&'a self) -> Option<&'a [u8; 32]> {
+        self.preshared_key.as_ref()
     }
 }

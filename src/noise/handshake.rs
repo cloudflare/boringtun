@@ -124,6 +124,7 @@ struct NoiseParams {
     static_shared: [u8; KEY_LEN],
     sending_mac1_key: [u8; KEY_LEN],
     receiving_mac1_key: [u8; KEY_LEN],
+    preshared_key: Option<[u8; KEY_LEN]>,
 }
 
 #[derive(Debug)]
@@ -238,22 +239,44 @@ pub fn parse_handshake_anon(
     })
 }
 
-impl Handshake {
-    pub fn new(static_private: &[u8], peer_static_public: &[u8], global_idx: u32) -> Handshake {
-        let static_public = x25519_public_key(static_private);
-
-        if constant_time_zero_key_check(&static_public) {
-            panic!("Zero key");
-        }
-
-        let params = NoiseParams {
+impl NoiseParams {
+    fn new(
+        static_public: [u8; 32],
+        static_private: &[u8],
+        peer_static_public: &[u8],
+        preshared_key: Option<[u8; 32]>,
+    ) -> NoiseParams {
+        NoiseParams {
             static_public,
             static_private: make_array(static_private),
             peer_static_public: make_array(peer_static_public),
             static_shared: x25519_shared_key(&peer_static_public, &static_private),
             sending_mac1_key: HASH!(LABEL_MAC1, peer_static_public),
             receiving_mac1_key: HASH!(LABEL_MAC1, static_public),
-        };
+            preshared_key,
+        }
+    }
+}
+
+impl Handshake {
+    pub fn new(
+        static_private: &[u8],
+        peer_static_public: &[u8],
+        global_idx: u32,
+        preshared_key: Option<[u8; 32]>,
+    ) -> Handshake {
+        let static_public = x25519_public_key(static_private);
+
+        if constant_time_zero_key_check(&static_public) {
+            panic!("Zero key");
+        }
+
+        let params = NoiseParams::new(
+            static_public,
+            static_private,
+            peer_static_public,
+            preshared_key,
+        );
 
         Handshake {
             params: params,
@@ -483,8 +506,10 @@ impl Handshake {
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = HMAC!(temp, [0x01]);
         // temp = HMAC(responder.chaining_key, preshared_key)
-        let preshared_key = [0u8; KEY_LEN]; // TODO: preshared key?
-        let temp = HMAC!(chaining_key, preshared_key);
+        let temp = HMAC!(
+            chaining_key,
+            &self.params.preshared_key.unwrap_or([0u8; 32])[..]
+        );
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = HMAC!(temp, [0x01]);
         // temp2 = HMAC(temp, responder.chaining_key || 0x2)

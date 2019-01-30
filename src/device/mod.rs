@@ -340,6 +340,7 @@ impl Device {
         endpoint: Option<SocketAddr>,
         allowed_ips: Vec<AllowedIP>,
         keepalive: Option<u16>,
+        preshared_key: Option<[u8; 32]>,
     ) {
         let device_key_pair = self
             .key_pair
@@ -349,8 +350,14 @@ impl Device {
         let next_index = self.next_index;
         self.next_index += 1;
 
-        let tunn = Tunn::new(&device_key_pair.0, &pub_key, next_index).unwrap();
-        let peer = Peer::new(tunn, endpoint, &allowed_ips, keepalive);
+        let tunn = Tunn::new(
+            &device_key_pair.0,
+            &pub_key,
+            preshared_key.clone(),
+            next_index,
+        )
+        .unwrap();
+        let peer = Peer::new(tunn, endpoint, &allowed_ips, keepalive, preshared_key);
 
         let peer = Arc::new(peer);
         self.peers.insert(pub_key, Arc::clone(&peer));
@@ -444,6 +451,10 @@ impl Device {
         }
         let public_key = private_key.public_key();
         self.key_pair = Some((private_key, public_key));
+    }
+
+    fn set_fwmark(&mut self, mark: u32) {
+        panic!("TODO: fwmark");
     }
 
     fn clear_peers(&mut self) {
