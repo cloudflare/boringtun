@@ -3,6 +3,7 @@ extern crate base64;
 extern crate hex;
 extern crate libc;
 extern crate rand;
+extern crate ring;
 extern crate spin;
 
 pub mod crypto;
