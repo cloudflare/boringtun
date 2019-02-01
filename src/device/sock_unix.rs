@@ -1,6 +1,7 @@
 use super::{errno_str, Descriptor, Error};
 use libc::*;
-use std::os::unix::io::RawFd;
+use std::fs::File;
+use std::os::unix::io::{FromRawFd, RawFd};
 
 // Accepts connections from the wg app
 #[derive(Default, Debug)]
@@ -99,29 +100,8 @@ impl UNIXSocket {
     }
 }
 
-impl UNIXConn {}
-/*
-
-use std::io::{self, Read, Write};
-impl<'a> Read for &UNIXConn {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match unsafe { read(self.fd, &mut buf[0] as *mut u8 as *mut c_void, buf.len()) } {
-            -1 => Err(io::Error::new(io::ErrorKind::Other, "UNIXConn read error")),
-            n @ _ => Ok(n as usize),
-        }
+impl UNIXConn {
+    pub fn as_file(&self) -> File {
+        unsafe { File::from_raw_fd(self.descriptor()) }
     }
 }
-
-impl<'a> Write for &UNIXConn {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match unsafe { write(self.fd, &buf[0] as *const u8 as *const c_void, buf.len()) } {
-            -1 => Err(io::Error::new(io::ErrorKind::Other, "UNIXConn read error")),
-            n @ _ => Ok(n as usize),
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-*/

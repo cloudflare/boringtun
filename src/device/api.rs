@@ -1,55 +1,53 @@
-use super::events::*;
 use super::*;
 use dev_lock::*;
 use hex::encode as encode_hex;
 use libc::*;
-use std::fs::File;
+use std::fs::{create_dir, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::mem::forget;
-use std::os::unix::io::{FromRawFd, RawFd};
 
-// This handler accepts connections from the wg app.
-pub const UNIX_SOCKET_HANDLER: HandlerFunction =
-    |_: RawFd, d: &mut LockReadGuard<Device>, e: Event| -> Option<()> {
-        if let Ok(conn) = d.api.accept() {
-            d.event_queue
-                .register_event(Event::new_event(
-                    conn.descriptor(),
-                    &API_HANDLER,
-                    EventType::None,
-                ))
-                .unwrap();
-            forget(conn); // Don't close the fd yet
-        }
-        d.event_queue.enable_event(e).unwrap();
-        None
-    };
+impl Device {
+    pub fn register_api_handler(&self) -> Result<(), Error> {
+        if let Err(_) = create_dir("/var/run/wireguard/") {};
+        let path = format!("/var/run/wireguard/{}.sock", self.iface.name()?);
 
-// This handler handles the actual API connection
-pub const API_HANDLER: HandlerFunction =
-    |fd: RawFd, d: &mut LockReadGuard<Device>, e: Event| -> Option<()> {
-        let file_conn = unsafe { File::from_raw_fd(fd) };
-        let mut reader = BufReader::new(&file_conn);
-        let mut writer = BufWriter::new(&file_conn);
-        let mut cmd = String::new();
+        let api_sock = UNIXSocket::new()
+            .and_then(|s| s.set_non_blocking())
+            .and_then(|s| s.bind(&path))
+            .and_then(|s| s.listen())?;
 
-        if let Ok(_) = reader.read_line(&mut cmd) {
-            cmd.pop(); // pop the new line character
-            let status = match cmd.as_ref() {
-                "get=1" => api_get(&mut writer, d),
-                "set=1" => api_set(&mut reader, d),
-                _ => Some(EIO),
-            };
+        let api_sock_ev = self.factory.new_event(
+            api_sock.descriptor(),
+            Box::new(move |d: &mut LockReadGuard<Device>| {
+                // This is the closure that listens on the api unix socket
+                let api_conn = match api_sock.accept() {
+                    Ok(conn) => conn,
+                    _ => return None,
+                };
 
-            writer
-                .write(format!("errno={}\n\n", status.unwrap_or(0)).as_ref())
-                .ok();
-        }
+                let api_conn = api_conn.as_file();
+                let mut reader = BufReader::new(&api_conn);
+                let mut writer = BufWriter::new(&api_conn);
+                let mut cmd = String::new();
+                if let Ok(_) = reader.read_line(&mut cmd) {
+                    cmd.pop(); // pop the new line character
+                    let status = match cmd.as_ref() {
+                        "get=1" => api_get(&mut writer, d),
+                        "set=1" => api_set(&mut reader, d),
+                        _ => Some(EIO),
+                    };
 
-        d.event_queue.remove_event(e).unwrap();
-        None
-        // Connection will be closed by File dropping here
-    };
+                    writer
+                        .write(format!("errno={}\n\n", status.unwrap_or(0)).as_ref())
+                        .ok();
+                }
+                None // Return None to indicate no further action is expected from the caller
+            }),
+            false,
+        );
+        self.factory.register_event(&self.queue, &api_sock_ev)?;
+        Ok(())
+    }
+}
 
 #[allow(unused_must_use)]
 fn api_get(writer: &mut BufWriter<&File>, d: &Device) -> Option<i32> {
@@ -85,7 +83,6 @@ fn api_get(writer: &mut BufWriter<&File>, d: &Device) -> Option<i32> {
         writer.write(format!("rx_bytes={}\n", p.get_rx_bytes()).as_ref());
         writer.write(format!("tx_bytes={}\n", p.get_tx_bytes()).as_ref());
     }
-
     None
 }
 
@@ -96,9 +93,9 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> Opti
         return Some(EIO);
     }
     let mut write_mark = want_write.unwrap();
-    write_mark.event_queue.trigger_notification(); // Notify other threads we want to write
+    write_mark.trigger_notifier();
     let mut device = write_mark.write();
-    device.event_queue.stop_notification(); // Let the other threads know we have the lock
+    device.cancel_notifier();
 
     let mut cmd = String::new();
 

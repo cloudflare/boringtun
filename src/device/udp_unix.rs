@@ -145,7 +145,7 @@ impl UDPSocket {
     }
 
     fn connect4(self, dst: &SocketAddrV4) -> Result<UDPSocket, Error> {
-        assert_eq!(self.version, 4);
+        // assert_eq!(self.version, 4);
         let addr = sockaddr_in {
             #[cfg(target_os = "macos")]
             sin_len: std::mem::size_of::<sockaddr_in>() as u8,
@@ -170,7 +170,7 @@ impl UDPSocket {
     }
 
     fn connect6(self, dst: &SocketAddrV6) -> Result<UDPSocket, Error> {
-        assert_eq!(self.version, 6);
+        // assert_eq!(self.version, 6);
         let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
         addr.sin6_family = AF_INET6 as _;
         addr.sin6_port = dst.port().to_be();
@@ -196,7 +196,7 @@ impl UDPSocket {
     }
 
     fn sendto4(&self, buf: &[u8], dst: SocketAddrV4) -> usize {
-        assert_eq!(self.version, 4);
+        // assert_eq!(self.version, 4);
 
         let addr = sockaddr_in {
             #[cfg(target_os = "macos")]
@@ -225,7 +225,7 @@ impl UDPSocket {
     }
 
     fn sendto6(&self, buf: &[u8], dst: SocketAddrV6) -> usize {
-        assert_eq!(self.version, 6);
+        // assert_eq!(self.version, 6);
 
         let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
         addr.sin6_family = AF_INET6 as _;
@@ -299,5 +299,9 @@ impl UDPSocket {
             -1 => 0,
             n @ _ => n as usize,
         }
+    }
+
+    pub fn shutdown(&self) {
+        unsafe { shutdown(self.fd, SHUT_RDWR) };
     }
 }

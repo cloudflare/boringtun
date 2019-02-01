@@ -144,6 +144,7 @@ pub enum HandshakeState {
         peer_ephemeral_public: [u8; KEY_LEN],
         peer_index: u32,
     }, // Handshake initiated by peer
+    Expired,
 }
 
 #[derive(Debug)]
@@ -293,7 +294,7 @@ impl Handshake {
 
     pub fn is_in_progress(&self) -> bool {
         match self.state {
-            HandshakeState::None => false,
+            HandshakeState::None | HandshakeState::Expired => false,
             _ => true,
         }
     }
@@ -305,8 +306,15 @@ impl Handshake {
         }
     }
 
-    pub fn clear(&mut self) {
-        self.state = HandshakeState::None;
+    pub fn expired(&mut self) {
+        self.state = HandshakeState::Expired;
+    }
+
+    pub fn is_expired(&self) -> bool {
+        match self.state {
+            HandshakeState::Expired => true,
+            _ => false,
+        }
     }
 
     pub fn has_cookie(&self) -> bool {

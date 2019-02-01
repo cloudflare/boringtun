@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[derive(Default, Debug)]
 pub struct Endpoint {
     pub addr: Option<SocketAddr>,
-    pub conn: Option<UDPSocket>,
+    pub conn: Option<Arc<UDPSocket>>,
 }
 
 pub struct Peer {
@@ -89,60 +89,46 @@ impl Peer {
         self.endpoint.read()
     }
 
-    pub fn set_endpoint(&self, addr: SocketAddr, sock: Option<UDPSocket>) {
+    pub fn set_endpoint(&self, addr: SocketAddr) {
         let mut endpoint = self.endpoint.write();
         if endpoint.addr != Some(addr) {
+            // We only need to update the endpoint if it differs from the current one
+
+            if let Some(ref conn) = endpoint.conn {
+                conn.shutdown();
+            }
+
             *endpoint = Endpoint {
                 addr: Some(addr),
-                conn: sock,
+                conn: None, // TODO: shutdown sock
             }
         };
     }
 
-    pub fn connected_endpoint(
-        &self,
-        d: &Device,
-        p: &Arc<Peer>,
-    ) -> Option<spin::RwLockReadGuard<'_, Endpoint>> {
-        {
-            // In the common case this is called by the iface handler and we have a connection
-            let endpoint = self.endpoint.read();
-            if let Endpoint { conn: Some(_), .. } = *endpoint {
-                return Some(endpoint);
-            };
+    pub fn connect_endpoint(&self, port: u16) -> Result<Arc<UDPSocket>, Error> {
+        let mut endpoint = self.endpoint.write();
+
+        if let Some(_) = endpoint.conn {
+            return Err(Error::Connect("Connected".to_owned()));
         }
 
-        // In some cases we don't have a connection established, but have an endpoint address we can connect to
-        {
-            let mut endpoint = self.endpoint.write();
-            if let Endpoint {
-                addr: Some(ref addr),
-                ref mut conn,
-            } = *endpoint
-            {
-                let new_connection = UDPSocket::new()
-                    .and_then(|s| s.set_non_blocking())
-                    .and_then(|s| s.set_reuse_port())
-                    .and_then(|s| s.bind(d.listen_port))
-                    .and_then(|s| s.connect(addr))
-                    .unwrap();
+        let udp_conn = Arc::new(match endpoint.addr {
+            Some(addr @ SocketAddr::V4(_)) => UDPSocket::new()
+                .and_then(|s| s.set_non_blocking())
+                .and_then(|s| s.set_reuse_port())
+                .and_then(|s| s.bind(port))
+                .and_then(|s| s.connect(&addr))?,
+            Some(addr @ SocketAddr::V6(_)) => UDPSocket::new6()
+                .and_then(|s| s.set_non_blocking())
+                .and_then(|s| s.set_reuse_port())
+                .and_then(|s| s.bind(port))
+                .and_then(|s| s.connect(&addr))?,
+            None => panic!("Attempt to connect to undefined endpoint"),
+        });
 
-                d.event_queue
-                    .register_event(Event::new_read_event(
-                        &new_connection,
-                        &CONNECTED_SOCKET_HANDLER,
-                        EventType::ConnectedPeer(Arc::clone(p)),
-                    ))
-                    .unwrap();
+        endpoint.conn = Some(Arc::clone(&udp_conn));
 
-                *conn = Some(new_connection);
-            } else {
-                // No connection and no address to connect to
-                return None;
-            }
-        }
-
-        return self.connected_endpoint(d, p); // Will return the connection with a read lock
+        Ok(udp_conn)
     }
 
     pub fn add_rx_bytes(&self, amt: usize) {

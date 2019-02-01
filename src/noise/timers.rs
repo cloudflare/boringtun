@@ -65,6 +65,8 @@ impl Tunn {
     }
 
     pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
+        let mut hanshake_initiation_required = false;
+
         let time = Instant::now();
         let timers = &self.timers;
 
@@ -76,84 +78,86 @@ impl Tunn {
         let time_session_established = self.timer(TimerName::TimeSessionEstablished);
         let time_last_packet_sent = self.timer(TimerName::TimeLastPacketSent);
 
-        let mut hanshake_initiation_required = false;
-
         {
-            if let Some(mut handshake) = self.handshake.try_lock() {
-                // Clear cookie after COOKIE_EXPIRATION_TIME
-                if handshake.has_cookie() {
-                    let time_cookie_received = self.timer(TimerName::TimeCookieReceived);
-                    if time_current - time_cookie_received >= COOKIE_EXPIRATION_TIME {
-                        handshake.clear_cookie();
+            let mut handshake = match self.handshake.try_lock() {
+                Some(handshake) => handshake,
+                None => return TunnResult::Done,
+            };
+
+            if handshake.is_expired() {
+                return TunnResult::Err(WireGuardError::ConnectionExpired);
+            }
+
+            // Clear cookie after COOKIE_EXPIRATION_TIME
+            if handshake.has_cookie() {
+                let time_cookie_received = self.timer(TimerName::TimeCookieReceived);
+                if time_current - time_cookie_received >= COOKIE_EXPIRATION_TIME {
+                    handshake.clear_cookie();
+                }
+            }
+
+            if handshake.is_in_progress() {
+                if let Some(time_init_sent) = handshake.timer() {
+                    let time_since_init_sent =
+                        time.duration_since(time_init_sent).as_secs() as usize;
+                    let time_since_started = self.timer(TimerName::TimeLastHandshakeStarted);
+
+                    if time_current - time_since_started >= REKEY_ATTEMPT_TIME {
+                        // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
+                        // the retries give up and cease, and clear all existing packets queued
+                        // up to be sent. If a packet is explicitly queued up to be sent, then
+                        // this timer is reset.
+                        handshake.expired();
+
+                        for session in &self.sessions {
+                            *session.write() = None;
+                        }
+
+                        {
+                            let mut queued = self.packet_queue.lock();
+                            queued.clear();
+                        }
+
+                        self.log(Verbosity::Debug, "HANDSHAKE(REKEY_ATTEMPT_TIME)");
+                        return TunnResult::Err(WireGuardError::ConnectionExpired);
+                    }
+
+                    if time_since_init_sent >= REKEY_TIMEOUT {
+                        // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
+                        // if a response has not been received, where jitter is some random
+                        // value between 0 and 333 ms.
+                        self.log(Verbosity::Debug, "HANDSHAKE_RETRY(REKEY_TIMEOUT)");
+                        hanshake_initiation_required = true;
                     }
                 }
+            } else {
+                // If we have sent a packet to a given peer but have not received a
+                // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
+                // we initiate a new handshake.
+                let time_last_packet_received = self.timer(TimerName::TimeLastPacketReceived);
+                if time_current - time_last_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT {
+                    self.log(Verbosity::Debug, "HANDSHAKE(REKEY_TIMEOUT)");
+                    hanshake_initiation_required = true;
+                }
 
-                // If can't lock, then something is being upated anyway
-                if handshake.is_in_progress() {
-                    if let Some(time_init_sent) = handshake.timer() {
-                        let time_since_init_sent =
-                            time.duration_since(time_init_sent).as_secs() as usize;
-                        let time_since_started = self.timer(TimerName::TimeLastHandshakeStarted);
-
-                        if time_current - time_since_started >= REKEY_ATTEMPT_TIME {
-                            // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
-                            // the retries give up and cease, and clear all existing packets queued
-                            // up to be sent. If a packet is explicitly queued up to be sent, then
-                            // this timer is reset.
-                            handshake.clear();
-
-                            for session in &self.sessions {
-                                *session.write() = None;
-                            }
-
-                            {
-                                let mut queued = self.packet_queue.lock();
-                                queued.clear();
-                            }
-
-                            self.log(Verbosity::Debug, "HANDSHAKE(REKEY_ATTEMPT_TIME)");
-
-                            return TunnResult::Err(WireGuardError::ConnectionExpired);
-                        }
-
-                        if time_since_init_sent >= REKEY_TIMEOUT {
-                            // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
-                            // if a response has not been received, where jitter is some random
-                            // value between 0 and 333 ms.
-                            self.log(Verbosity::Debug, "HANDSHAKE_RETRY(REKEY_TIMEOUT)");
-                            hanshake_initiation_required = true;
-                        }
-                    }
+                let rekey_after = if timers.is_initiator.load(Ordering::Relaxed) {
+                    // After sending a packet, if the sender was the original initiator
+                    // of the handshake and if the current session key is REKEY_AFTER_TIME
+                    // ms old, we initiate a new handshake. If the sender was the original
+                    // responder of the handshake, it does not reinitiate a new handshake
+                    // after REKEY_AFTER_TIME ms like the original initiator does.
+                    REKEY_AFTER_TIME
                 } else {
-                    // If we have sent a packet to a given peer but have not received a
-                    // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
-                    // we initiate a new handshake.
-                    let time_last_packet_received = self.timer(TimerName::TimeLastPacketReceived);
-                    if time_current - time_last_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
-                    {
-                        self.log(Verbosity::Debug, "HANDSHAKE(REKEY_TIMEOUT)");
-                        hanshake_initiation_required = true;
-                    }
+                    // After receiving a packet, if the receiver was the original initiator
+                    // of the handshake and if the current session key is REKEY_AFTER_TIME
+                    // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
+                    // handshake.
+                    REKEY_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
+                };
 
-                    let rekey_after = if timers.is_initiator.load(Ordering::Relaxed) {
-                        // After sending a packet, if the sender was the original initiator
-                        // of the handshake and if the current session key is REKEY_AFTER_TIME
-                        // ms old, we initiate a new handshake. If the sender was the original
-                        // responder of the handshake, it does not reinitiate a new handshake
-                        // after REKEY_AFTER_TIME ms like the original initiator does.
-                        REKEY_AFTER_TIME
-                    } else {
-                        // After receiving a packet, if the receiver was the original initiator
-                        // of the handshake and if the current session key is REKEY_AFTER_TIME
-                        // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
-                        // handshake.
-                        REKEY_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
-                    };
-
-                    if time_current - time_session_established >= rekey_after {
-                        self.log(Verbosity::Debug, "HANDSHAKE(REKEY_AFTER_TIME_TIMEOUT)");
-                        hanshake_initiation_required = true;
-                    }
+                if time_current - time_session_established >= rekey_after {
+                    self.log(Verbosity::Debug, "HANDSHAKE(REKEY_AFTER_TIME_TIMEOUT)");
+                    hanshake_initiation_required = true;
                 }
             }
         }
@@ -181,9 +185,7 @@ impl Tunn {
         // out after (REJECT_AFTER_TIME * 3) ms if no new keys have been
         // exchanged.
 
-        //  TODO: since a session is closed after REJECT_AFTER_TIME seconds
-        //  there is little value of zeroing the keys on the client side, if
-        //  it is compromised, the keys are the least of our worries.
+        //  TODO: ?
 
         // After sending a packet, if the number of packets sent using that
         // key exceed REKEY_AFTER_MESSAGES, we initiate a new handshake.

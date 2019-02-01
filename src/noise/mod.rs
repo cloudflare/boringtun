@@ -91,6 +91,14 @@ impl Tunn {
         self.verbosity = verbosity;
     }
 
+    /// Update the private key and clear existing sessions
+    pub fn set_static_private(&self, static_private: &[u8]) {
+        self.handshake.lock().set_static_private(static_private);
+        for s in &self.sessions {
+            *s.write() = None;
+        }
+    }
+
     /// Receives an IP packet from the tunnel interface and encapsulates it.
     /// Returns wireguard_result.
     /// # Panics
@@ -198,10 +206,14 @@ impl Tunn {
             return TunnResult::Done;
         }
 
+        let starting_new_handshake = !handshake.is_in_progress();
+
         match handshake.format_handshake_initiation(dst) {
             Ok(packet) => {
                 self.log(Verbosity::Debug, "Sending handshake_initiation");
-                self.timer_tick(TimerName::TimeLastHandshakeStarted);
+                if starting_new_handshake {
+                    self.timer_tick(TimerName::TimeLastHandshakeStarted);
+                }
                 self.timer_tick(TimerName::TimeLastPacketSent);
                 TunnResult::WriteToNetwork(packet)
             }
@@ -344,14 +356,6 @@ impl Tunn {
             if self.verbosity >= lvl {
                 logger.lock()(entry)
             }
-        }
-    }
-
-    /// Update the private key and clear existing sessions
-    pub fn set_static_private(&self, static_private: &[u8]) {
-        self.handshake.lock().set_static_private(static_private);
-        for s in &self.sessions {
-            *s.write() = None;
         }
     }
 }

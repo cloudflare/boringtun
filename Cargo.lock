@@ -267,8 +267,8 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
-name = "wireguard_cf"
-version = "0.1.0"
+name = "wireguard-cf"
+version = "0.2.0"
 dependencies = [
  "base64 0.9.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",

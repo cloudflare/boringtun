@@ -30,6 +30,7 @@ pub enum EventType {
 pub struct EventData {
     fd: RawFd,
     handler: &'static HandlerFunction,
+    handler_cl: Option<Box<Fn() -> Option<()>>>,
     pub extra: EventType,
 }
 
@@ -39,7 +40,25 @@ impl Event {
         let udata = Box::into_raw(Box::new(EventData {
             fd: trigger,
             handler,
+            handler_cl: None,
             extra,
+        }));
+
+        Event {
+            event: epoll_event {
+                events: (EPOLLIN | EPOLLONESHOT) as _,
+                u64: udata as *mut EventData as _,
+            },
+        }
+    }
+
+    // Create a new event that can be registered with the queue
+    pub fn new_event2(trigger: RawFd, handler: Box<Fn() -> Option<()>>) -> Event {
+        let udata = Box::into_raw(Box::new(EventData {
+            fd: trigger,
+            handler: &super::CONNECTED_SOCKET_HANDLER,
+            handler_cl: Some(handler),
+            extra: EventType::None,
         }));
 
         Event {
@@ -61,6 +80,7 @@ impl Event {
     {
         let udata = Box::into_raw(Box::new(EventData {
             fd: trigger.descriptor(),
+            handler_cl: None,
             handler,
             extra,
         }));
@@ -164,6 +184,7 @@ impl EventQueue {
         let udata = Box::into_raw(Box::new(EventData {
             fd: self.efd,
             handler: &super::COOP_HANDLER,
+            handler_cl: None,
             extra: EventType::None,
         }));
 
@@ -208,6 +229,7 @@ impl EventQueue {
 
         let udata = Box::into_raw(Box::new(EventData {
             fd: self.timerfd,
+            handler_cl: None,
             handler: handler,
             extra: EventType::None,
         }));
