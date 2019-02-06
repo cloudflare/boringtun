@@ -298,7 +298,8 @@ impl Tunn {
                 ]),
             ),
             _ if packet[0] >> 4 == 6 && packet.len() >= IPV6_MIN_HEADER_SIZE => (
-                u16::from_be_bytes([packet[IPV6_LEN_OFF], packet[IPV6_LEN_OFF + 1]]) as usize,
+                u16::from_be_bytes([packet[IPV6_LEN_OFF], packet[IPV6_LEN_OFF + 1]]) as usize
+                    + IPV6_MIN_HEADER_SIZE,
                 IpAddr::from([
                     packet[IPV6_SRC_IP_OFF],
                     packet[IPV6_SRC_IP_OFF + 1],
