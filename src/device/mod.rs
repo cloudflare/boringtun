@@ -495,19 +495,21 @@ impl Device {
                             None => continue,
                         };
 
-                        let endpoint_addr = match peer.endpoint().addr {
-                            Some(addr) => addr,
-                            None => continue,
-                        };
-
                         match peer.encapsulate(src, &mut dst[..]) {
                             TunnResult::Done => {}
                             TunnResult::Err(e) => eprintln!("Encapsulate error {:?}", e),
                             TunnResult::WriteToNetwork(packet) => {
-                                peer.add_tx_bytes(match endpoint_addr {
-                                    SocketAddr::V4(_) => udp4.sendto(packet, endpoint_addr),
-                                    SocketAddr::V6(_) => udp6.sendto(packet, endpoint_addr),
-                                });
+                                let endpoint = peer.endpoint();
+                                if let Some(ref conn) = endpoint.conn {
+                                    // Prefer to send using the connected socket
+                                    peer.add_tx_bytes(conn.write(packet));
+                                } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
+                                    peer.add_tx_bytes(udp4.sendto(packet, addr));
+                                } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
+                                    peer.add_tx_bytes(udp6.sendto(packet, addr));
+                                } else {
+                                    eprintln!("No endpoint for peer");
+                                }
                             }
                             _ => panic!("Unexpected result from encapsulate"),
                         };
