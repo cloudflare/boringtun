@@ -79,7 +79,10 @@ fn parse_utun_name(name: &str) -> Result<u32, Error> {
         return Ok(0);
     }
 
-    name[4..].parse().map_err(|_| Error::InvalidTunnelName).map(|x| x+1)
+    name[4..]
+        .parse::<u32>()
+        .map_err(|_| Error::InvalidTunnelName)
+        .map(|x| x + 1)
 }
 
 impl TunSocket {

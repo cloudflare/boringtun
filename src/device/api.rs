@@ -11,7 +11,6 @@ impl Device {
         let path = format!("/var/run/wireguard/{}.sock", self.iface.name()?);
 
         let api_sock = UNIXSocket::new()
-            .and_then(|s| s.set_non_blocking())
             .and_then(|s| s.bind(&path))
             .and_then(|s| s.listen())?;
 

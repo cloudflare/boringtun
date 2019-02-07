@@ -2,6 +2,9 @@ pub mod allowed_ips;
 pub mod api;
 pub mod dev_lock;
 pub mod peer;
+#[cfg_attr(any(target_os = "macos", target_os = "ios"), path = "kqueue.rs")]
+#[cfg_attr(target_os = "linux", path = "epoll.rs")]
+pub mod poll;
 #[cfg_attr(unix, path = "sock_unix.rs")]
 pub mod sock;
 #[cfg_attr(any(target_os = "macos", target_os = "ios"), path = "tun_darwin.rs")]
@@ -9,8 +12,6 @@ pub mod sock;
 pub mod tun;
 #[cfg_attr(unix, path = "udp_unix.rs")]
 pub mod udp;
-
-pub mod event_factory;
 
 use crypto::x25519::X25519Key;
 use noise::handshake::*;
@@ -22,10 +23,10 @@ use std::sync::Arc;
 
 use allowed_ips::*;
 use dev_lock::*;
-use event_factory::*;
 use noise::errors::*;
 use noise::*;
 use peer::*;
+use poll::*;
 use sock::*;
 use tun::*;
 use udp::*;
