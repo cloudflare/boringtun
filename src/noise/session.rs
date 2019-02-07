@@ -1,5 +1,5 @@
 use noise::errors::WireGuardError;
-use noise::h2n::*;
+use noise::make_array;
 use ring::aead::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -36,7 +36,7 @@ const AEAD_SIZE: usize = 16;
 
 // Receiving buffer constants
 const WORD_SIZE: u64 = 64;
-const N_WORDS: u64 = 16; // Suffice to reorder 8*16 = 512 packets; can be increased at will
+const N_WORDS: u64 = 16; // Suffice to reorder 64*16 = 1024 packets; can be increased at will
 const N_BITS: u64 = WORD_SIZE * N_WORDS;
 
 #[derive(Debug, Clone, Default)]
@@ -168,16 +168,14 @@ impl Session {
         }
 
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
-        write_u32(
-            PACKET_DATA_TYPE,
-            &mut dst[MSG_TYPE_OFF..MSG_TYPE_OFF + MSG_TYPE_SZ],
-        );
-        write_u32(self.sending_index, &mut dst[IDX_OFF..IDX_OFF + IDX_SZ]);
-        write_u64(sending_key_counter, &mut dst[CTR_OFF..CTR_OFF + CTR_SZ]);
+        dst[MSG_TYPE_OFF..MSG_TYPE_OFF + MSG_TYPE_SZ]
+            .copy_from_slice(&PACKET_DATA_TYPE.to_le_bytes());
+        dst[IDX_OFF..IDX_OFF + IDX_SZ].copy_from_slice(&self.sending_index.to_le_bytes());
+        dst[CTR_OFF..CTR_OFF + CTR_SZ].copy_from_slice(&sending_key_counter.to_le_bytes());
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
 
         let mut nonce = [0u8; 12];
-        write_u64(sending_key_counter, &mut nonce[4..12]);
+        nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
 
         dst[DATA_OFF..DATA_OFF + src.len()].copy_from_slice(src);
         let n = seal_in_place(
@@ -205,12 +203,12 @@ impl Session {
             // This is a very incorrect use of the library, therefore panic and not error
             panic!("The destination buffer is too small");
         }
-        let message_type = read_u32(&src[MSG_TYPE_OFF..MSG_TYPE_OFF + MSG_TYPE_SZ]);
+        let message_type = u32::from_le_bytes(make_array(&src[MSG_TYPE_OFF..]));
         if message_type != PACKET_DATA_TYPE {
             return Err(WireGuardError::WrongPacketType);
         }
-        let receiver_index = read_u32(&src[IDX_OFF..IDX_OFF + IDX_SZ]);
-        let receiving_key_counter = read_u64(&src[CTR_OFF..CTR_OFF + CTR_SZ]);
+        let receiver_index = u32::from_le_bytes(make_array(&src[IDX_OFF..]));
+        let receiving_key_counter = u64::from_le_bytes(make_array(&src[CTR_OFF..]));
         if receiver_index != self.receiving_index {
             return Err(WireGuardError::WrongIndex);
         }
@@ -218,7 +216,7 @@ impl Session {
         self.receiving_counter_quick_check(receiving_key_counter)?;
 
         let mut nonce = [0u8; 12];
-        write_u64(receiving_key_counter, &mut nonce[4..12]);
+        nonce[4..12].copy_from_slice(&receiving_key_counter.to_le_bytes());
         dst[..src.len() - DATA_OFF].copy_from_slice(&src[DATA_OFF..]);
         open_in_place(
             &self.receiver,

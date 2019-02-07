@@ -3,7 +3,6 @@ mod tests {
     use super::super::*;
     use base64::encode;
     use crypto::x25519::*;
-    use noise::h2n::{read_u16_be, write_u32_be};
     use std::fs;
     use std::fs::File;
     use std::io::prelude::Write;
@@ -95,7 +94,7 @@ mod tests {
     fn ipv4_checksum(buf: &[u8]) -> u16 {
         let mut sum = 0u32;
         for i in 0..buf.len() / 2 {
-            sum += read_u16_be(&buf[i * 2..]) as u32;
+            sum += u16::from_be_bytes([buf[i * 2], buf[i * 2 + 1]]) as u32;
         }
         if buf.len() % 2 == 1 {
             sum += (buf[buf.len() - 1] as u32) << 8;
@@ -117,8 +116,10 @@ mod tests {
         write_u16_be(packet_len as u16, &mut ipv4_header[2..]); // packet length
         ipv4_header[8] = 64; // TTL
         ipv4_header[9] = 1; // ICMP
-        write_u32_be(0xC0A80202, &mut ipv4_header[12..]); // src ip = 192.168.2.2
-        write_u32_be(0xC0A80200 + ip as u32, &mut ipv4_header[16..]); // dst ip = 192.168.2.ip
+
+        ipv4_header[12..16].copy_from_slice(&0xC0A80202u32.to_be_bytes()); // src ip = 192.168.2.2
+        ipv4_header[16..20].copy_from_slice(&(0xC0A80200u32 + ip as u32).to_be_bytes()); // dst ip = 192.168.2.ip
+
         let checksum = ipv4_checksum(&ipv4_header);
         write_u16_be(checksum, &mut ipv4_header[10..]);
 
@@ -133,7 +134,6 @@ mod tests {
         // Compute the checkusm of the icmp header + payload
         let icmp_checksum = ipv4_checksum(&packet[20..]);
         write_u16_be(icmp_checksum, &mut packet[20 + 2..]);
-
         socket.send(&packet).unwrap();
     }
 
@@ -150,7 +150,7 @@ mod tests {
             let ipv4_header = &data[..hdr_len];
             assert_eq!(ipv4_header[9], 1); // ICMP
             let icmp_header = &data[hdr_len..hdr_len + 8];
-            let seq = read_u16_be(&icmp_header[6..]);
+            let seq = u16::from_be_bytes([icmp_header[6], icmp_header[7]]);
             assert_eq!(seq, want_seq);
 
             packet.extend_from_slice(&data[hdr_len + 8..len]);
@@ -339,20 +339,20 @@ mod tests {
                 write_ipv4_packet(&peer_iface_socket_sender, &data_string);
             });
 
-            for _i in 0..256 {
+            for _i in 0..64 {
                 write_ipv4_packet(&client_iface_socket_sender, b"test");
             }
 
-            for _i in 0..256 {
+            for _i in 0..64 {
                 let response = read_ipv4_packet(&client_iface_socket_sender);
                 assert_eq!(&response, b"TEST");
             }
 
-            for _i in 0..256 {
+            for _i in 0..64 {
                 write_ipv4_packet(&client_iface_socket_sender, b"check");
             }
 
-            for _i in 0..256 {
+            for _i in 0..64 {
                 let response = read_ipv4_packet(&client_iface_socket_sender);
                 assert_eq!(&response, b"CHECK");
             }
@@ -388,7 +388,7 @@ PrivateKey = {}
 [Peer]
 PublicKey = {}
 AllowedIPs = 192.168.2.2/32
-Endpoint = :{}",
+Endpoint = localhost:{}",
                     ip, port, key_pair.0, public_key, endpoint,
                 )
                 .as_bytes(),
@@ -452,7 +452,7 @@ Endpoint = :{}",
         );
 
         c_iface
-            .set_read_timeout(Some(Duration::from_millis(50)))
+            .set_read_timeout(Some(Duration::from_millis(200)))
             .unwrap();
 
         for i in 0..10000 {
@@ -489,7 +489,7 @@ Endpoint = :{}",
         );
 
         c_iface
-            .set_read_timeout(Some(Duration::from_millis(50)))
+            .set_read_timeout(Some(Duration::from_millis(200)))
             .unwrap();
 
         let t_addr = format!("192.168.2.{}:{}", wg.ip, NEXT_PORT.next());

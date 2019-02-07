@@ -1,5 +1,4 @@
 pub mod errors;
-pub mod h2n;
 pub mod handshake;
 mod session;
 mod tests;
@@ -358,4 +357,16 @@ impl Tunn {
             }
         }
     }
+}
+
+#[inline(always)]
+pub fn make_array<A, T>(slice: &[T]) -> A
+where
+    A: Sized + Default + AsMut<[T]> + std::borrow::Borrow<[T]>,
+    T: Copy,
+{
+    let mut arr: A = Default::default();
+    let arr_len = arr.borrow().len();
+    <A as AsMut<[T]>>::as_mut(&mut arr).copy_from_slice(&slice[0..arr_len]);
+    arr
 }

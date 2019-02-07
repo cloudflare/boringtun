@@ -2,7 +2,7 @@ use crypto::blake2s::{constant_time_mac_check, Blake2s};
 use crypto::chacha20poly1305::ChaCha20Poly1305;
 use crypto::x25519::{x25519_public_key, x25519_shared_key};
 use noise::errors::WireGuardError;
-use noise::h2n::{read_u32, read_u32_be, read_u64_be, write_u32, write_u32_be, write_u64_be};
+use noise::make_array;
 use noise::session::Session;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -82,8 +82,8 @@ impl TimeStamper {
         const TAI64_BASE: u64 = (1u64 << 62) + 37;
         let mut ext_stamp = [0u8; 12];
         let stamp = Instant::now().duration_since(self.instant_at_start) + self.duration_at_start;
-        write_u64_be(stamp.as_secs() + TAI64_BASE, &mut ext_stamp[0..12]);
-        write_u32_be(stamp.subsec_nanos(), &mut ext_stamp[8..12]);
+        ext_stamp[0..8].copy_from_slice(&(stamp.as_secs() + TAI64_BASE).to_be_bytes());
+        ext_stamp[8..12].copy_from_slice(&stamp.subsec_nanos().to_be_bytes());
         ext_stamp
     }
 }
@@ -98,8 +98,8 @@ impl Tai64N {
             return Err(WireGuardError::InvalidTai64nTimestamp);
         }
 
-        let secs = read_u64_be(&buf[0..8]);
-        let nano = read_u32_be(&buf[8..12]);
+        let secs = u64::from_be_bytes(make_array(&buf[0..]));
+        let nano = u32::from_be_bytes(make_array(&buf[8..]));
 
         // wireguard does not actually expect tai64n timestamp, just monotonically increasing one
         //if secs < (1u64 << 62) || secs >= (1u64 << 63) {
@@ -108,6 +108,7 @@ impl Tai64N {
         //if nano >= 1_000_000_000 {
         //   return Err(WireGuardError::InvalidTai64nTimestamp);
         //}
+
         return Ok(Tai64N { secs, nano });
     }
 
@@ -192,7 +193,7 @@ pub fn parse_handshake_anon(
     }
     // msg.message_type = 1
     // msg.reserved_zero = { 0, 0, 0 }
-    let message_type = read_u32(&src[MSG_TYPE_OFF..MSG_TYPE_OFF + MSG_TYPE_SZ]);
+    let message_type = u32::from_le_bytes(make_array(&src[MSG_TYPE_OFF..]));
     if message_type != 1 {
         return Err(WireGuardError::WrongPacketType);
     }
@@ -208,7 +209,7 @@ pub fn parse_handshake_anon(
     let mut hash = INITIAL_CHAIN_HASH;
     hash = HASH!(hash, static_public);
     // msg.sender_index = little_endian(initiator.sender_index)
-    let peer_index = read_u32(&src[SND_IDX_OFF..SND_IDX_OFF + SND_IDX_SZ]);
+    let peer_index = u32::from_le_bytes(make_array(&src[SND_IDX_OFF..]));
     // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
     let peer_ephemeral_public = &src[EPH_OFF..EPH_OFF + EPH_SZ];
     // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
@@ -374,9 +375,9 @@ impl Handshake {
         self.rng.fill_bytes(&mut ephemeral_private[..]);
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
-        write_u32(1, &mut dst[MSG_TYPE_OFF..]);
+        dst[MSG_TYPE_OFF..MSG_TYPE_OFF + 4].copy_from_slice(&1u32.to_le_bytes());
         // msg.sender_index = little_endian(initiator.sender_index)
-        write_u32(local_index, &mut dst[SND_IDX_OFF..]);
+        dst[SND_IDX_OFF..SND_IDX_OFF + 4].copy_from_slice(&local_index.to_le_bytes());
         //msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
         dst[EPH_OFF..EPH_OFF + EPH_SZ].copy_from_slice(&x25519_public_key(&ephemeral_private));
         // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
@@ -481,14 +482,13 @@ impl Handshake {
 
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
-        let message_type = read_u32(&src[MSG_TYPE_OFF..MSG_TYPE_OFF + MSG_TYPE_SZ]);
+        let message_type = u32::from_le_bytes(make_array(&src[MSG_TYPE_OFF..]));
         if message_type != 2 {
             return Err(WireGuardError::WrongPacketType);
         }
 
-        let peer_index = read_u32(&src[SND_IDX_OFF..SND_IDX_OFF + SND_IDX_SZ]);
-
-        let rcv_index = read_u32(&src[RCV_IDX_OFF..RCV_IDX_OFF + RCV_IDX_SZ]);
+        let peer_index = u32::from_le_bytes(make_array(&src[SND_IDX_OFF..]));
+        let rcv_index = u32::from_le_bytes(make_array(&src[RCV_IDX_OFF..]));
         if rcv_index != local_index {
             return Err(WireGuardError::WrongIndex);
         }
@@ -591,12 +591,12 @@ impl Handshake {
         };
         // msg.message_type = 3
         // msg.reserved_zero = { 0, 0, 0 }
-        let message_type = read_u32(&src[MSG_TYPE_OFF..MSG_TYPE_OFF + MSG_TYPE_SZ]);
+        let message_type = u32::from_le_bytes(make_array(&src[MSG_TYPE_OFF..]));
         if message_type != 3 {
             return Err(WireGuardError::WrongPacketType);
         }
         // msg.receiver_index = little_endian(initiator.sender_index)
-        let rcv_index = read_u32(&src[RCV_IDX_OFF..RCV_IDX_OFF + RCV_IDX_SZ]);
+        let rcv_index = u32::from_le_bytes(make_array(&src[RCV_IDX_OFF..]));
         if rcv_index != local_index {
             return Err(WireGuardError::WrongIndex);
         }
@@ -645,7 +645,7 @@ impl Handshake {
 
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
-        let message_type = read_u32(&src[MSG_TYPE_OFF..MSG_TYPE_OFF + MSG_TYPE_SZ]);
+        let message_type = u32::from_le_bytes(make_array(&src[MSG_TYPE_OFF..]));
         if message_type != 1 {
             return Err(WireGuardError::WrongPacketType);
         }
@@ -661,7 +661,7 @@ impl Handshake {
         let mut hash = INITIAL_CHAIN_HASH;
         hash = HASH!(hash, self.params.static_public);
         // msg.sender_index = little_endian(initiator.sender_index)
-        let peer_index = read_u32(&src[SND_IDX_OFF..SND_IDX_OFF + SND_IDX_SZ]);
+        let peer_index = u32::from_le_bytes(make_array(&src[SND_IDX_OFF..]));
         // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
         let peer_ephemeral_public = &src[EPH_OFF..EPH_OFF + EPH_SZ];
         // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
@@ -773,11 +773,11 @@ impl Handshake {
         self.rng.fill_bytes(&mut ephemeral_private[..]);
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
-        write_u32(2, &mut dst[MSG_TYPE_OFF..]);
+        dst[MSG_TYPE_OFF..MSG_TYPE_OFF + 4].copy_from_slice(&2u32.to_le_bytes());
         // msg.sender_index = little_endian(responder.sender_index)
-        write_u32(local_index, &mut dst[SND_IDX_OFF..]);
+        dst[SND_IDX_OFF..SND_IDX_OFF + 4].copy_from_slice(&local_index.to_le_bytes());
         // msg.receiver_index = little_endian(initiator.sender_index)
-        write_u32(peer_index, &mut dst[RCV_IDX_OFF..]);
+        dst[RCV_IDX_OFF..RCV_IDX_OFF + 4].copy_from_slice(&peer_index.to_le_bytes());
         // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
         dst[EPH_OFF..EPH_OFF + EPH_SZ].copy_from_slice(&x25519_public_key(&ephemeral_private));
         // responder.hash = HASH(responder.hash || msg.unencrypted_ephemeral)
@@ -854,16 +854,6 @@ impl Handshake {
             Session::new(local_index, peer_index, temp2, temp3),
         ))
     }
-}
-
-fn make_array<A, T>(slice: &[T]) -> A
-where
-    A: Sized + Default + AsMut<[T]>,
-    T: Copy,
-{
-    let mut arr = Default::default();
-    <A as AsMut<[T]>>::as_mut(&mut arr).copy_from_slice(slice);
-    arr
 }
 
 fn constant_time_key_check(key1: &[u8], key2: &[u8]) -> Result<(), WireGuardError> {

@@ -351,16 +351,16 @@ impl Device {
                             }
                         }
                         HANDSHAKE_RESPONSE => {
-                            let peer_idx = super::noise::h2n::read_u32(&packet[8..12]) >> 8;
+                            let peer_idx = u32::from_le_bytes(make_array(&packet[8..])) >> 8;
                             peers_by_idx.get(&peer_idx)
                         }
                         COOKIE_REPLY => {
-                            let peer_idx = super::noise::h2n::read_u32(&packet[4..8]) & !0xff;
+                            let peer_idx = u32::from_le_bytes(make_array(&packet[4..])) & !0xff;
                             peers_by_idx.get(&peer_idx)
                         }
                         (4, 32...std::usize::MAX) => {
                             // A data packet, with at least a header
-                            let peer_idx = super::noise::h2n::read_u32(&packet[4..8]) & !0xff;
+                            let peer_idx = u32::from_le_bytes(make_array(&packet[4..])) & !0xff;
                             peers_by_idx.get(&peer_idx)
                         }
                         _ => continue,
