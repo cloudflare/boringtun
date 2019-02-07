@@ -19,4 +19,3 @@ jni = "0.10.2"
 
 [lib]
 crate-type = ["lib", "staticlib"]
-

@@ -254,7 +254,7 @@ impl Device {
             Box::new(|d: &mut LockReadGuard<Device>| {
                 // The timed event will check timer expiration of the peers
                 // TODO: split into several timers
-                let mut dst = [0u8; MAX_UDP_SIZE];
+                let mut dst: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
                 let peer_map = &d.peers;
 
                 let udp4 = d.udp4.as_ref();
@@ -317,8 +317,8 @@ impl Device {
                 const HANDSHAKE_RESPONSE: (u8, usize) = (2, 92);
                 const COOKIE_REPLY: (u8, usize) = (3, 64);
 
-                let mut src = [0u8; MAX_UDP_SIZE];
-                let mut dst = [0u8; MAX_UDP_SIZE];
+                let mut src: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
+                let mut dst: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
                 let mut iter = MAX_ITR;
 
                 let key_pair = &d.key_pair;
@@ -420,8 +420,8 @@ impl Device {
                 // The conn_handler handles packet received from a connected UDP socket, associated
                 // with a known peer, this saves us the hustle of finding the right peer. If another
                 // peer gets the same ip, it will be ignored until the socket does not expire.
-                let mut src = [0u8; MAX_UDP_SIZE];
-                let mut dst = [0u8; MAX_UDP_SIZE];
+                let mut src: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
+                let mut dst: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
                 let iface = &d.iface;
                 let mut iter = MAX_ITR;
 
@@ -433,7 +433,8 @@ impl Device {
                             peer.add_tx_bytes(udp.write(packet));
                             {
                                 // Flush pending queue
-                                let mut tmp = [0u8; MAX_UDP_SIZE];
+                                let mut tmp: [u8; MAX_UDP_SIZE] =
+                                    unsafe { std::mem::uninitialized() };
                                 while let TunnResult::WriteToNetwork(packet) =
                                     peer.decapsulate(&[], &mut tmp[..])
                                 {
@@ -477,8 +478,8 @@ impl Device {
                 // * Determine peer based on packet destination ip
                 // * Encapsulate the packet for the given peer
                 // * Send encapsulated packet to the peer's endpoint
-                let mut src = [0u8; MAX_UDP_SIZE];
-                let mut dst = [0u8; MAX_UDP_SIZE];
+                let mut src: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
+                let mut dst: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
                 let udp4 = d.udp4.as_ref().expect("Not connected");
                 let udp6 = d.udp6.as_ref().expect("Not connected");
 
