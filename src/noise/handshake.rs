@@ -799,8 +799,10 @@ impl Handshake {
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = HMAC!(temp, [0x01]);
         // temp = HMAC(responder.chaining_key, preshared_key)
-        let preshared_key = [0u8; KEY_LEN]; // TODO: preshared key?
-        let temp = HMAC!(chaining_key, preshared_key);
+        let temp = HMAC!(
+            chaining_key,
+            &self.params.preshared_key.unwrap_or([0u8; 32])[..]
+        );
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = HMAC!(temp, [0x01]);
         // temp2 = HMAC(temp, responder.chaining_key || 0x2)
