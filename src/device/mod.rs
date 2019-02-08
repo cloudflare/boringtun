@@ -113,6 +113,7 @@ impl Device {
     fn next_index(&mut self) -> u32 {
         let next_index = self.next_index;
         self.next_index += 1;
+        assert!(next_index < (1 << 24), "Too many peers created");
         next_index
     }
 
@@ -138,16 +139,21 @@ impl Device {
         preshared_key: Option<[u8; 32]>,
     ) {
         if remove {
+            // Completely remove a peer
             return self.remove_peer(&pub_key);
         }
 
-        let next_index = self.next_index();
+        // Update an existing peer
+        if let Some(_) = self.peers.get(&pub_key) {
+            // We already have a peer, we need to merge the existing config into the newly created one
+            panic!("Changin existing peers is not supported. Remove and add again instead.");
+        }
 
+        let next_index = self.next_index();
         let device_key_pair = self
             .key_pair
             .as_ref()
             .expect("Private key must be set first");
-
         let mut tunn = Tunn::new(
             &device_key_pair.0,
             &pub_key,

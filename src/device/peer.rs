@@ -12,8 +12,8 @@ pub struct Endpoint {
 }
 
 pub struct Peer {
-    tunnel: Box<Tunn>, // The associated tunnel struct
-    index: u32,
+    tunnel: Box<Tunn>,      // The associated tunnel struct
+    index: u32,             // The index the tunnel uses
     keepalive: Option<u16>, // Optional keepalive
     rx_bytes: AtomicUsize,
     tx_bytes: AtomicUsize,
