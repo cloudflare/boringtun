@@ -163,9 +163,13 @@ impl Device {
         .unwrap();
 
         {
-            let pub_key = pub_key.clone();
+            let pub_key = pub_key.as_bytes();
+            let peer_name = format!(
+                "peer({:02x}{:02x}…{:02x}{:02x})",
+                pub_key[0], pub_key[1], pub_key[30], pub_key[31]
+            );
             tunn.set_logger(
-                Box::new(move |e: &str| eprintln!("{:?}: {}", pub_key, e)),
+                Box::new(move |e: &str| println!("{:?} {} {}", chrono::Utc::now(), peer_name, e)),
                 Verbosity::from(Verbosity::Debug),
             );
         }

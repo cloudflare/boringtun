@@ -9,6 +9,7 @@ hex = "0.3.2"
 rand = "0.5.5"
 libc = "0.2"
 ring = "0.14"
+chrono = "0.4"
 
 [dependencies.spin]
 version = "0.4"

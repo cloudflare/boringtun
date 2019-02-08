@@ -134,6 +134,11 @@ impl Peer {
             None => panic!("Attempt to connect to undefined endpoint"),
         });
 
+        self.log(
+            Verbosity::Debug,
+            &format!("Connected endpoint :{}->{}", port, endpoint.addr.unwrap()),
+        );
+
         endpoint.conn = Some(Arc::clone(&udp_conn));
 
         Ok(udp_conn)
@@ -180,5 +185,9 @@ impl Peer {
 
     pub fn index(&self) -> u32 {
         self.index
+    }
+
+    pub fn log(&self, level: Verbosity, e: &str) {
+        self.tunnel.log(level, e)
     }
 }
