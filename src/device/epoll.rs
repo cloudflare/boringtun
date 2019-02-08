@@ -304,6 +304,20 @@ impl<H> EventPoll<H> {
         }
 
         let event_data = unsafe { (event.u64 as *mut Event<H>).as_ref().unwrap() };
+
+        if event.events & EPOLLHUP as u32 != 0 {
+            // On EOF we remove the event from the queue (for example socket shutdown)
+            // TODO: let the caller control this case
+            for queue in event_data.queues.iter() {
+                unsafe {
+                    epoll_ctl(*queue, EPOLL_CTL_DEL, event_data.fd, null_mut());
+                }
+            }
+            // Drop
+            unsafe { Box::from_raw(event.u64 as *mut Event<H>) };
+            return Err(Error::EventQueue("Event dropped (EOF)".to_owned()));
+        }
+
         Ok(EventGuard {
             epoll: self.epoll,
             event: &event_data,
