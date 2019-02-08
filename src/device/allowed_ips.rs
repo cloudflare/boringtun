@@ -37,6 +37,11 @@ impl<D> AllowedIps<D> {
         }
     }
 
+    pub fn remove(&mut self, predicate: &Fn(&D) -> bool) {
+        remove32(&mut self.v4, predicate);
+        remove128(&mut self.v6, predicate);
+    }
+
     pub fn iter<'a>(&'a self) -> Iter<'a, D> {
         Iter::new(&self.v4, &self.v6)
     }
@@ -85,7 +90,7 @@ macro_rules! mask_key {
 }
 
 macro_rules! build_node {
-    ($name: ident, $find: ident, $insert: ident, $keyt: ty) => {
+    ($name: ident, $find: ident, $remove: ident, $insert: ident, $keyt: ty) => {
         enum $name<D> {
             Node($keyt, usize, Box<Option<$name<D>>>, Box<Option<$name<D>>>),
             Leaf($keyt, usize, D), // Leaf node, keyt: part of the key to match, usize: how much to match, D: data on match
@@ -125,6 +130,24 @@ macro_rules! build_node {
                     }
                 }
             }
+        }
+
+        fn $remove<D>(node: &mut Option<$name<D>>, predicate: &Fn(&D) -> bool) {
+            match node {
+                None => return,
+                Some($name::Node(_, _, ref mut left, ref mut right)) => {
+                    $remove(left, predicate);
+                    $remove(right, predicate);
+                    return;
+                }
+                Some($name::Leaf(_, _, ref cur_data)) => {
+                    if !predicate(cur_data) {
+                        return;
+                    }
+                }
+            }
+            // If we got here the node contains the data we want to remove
+            *node = None
         }
 
         fn $insert<D>(node: &mut Option<$name<D>>, key: $keyt, bits: usize, data: D) {
@@ -249,10 +272,15 @@ macro_rules! build_iter {
         impl<'a, D> Iterator for $name<'a, D> {
             type Item = (&'a D, $keyt, usize);
             fn next(&mut self) -> Option<Self::Item> {
+                const BITS: usize = std::mem::size_of::<$keyt>() * 8; // Bits in key
+                const BM1: usize = BITS - 1; // Bits in key minus one
+
                 while !self.stack.is_empty() {
                     let node = self.stack.pop().unwrap();
                     match node {
-                        None => return None,
+                        None => {
+                            self.key_hlp.pop();
+                        }
                         Some($node::Leaf(key, bits, data)) => {
                             let (cur_key, cur_bits) = self.key_hlp.pop().unwrap();
                             return Some((data, cur_key ^ (key >> cur_bits), cur_bits + bits));
@@ -266,7 +294,7 @@ macro_rules! build_iter {
                             self.stack.push(left);
 
                             self.key_hlp
-                                .push((cur_key ^ (1 << (31 - cur_bits)), cur_bits + 1));
+                                .push((cur_key ^ (1 << (BM1 - cur_bits)), cur_bits + 1));
                             self.key_hlp.push((cur_key, cur_bits + 1));
                         }
                     }
@@ -277,8 +305,8 @@ macro_rules! build_iter {
     };
 }
 
-build_node!(Node32, find32, insert32, u32);
-build_node!(Node128, find128, insert128, u128);
+build_node!(Node32, find32, remove32, insert32, u32);
+build_node!(Node128, find128, remove128, insert128, u128);
 
 build_iter!(Iter32, Node32, u32);
 build_iter!(Iter128, Node128, u128);
@@ -319,24 +347,40 @@ mod tests {
         );
         assert_eq!(map.find(IpAddr::from([553, 0, 0, 1, 0, 0, 0, 1])), None);
 
-        let mut map_iter = map.iter();
-        assert_eq!(map_iter.next().unwrap().0, "peer6");
-        assert_eq!(map_iter.next().unwrap().0, "peer5");
-        assert_eq!(map_iter.next().unwrap().0, "peer2");
-        assert_eq!(map_iter.next().unwrap().0, "peer3");
-        assert_eq!(map_iter.next().unwrap().0, "peer4");
-        assert_eq!(map_iter.next().unwrap().0, "peer7");
-        assert_eq!(map_iter.next(), None);
+        {
+            let mut map_iter = map.iter();
+            assert_eq!(map_iter.next().unwrap().0, "peer6");
+            assert_eq!(map_iter.next().unwrap().0, "peer5");
+            assert_eq!(map_iter.next().unwrap().0, "peer2");
+            assert_eq!(map_iter.next().unwrap().0, "peer3");
+            assert_eq!(map_iter.next().unwrap().0, "peer4");
+            assert_eq!(map_iter.next().unwrap().0, "peer7");
+            assert_eq!(map_iter.next(), None);
+        }
+        {
+            let mut map_iter = map.iter();
+            assert_eq!(map_iter.next().unwrap().1, IpAddr::from([45, 25, 15, 0]));
+            assert_eq!(map_iter.next().unwrap().1, IpAddr::from([60, 25, 15, 1]));
+            assert_eq!(map_iter.next().unwrap().1, IpAddr::from([127, 0, 0, 0]));
+            assert_eq!(map_iter.next().unwrap().1, IpAddr::from([127, 1, 15, 0]));
+            assert_eq!(map_iter.next().unwrap().1, IpAddr::from([255, 1, 15, 0]));
+            assert_eq!(
+                map_iter.next().unwrap().1,
+                IpAddr::from([553, 0, 0, 1, 0, 0, 0, 0])
+            );
+        }
 
-        let mut map_iter = map.iter();
-        assert_eq!(map_iter.next().unwrap().1, IpAddr::from([45, 25, 15, 0]));
-        assert_eq!(map_iter.next().unwrap().1, IpAddr::from([60, 25, 15, 1]));
-        assert_eq!(map_iter.next().unwrap().1, IpAddr::from([127, 0, 0, 0]));
-        assert_eq!(map_iter.next().unwrap().1, IpAddr::from([127, 1, 15, 0]));
-        assert_eq!(map_iter.next().unwrap().1, IpAddr::from([255, 1, 15, 0]));
-        assert_eq!(
-            map_iter.next().unwrap().1,
-            IpAddr::from([553, 0, 0, 1, 0, 0, 0, 0])
-        );
+        map.remove(&|s: &String| s == "peer5");
+        assert_eq!(map.find(IpAddr::from([60, 25, 15, 1])), None);
+
+        {
+            let mut map_iter = map.iter();
+            assert_eq!(map_iter.next().unwrap().0, "peer6");
+            assert_eq!(map_iter.next().unwrap().0, "peer2");
+            assert_eq!(map_iter.next().unwrap().0, "peer3");
+            assert_eq!(map_iter.next().unwrap().0, "peer4");
+            assert_eq!(map_iter.next().unwrap().0, "peer7");
+            assert_eq!(map_iter.next(), None);
+        }
     }
 }

@@ -12,7 +12,8 @@ pub struct Endpoint {
 }
 
 pub struct Peer {
-    tunnel: Box<Tunn>,      // The associated tunnel struct
+    tunnel: Box<Tunn>, // The associated tunnel struct
+    index: u32,
     keepalive: Option<u16>, // Optional keepalive
     rx_bytes: AtomicUsize,
     tx_bytes: AtomicUsize,
@@ -48,6 +49,7 @@ impl FromStr for AllowedIP {
 impl Peer {
     pub fn new(
         tunnel: Box<Tunn>,
+        index: u32,
         endpoint: Option<SocketAddr>,
         allowed_ips: &Vec<AllowedIP>,
         keepalive: Option<u16>,
@@ -55,6 +57,7 @@ impl Peer {
     ) -> Peer {
         let mut peer = Peer {
             tunnel,
+            index,
             keepalive,
             rx_bytes: AtomicUsize::new(0),
             tx_bytes: AtomicUsize::new(0),
@@ -89,18 +92,23 @@ impl Peer {
         self.endpoint.read()
     }
 
+    pub fn shutdown_endpoint(&self) {
+        if let Some(conn) = self.endpoint.write().conn.take() {
+            conn.shutdown();
+        }
+    }
+
     pub fn set_endpoint(&self, addr: SocketAddr) {
         let mut endpoint = self.endpoint.write();
         if endpoint.addr != Some(addr) {
             // We only need to update the endpoint if it differs from the current one
-
-            if let Some(ref conn) = endpoint.conn {
+            if let Some(conn) = endpoint.conn.take() {
                 conn.shutdown();
             }
 
             *endpoint = Endpoint {
                 addr: Some(addr),
-                conn: None, // TODO: shutdown sock
+                conn: None,
             }
         };
     }
@@ -168,5 +176,9 @@ impl Peer {
 
     pub fn set_static_private(&self, static_private: &[u8]) {
         self.tunnel.set_static_private(static_private)
+    }
+
+    pub fn index(&self) -> u32 {
+        self.index
     }
 }

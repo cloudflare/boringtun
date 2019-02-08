@@ -116,16 +116,31 @@ impl Device {
         next_index
     }
 
+    fn remove_peer(&mut self, pub_key: &X25519Key) {
+        if let Some(peer) = self.peers.remove(pub_key) {
+            // Found a peer to remove, now perge all references to is:
+            peer.shutdown_endpoint(); // close open udp socket and free the closure
+            self.peers_by_idx.remove(&peer.index()); // peers_by_idx
+            self.peers_by_ip
+                .remove(&|p: &Arc<Peer>| Arc::ptr_eq(&peer, p));
+            self.peers_by_ip.clear(); // peers_by_ip
+        }
+    }
+
     fn update_peer(
         &mut self,
         pub_key: X25519Key,
-        _remove: bool,
+        remove: bool,
         _replace_ips: bool,
         endpoint: Option<SocketAddr>,
         allowed_ips: Vec<AllowedIP>,
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
     ) {
+        if remove {
+            return self.remove_peer(&pub_key);
+        }
+
         let next_index = self.next_index();
 
         let device_key_pair = self
@@ -149,7 +164,14 @@ impl Device {
             );
         }
 
-        let peer = Peer::new(tunn, endpoint, &allowed_ips, keepalive, preshared_key);
+        let peer = Peer::new(
+            tunn,
+            next_index,
+            endpoint,
+            &allowed_ips,
+            keepalive,
+            preshared_key,
+        );
 
         let peer = Arc::new(peer);
         self.peers.insert(pub_key, Arc::clone(&peer));

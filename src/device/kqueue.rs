@@ -132,10 +132,11 @@ where
         };
         events.resize(new_len, None);
 
-        assert_eq!(
-            events[index], None,
-            "Did not properly dispose of previous event"
-        );
+        // TODO: need to remove an event assosiated with a reused fd
+        //assert_eq!(
+        //    events[index], None,
+        //    "Did not properly dispose of previous event"
+        //);
 
         events[index] = Some(data);
     }
@@ -317,6 +318,19 @@ impl<H> EventPoll<H> {
         }
 
         let event_data = unsafe { (event.udata as *mut Event<H>).as_ref().unwrap() };
+
+        if event.flags & EV_EOF != 0 {
+            // On EOF we remove the event from the queue (for example socket shutdown)
+            // TODO: let the caller control this case
+            for queue in event_data.queues.iter() {
+                event.flags = EV_DELETE;
+                unsafe { kevent(*queue, &event, 1, null_mut(), 0, null()) };
+            }
+            // Drop
+            unsafe { Box::from_raw(event.udata as *mut Event<H>) };
+            return Err(Error::EventQueue("Event dropped (EOF)".to_owned()));
+        }
+
         Ok(EventGuard {
             epoll: self.epoll,
             event: &event_data,
