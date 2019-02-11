@@ -3,7 +3,6 @@ extern crate base64;
 extern crate chrono;
 extern crate hex;
 extern crate libc;
-extern crate rand;
 extern crate ring;
 extern crate spin;
 

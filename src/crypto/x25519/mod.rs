@@ -1,12 +1,11 @@
 mod tests;
 
 use base64::decode;
-use rand::rngs::OsRng;
-use rand::RngCore;
 use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
 use std::str::FromStr;
+use ring::rand::*;
 
 #[derive(Debug, Eq, PartialEq, Hash, Default, Clone)]
 // TODO: implement Hash
@@ -513,9 +512,9 @@ fn write_u64(buf: &mut [u8], val: u64) {
 }
 
 pub fn x25519_gen_secret_key() -> [u8; 32] {
-    let mut rng = OsRng::new().unwrap();
+    let rng = SystemRandom::new();
     let mut private_key = [0u8; 32];
-    rng.fill_bytes(&mut private_key[..]);
+    rng.fill(&mut private_key[..]).unwrap();
     return private_key;
 }
 

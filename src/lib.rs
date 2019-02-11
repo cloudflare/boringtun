@@ -4,7 +4,6 @@ extern crate hex;
 #[cfg(target_os = "android")]
 extern crate jni;
 extern crate libc;
-extern crate rand;
 extern crate ring;
 extern crate spin;
 

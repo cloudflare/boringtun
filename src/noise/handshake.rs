@@ -4,8 +4,7 @@ use crypto::x25519::{x25519_public_key, x25519_shared_key};
 use noise::errors::WireGuardError;
 use noise::make_array;
 use noise::session::Session;
-use rand::rngs::OsRng;
-use rand::RngCore;
+use ring::rand::*;
 use std::time::{Duration, Instant, SystemTime};
 
 // static CONSTRUCTION: &'static [u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
@@ -148,11 +147,10 @@ pub enum HandshakeState {
     Expired,
 }
 
-#[derive(Debug)]
 pub struct Handshake {
     params: NoiseParams,
     next_index: u32,
-    rng: OsRng,
+    rng: SystemRandom,
     state: HandshakeState,
     cookie: Option<[u8; 16]>,
     last_handshake_timestamp: Tai64N,
@@ -285,7 +283,7 @@ impl Handshake {
         Handshake {
             params: params,
             next_index: global_idx,
-            rng: OsRng::new().unwrap(),
+            rng: SystemRandom::new(),
             state: HandshakeState::None,
             cookie: None,
             last_handshake_timestamp: Tai64N::zero(),
@@ -372,7 +370,7 @@ impl Handshake {
         hash = HASH!(hash, self.params.peer_static_public);
         // initiator.ephemeral_private = DH_GENERATE()
         let mut ephemeral_private = [0u8; KEY_LEN];
-        self.rng.fill_bytes(&mut ephemeral_private[..]);
+        self.rng.fill(&mut ephemeral_private[..]).unwrap();
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
         dst[MSG_TYPE_OFF..MSG_TYPE_OFF + 4].copy_from_slice(&1u32.to_le_bytes());
@@ -770,7 +768,7 @@ impl Handshake {
         // responder.ephemeral_private = DH_GENERATE()
         let mut ephemeral_private = [0u8; KEY_LEN];
         let local_index = self.inc_index();
-        self.rng.fill_bytes(&mut ephemeral_private[..]);
+        self.rng.fill(&mut ephemeral_private[..]).unwrap();
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
         dst[MSG_TYPE_OFF..MSG_TYPE_OFF + 4].copy_from_slice(&2u32.to_le_bytes());
