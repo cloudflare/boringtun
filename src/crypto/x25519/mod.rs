@@ -1,11 +1,12 @@
 mod tests;
 
 use base64::decode;
+use noise::make_array;
+use ring::rand::*;
 use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
 use std::str::FromStr;
-use ring::rand::*;
 
 #[derive(Debug, Eq, PartialEq, Hash, Default, Clone)]
 // TODO: implement Hash
@@ -25,12 +26,11 @@ impl FromStr for X25519Key {
                 if decoded_key.len() != key.0.len() {
                     return Err("Illegal key size".to_owned());
                 } else {
-                    &key.0[..].copy_from_slice(&decoded_key);
+                    key.0[..].copy_from_slice(&decoded_key);
                     return Ok(key);
                 }
             }
             // Try to parse as base 64
-
             return Err("Illegal key size".to_owned());
         }
 
@@ -47,7 +47,7 @@ impl FromStr for X25519Key {
 impl<'a> From<&'a [u8]> for X25519Key {
     fn from(slice: &[u8]) -> Self {
         let mut key = [0u8; 32];
-        &key[..].copy_from_slice(slice);
+        key[..].copy_from_slice(slice);
         X25519Key(key)
     }
 }
@@ -72,41 +72,43 @@ impl X25519Key {
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(suspicious_arithmetic_impl))]
 impl Add for Felem {
     type Output = Felem;
     #[inline(always)]
     fn add(self, other: Felem) -> Felem {
-        let x0 = self.0[0] as u128;
-        let x1 = self.0[1] as u128;
-        let x2 = self.0[2] as u128;
-        let x3 = self.0[3] as u128;
+        let x0 = u128::from(self.0[0]);
+        let x1 = u128::from(self.0[1]);
+        let x2 = u128::from(self.0[2]);
+        let x3 = u128::from(self.0[3]);
 
-        let y0 = other.0[0] as u128;
-        let y1 = other.0[1] as u128;
-        let y2 = other.0[2] as u128;
-        let y3 = other.0[3] as u128;
+        let y0 = u128::from(other.0[0]);
+        let y1 = u128::from(other.0[1]);
+        let y2 = u128::from(other.0[2]);
+        let y3 = u128::from(other.0[3]);
 
-        let mut acc0 = x0 + y0;
-        let mut acc1 = x1 + y1 + (acc0 >> 64);
-        acc0 = acc0 as u64 as u128;
-        let mut acc2 = x2 + y2 + (acc1 >> 64);
-        acc1 = acc1 as u64 as u128;
-        let mut acc3 = x3 + y3 + (acc2 >> 64);
-        acc2 = acc2 as u64 as u128;
+        let mut acc0 = x0.wrapping_add(y0);
+        let mut acc1 = x1.wrapping_add(y1).wrapping_add(acc0 >> 64);
+        let mut acc2 = x2.wrapping_add(y2).wrapping_add(acc1 >> 64);
+        let mut acc3 = x3.wrapping_add(y3).wrapping_add(acc2 >> 64);
 
-        let mut top = acc3 >> 63;
-        acc3 &= 0x7fffffffffffffff;
+        let mut top = (acc3 >> 63) & 0xffff_ffff_ffff_ffff;
+        acc0 &= 0xffff_ffff_ffff_ffff;
+        acc1 &= 0xffff_ffff_ffff_ffff;
+        acc2 &= 0xffff_ffff_ffff_ffff;
+        acc3 &= 0x7fff_ffff_ffff_ffff;
 
-        top *= 19;
-        acc0 += top;
-        acc1 += acc0 >> 64;
-        acc2 += acc1 >> 64;
-        acc3 += acc2 >> 64;
+        top = top.wrapping_mul(19);
+        acc0 = acc0.wrapping_add(top);
+        acc1 = acc1.wrapping_add(acc0 >> 64);
+        acc2 = acc2.wrapping_add(acc1 >> 64);
+        acc3 = acc3.wrapping_add(acc2 >> 64);
 
         Felem([acc0 as u64, acc1 as u64, acc2 as u64, acc3 as u64])
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(suspicious_arithmetic_impl))]
 impl Sub for Felem {
     type Output = Felem;
     #[inline(always)]
@@ -118,144 +120,153 @@ impl Sub for Felem {
             0x1fffffffffffffffe,
         ];
 
-        let x0 = self.0[0] as u128;
-        let x1 = self.0[1] as u128;
-        let x2 = self.0[2] as u128;
-        let x3 = self.0[3] as u128;
+        let x0 = u128::from(self.0[0]);
+        let x1 = u128::from(self.0[1]);
+        let x2 = u128::from(self.0[2]);
+        let x3 = u128::from(self.0[3]);
 
-        let y0 = other.0[0] as u128;
-        let y1 = other.0[1] as u128;
-        let y2 = other.0[2] as u128;
-        let y3 = other.0[3] as u128;
+        let y0 = u128::from(other.0[0]);
+        let y1 = u128::from(other.0[1]);
+        let y2 = u128::from(other.0[2]);
+        let y3 = u128::from(other.0[3]);
 
-        let mut acc0 = POLY_X4[0] + x0 - y0;
-        let mut acc1 = POLY_X4[1] + x1 + (acc0 >> 64) - y1;
-        acc0 = acc0 as u64 as u128;
-        let mut acc2 = POLY_X4[2] + x2 + (acc1 >> 64) - y2;
-        acc1 = acc1 as u64 as u128;
-        let mut acc3 = POLY_X4[3] + x3 + (acc2 >> 64) - y3;
-        acc2 = acc2 as u64 as u128;
+        let mut acc0 = POLY_X4[0].wrapping_sub(y0).wrapping_add(x0);
+        let mut acc1 = POLY_X4[1]
+            .wrapping_sub(y1)
+            .wrapping_add(x1)
+            .wrapping_add(acc0 >> 64);
+        let mut acc2 = POLY_X4[2]
+            .wrapping_sub(y2)
+            .wrapping_add(x2)
+            .wrapping_add(acc1 >> 64);
+        let mut acc3 = POLY_X4[3]
+            .wrapping_sub(y3)
+            .wrapping_add(x3)
+            .wrapping_add(acc2 >> 64);
 
-        let mut top = acc3 >> 63;
-        acc3 &= 0x7fffffffffffffff;
+        let mut top = (acc3 >> 63) & 0xffff_ffff_ffff_ffff;
+        acc0 &= 0xffff_ffff_ffff_ffff;
+        acc1 &= 0xffff_ffff_ffff_ffff;
+        acc2 &= 0xffff_ffff_ffff_ffff;
+        acc3 &= 0x7fff_ffff_ffff_ffff;
 
-        top *= 19;
-        acc0 += top;
-        acc1 += acc0 >> 64;
-        acc2 += acc1 >> 64;
-        acc3 += acc2 >> 64;
+        top = top.wrapping_mul(19);
+        acc0 = acc0.wrapping_add(top);
+        acc1 = acc1.wrapping_add(acc0 >> 64);
+        acc2 = acc2.wrapping_add(acc1 >> 64);
+        acc3 = acc3.wrapping_add(acc2 >> 64);
 
         Felem([acc0 as u64, acc1 as u64, acc2 as u64, acc3 as u64])
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(suspicious_arithmetic_impl))]
 impl Mul for Felem {
     type Output = Felem;
     #[inline(always)]
     fn mul(self, other: Felem) -> Felem {
-        let x0 = self.0[0] as u128;
-        let x1 = self.0[1] as u128;
-        let x2 = self.0[2] as u128;
-        let x3 = self.0[3] as u128;
-
-        let mut t: u128;
+        let x0 = u128::from(self.0[0]);
+        let x1 = u128::from(self.0[1]);
+        let x2 = u128::from(self.0[2]);
+        let x3 = u128::from(self.0[3]);
 
         // y0
-        let y0 = other.0[0] as u128;
-        t = x0.wrapping_mul(y0);
-        let acc0 = t as u64;
+        let y0 = u128::from(other.0[0]);
+        let mut t = x0.wrapping_mul(y0);
+        let acc0 = t & 0xffff_ffff_ffff_ffff;
         let mut acc1 = t >> 64;
 
         t = x1.wrapping_mul(y0);
-        acc1 += t;
+        acc1 = acc1.wrapping_add(t);
         let mut acc2 = acc1 >> 64;
-        acc1 = (acc1 as u64) as u128;
+        acc1 &= 0xffff_ffff_ffff_ffff;
 
         t = x2.wrapping_mul(y0);
-        acc2 += t;
+        acc2 = acc2.wrapping_add(t);
         let mut acc3 = acc2 >> 64;
-        acc2 = (acc2 as u64) as u128;
+        acc2 &= 0xffff_ffff_ffff_ffff;
 
         t = x3.wrapping_mul(y0);
-        acc3 += t;
+        acc3 = acc3.wrapping_add(t);
         let mut acc4 = acc3 >> 64;
-        acc3 = (acc3 as u64) as u128;
+        acc3 &= 0xffff_ffff_ffff_ffff;
 
         // y1
-        let y1 = other.0[1] as u128;
+        let y1 = u128::from(other.0[1]);
         t = x0.wrapping_mul(y1);
-        acc1 += t;
+        acc1 = acc1.wrapping_add(t);
         let mut top = acc1 >> 64;
-        acc1 = (acc1 as u64) as u128;
+        acc1 &= 0xffff_ffff_ffff_ffff;
 
         t = x1.wrapping_mul(y1);
-        acc2 += top;
-        acc2 += t;
+        acc2 = acc2.wrapping_add(top);
+        acc2 = acc2.wrapping_add(t);
         top = acc2 >> 64;
-        acc2 = (acc2 as u64) as u128;
+        acc2 &= 0xffff_ffff_ffff_ffff;
 
         t = x2.wrapping_mul(y1);
-        acc3 += top;
-        acc3 += t;
+        acc3 = acc3.wrapping_add(top);
+        acc3 = acc3.wrapping_add(t);
         top = acc3 >> 64;
-        acc3 = (acc3 as u64) as u128;
+        acc3 &= 0xffff_ffff_ffff_ffff;
 
         t = x3.wrapping_mul(y1);
-        acc4 += top;
-        acc4 += t;
+        acc4 = acc4.wrapping_add(top);
+        acc4 = acc4.wrapping_add(t);
         let mut acc5 = acc4 >> 64;
-        acc4 = (acc4 as u64) as u128;
+        acc4 &= 0xffff_ffff_ffff_ffff;
 
         // y2
-        let y2 = other.0[2] as u128;
+        let y2 = u128::from(other.0[2]);
         t = x0.wrapping_mul(y2);
-        acc2 += t;
+        acc2 = acc2.wrapping_add(t);
         top = acc2 >> 64;
-        acc2 = (acc2 as u64) as u128;
+        acc2 &= 0xffff_ffff_ffff_ffff;
 
         t = x1.wrapping_mul(y2);
-        acc3 += top;
-        acc3 += t;
+        acc3 = acc3.wrapping_add(top);
+        acc3 = acc3.wrapping_add(t);
         top = acc3 >> 64;
-        acc3 = (acc3 as u64) as u128;
+        acc3 &= 0xffff_ffff_ffff_ffff;
 
         t = x2.wrapping_mul(y2);
-        acc4 += top;
-        acc4 += t;
+        acc4 = acc4.wrapping_add(top);
+        acc4 = acc4.wrapping_add(t);
         top = acc4 >> 64;
-        acc4 = (acc4 as u64) as u128;
+        acc4 &= 0xffff_ffff_ffff_ffff;
 
         t = x3.wrapping_mul(y2);
-        acc5 += top;
-        acc5 += t;
+        acc5 = acc5.wrapping_add(top);
+        acc5 = acc5.wrapping_add(t);
         let mut acc6 = acc5 >> 64;
-        acc5 = (acc5 as u64) as u128;
+        acc5 &= 0xffff_ffff_ffff_ffff;
 
         // y3
-        let y3 = other.0[3] as u128;
+        let y3 = u128::from(other.0[3]);
         t = x0.wrapping_mul(y3);
-        acc3 += t;
+        acc3 = acc3.wrapping_add(t);
         top = acc3 >> 64;
-        acc3 = (acc3 as u64) as u128;
+        acc3 &= 0xffff_ffff_ffff_ffff;
 
         t = x1.wrapping_mul(y3);
-        acc4 += top;
-        acc4 += t;
+        acc4 = acc4.wrapping_add(top);
+        acc4 = acc4.wrapping_add(t);
         top = acc4 >> 64;
-        acc4 = (acc4 as u64) as u128;
+        acc4 &= 0xffff_ffff_ffff_ffff;
 
         t = x2.wrapping_mul(y3);
-        acc5 += top;
-        acc5 += t;
+        acc5 = acc5.wrapping_add(top);
+        acc5 = acc5.wrapping_add(t);
         top = acc5 >> 64;
-        acc5 = (acc5 as u64) as u128;
+        acc5 &= 0xffff_ffff_ffff_ffff;
 
         t = x3.wrapping_mul(y3);
-        acc6 += top;
-        acc6 += t;
+        acc6 = acc6.wrapping_add(top);
+        acc6 = acc6.wrapping_add(t);
         let acc7 = acc6 >> 64;
-        acc6 = (acc6 as u64) as u128;
+        acc6 &= 0xffff_ffff_ffff_ffff;
 
+        // Modulo
         mod_25519(Felem2([
             acc0 as u64,
             acc1 as u64,
@@ -266,8 +277,6 @@ impl Mul for Felem {
             acc6 as u64,
             acc7 as u64,
         ]))
-
-        // Modulo
     }
 }
 
@@ -285,76 +294,72 @@ impl Felem {
 
 #[inline(always)]
 fn sqr_256(x: Felem) -> Felem2 {
-    let x0 = x.0[0] as u128;
-    let x1 = x.0[1] as u128;
-    let x2 = x.0[2] as u128;
-    let x3 = x.0[3] as u128;
-
-    let mut t: u128;
+    let x0 = u128::from(x.0[0]);
+    let x1 = u128::from(x.0[1]);
+    let x2 = u128::from(x.0[2]);
+    let x3 = u128::from(x.0[3]);
 
     // y0
-    t = x1 * x0;
-    let mut acc1 = t as u64 as u128;
-    let mut acc2 = t >> 64;
+    let mut acc1 = x1.wrapping_mul(x0);
+    let mut acc2 = x2.wrapping_mul(x0);
+    let mut acc3 = x3.wrapping_mul(x0);
 
-    t = x2 * x0;
-    acc2 += t;
-    let mut acc3 = acc2 >> 64;
-    acc2 = (acc2 as u64) as u128;
-
-    t = x3 * x0;
-    acc3 += t;
+    acc2 = acc2.wrapping_add(acc1 >> 64);
+    acc3 = acc3.wrapping_add(acc2 >> 64);
     let mut acc4 = acc3 >> 64;
-    acc3 = (acc3 as u64) as u128;
+
+    acc1 &= 0xffff_ffff_ffff_ffff;
+    acc2 &= 0xffff_ffff_ffff_ffff;
+    acc3 &= 0xffff_ffff_ffff_ffff;
 
     // y1
-    t = x2 * x1;
-    acc3 += t;
-    let top = acc3 >> 64;
-    acc3 = (acc3 as u64) as u128;
+    let mut t = x2.wrapping_mul(x1);
+    acc3 = acc3.wrapping_add(t);
 
-    t = x3 * x1;
-    acc4 += top;
-    acc4 += t;
+    t = x3.wrapping_mul(x1);
+    acc4 = acc4.wrapping_add(acc3 >> 64).wrapping_add(t);
+
     let mut acc5 = acc4 >> 64;
-    acc4 = (acc4 as u64) as u128;
+
+    acc3 &= 0xffff_ffff_ffff_ffff;
+    acc4 &= 0xffff_ffff_ffff_ffff;
 
     // y2
-    t = x3 * x2;
-    acc5 += t;
+    t = x3.wrapping_mul(x2);
+    acc5 = acc5.wrapping_add(t);
+
     let mut acc6 = acc5 >> 64;
-    acc5 = (acc5 as u64) as u128;
+    acc5 &= 0xffff_ffff_ffff_ffff;
 
-    acc1 += acc1;
-    acc2 += acc2 + (acc1 >> 64);
-    acc1 = acc1 as u64 as u128;
-    acc3 += acc3 + (acc2 >> 64);
-    acc2 = acc2 as u64 as u128;
-    acc4 += acc4 + (acc3 >> 64);
-    acc3 = acc3 as u64 as u128;
-    acc5 += acc5 + (acc4 >> 64);
-    acc4 = acc4 as u64 as u128;
-    acc6 += acc6 + (acc5 >> 64);
-    acc5 = acc5 as u64 as u128;
+    acc6 = acc6 << 1 | acc5 >> 63;
+    acc5 = acc5 << 1 | acc4 >> 63;
+    acc4 = acc4 << 1 | acc3 >> 63;
+    acc3 = acc3 << 1 | acc2 >> 63;
+    acc2 = acc2 << 1 | acc1 >> 63;
+    acc1 <<= 1;
+
     let mut acc7 = acc6 >> 64;
-    acc6 = acc6 as u64 as u128;
+    acc1 &= 0xffff_ffff_ffff_ffff;
+    acc2 &= 0xffff_ffff_ffff_ffff;
+    acc3 &= 0xffff_ffff_ffff_ffff;
+    acc4 &= 0xffff_ffff_ffff_ffff;
+    acc5 &= 0xffff_ffff_ffff_ffff;
+    acc6 &= 0xffff_ffff_ffff_ffff;
 
-    t = x0 * x0;
+    let acc0 = x0.wrapping_mul(x0);
+    acc1 = acc1.wrapping_add(acc0 >> 64);
 
-    let acc0 = t as u64 as u128;
-    acc1 += t >> 64;
+    t = x1.wrapping_mul(x1);
+    acc2 = acc2.wrapping_add(acc1 >> 64).wrapping_add(t);
+    acc3 = acc3.wrapping_add(acc2 >> 64);
 
-    t = x1 * x1;
-    acc2 += t + (acc1 >> 64);
-    acc3 += acc2 >> 64;
+    t = x2.wrapping_mul(x2);
+    acc4 = acc4.wrapping_add(acc3 >> 64).wrapping_add(t);
+    acc5 = acc5.wrapping_add(acc4 >> 64);
 
-    t = x2 * x2;
-    acc4 += t + (acc3 >> 64);
-    acc5 += acc4 >> 64;
-
-    t = x3 * x3;
-    acc6 += t + (acc5 >> 64);
-    acc7 += acc6 >> 64;
+    t = x3.wrapping_mul(x3);
+    acc6 = acc6.wrapping_add(acc5 >> 64).wrapping_add(t);
+    acc7 = acc7.wrapping_add(acc6 >> 64);
 
     Felem2([
         acc0 as u64,
@@ -374,63 +379,62 @@ fn sqr_256(x: Felem) -> Felem2 {
 fn mod_25519(x: Felem2) -> Felem {
     let c38 = 38 as u128;
 
-    let mut acc0 = x.0[0] as u128;
-    let mut acc1 = x.0[1] as u128;
-    let mut acc2 = x.0[2] as u128;
-    let mut acc3 = x.0[3] as u128;
-    let mut acc4 = x.0[4] as u128;
-    let mut acc5 = x.0[5] as u128;
-    let mut acc6 = x.0[6] as u128;
-    let mut acc7 = x.0[7] as u128;
+    let mut acc0 = u128::from(x.0[0]);
+    let mut acc1 = u128::from(x.0[1]);
+    let mut acc2 = u128::from(x.0[2]);
+    let mut acc3 = u128::from(x.0[3]);
+    let mut acc4 = u128::from(x.0[4]);
+    let mut acc5 = u128::from(x.0[5]);
+    let mut acc6 = u128::from(x.0[6]);
+    let mut acc7 = u128::from(x.0[7]);
 
-    acc4 *= c38;
-    acc5 *= c38;
-    acc6 *= c38;
-    acc7 *= c38;
+    acc4 = acc4.wrapping_mul(c38);
+    acc5 = acc5.wrapping_mul(c38);
+    acc6 = acc6.wrapping_mul(c38);
+    acc7 = acc7.wrapping_mul(c38);
 
-    acc0 += acc4;
-    let mut top = acc0 >> 64;
-    acc0 = acc0 as u64 as u128;
+    acc0 = acc0.wrapping_add(acc4);
 
-    acc1 += top;
-    acc1 += acc5;
+    acc1 = acc1.wrapping_add(acc0 >> 64);
+    acc1 = acc1.wrapping_add(acc5);
 
-    top = acc1 >> 64;
-    acc1 = acc1 as u64 as u128;
-    acc2 += top;
-    acc2 += acc6;
+    acc2 = acc2.wrapping_add(acc1 >> 64);
+    acc2 = acc2.wrapping_add(acc6);
 
-    top = acc2 >> 64;
-    acc2 = acc2 as u64 as u128;
-    acc3 += top;
-    acc3 += acc7;
+    acc3 = acc3.wrapping_add(acc2 >> 64);
+    acc3 = acc3.wrapping_add(acc7);
 
-    top = acc3 >> 63;
-    acc3 &= 0x7fffffffffffffff;
+    let mut top = (acc3 >> 63) & 0xffff_ffff_ffff_ffff;
 
-    top *= 19;
-    acc0 += top;
-    acc1 += acc0 >> 64;
-    acc2 += acc1 >> 64;
-    acc3 += acc2 >> 64;
+    acc0 &= 0xffff_ffff_ffff_ffff;
+    acc1 &= 0xffff_ffff_ffff_ffff;
+    acc2 &= 0xffff_ffff_ffff_ffff;
+    acc3 &= 0x7fff_ffff_ffff_ffff;
+
+    top = top.wrapping_mul(19);
+
+    acc0 = acc0.wrapping_add(top);
+    acc1 = acc1.wrapping_add(acc0 >> 64);
+    acc2 = acc2.wrapping_add(acc1 >> 64);
+    acc3 = acc3.wrapping_add(acc2 >> 64);
 
     Felem([acc0 as u64, acc1 as u64, acc2 as u64, acc3 as u64])
 }
 
 fn mod_final_25519(x: Felem) -> Felem {
-    let mut acc0 = x.0[0] as u128;
-    let mut acc1 = x.0[1] as u128;
-    let mut acc2 = x.0[2] as u128;
-    let mut acc3 = x.0[3] as u128;
+    let mut acc0 = u128::from(x.0[0]);
+    let mut acc1 = u128::from(x.0[1]);
+    let mut acc2 = u128::from(x.0[2]);
+    let mut acc3 = u128::from(x.0[3]);
 
     let mut top = acc3 >> 63;
-    acc3 &= 0x7fffffffffffffff;
+    acc3 &= 0x7fff_ffff_ffff_ffff;
 
-    top *= 19;
-    acc0 += top;
-    acc1 += acc0 >> 64;
-    acc2 += acc1 >> 64;
-    acc3 += acc2 >> 64;
+    top = top.wrapping_mul(19);
+    acc0 = acc0.wrapping_add(top);
+    acc1 = acc1.wrapping_add(acc0 >> 64);
+    acc2 = acc2.wrapping_add(acc1 >> 64);
+    acc3 = acc3.wrapping_add(acc2 >> 64);
 
     Felem([acc0 as u64, acc1 as u64, acc2 as u64, acc3 as u64])
 }
@@ -454,8 +458,8 @@ fn mod_inv_25519(x: Felem) -> Felem {
 }
 
 #[inline(always)]
-fn constant_time_swap(a: Felem, b: Felem, swap: u8) -> (Felem, Felem) {
-    let mask = 0_u64.wrapping_sub(swap as u64);
+fn constant_time_swap(a: Felem, b: Felem, swap: u64) -> (Felem, Felem) {
+    let mask = 0_u64.wrapping_sub(swap);
 
     let mut v = [0_u64; 4];
     let mut a_out = [0_u64; 4];
@@ -479,43 +483,11 @@ fn constant_time_swap(a: Felem, b: Felem, swap: u8) -> (Felem, Felem) {
     (Felem(a_out), Felem(b_out))
 }
 
-#[inline(always)]
-fn read_u64(buf: &[u8]) -> u64 {
-    if buf.len() < 8 {
-        panic!("Illegal");
-    }
-
-    return (buf[0] as u64)
-        ^ (buf[1] as u64) << 8
-        ^ (buf[2] as u64) << 16
-        ^ (buf[3] as u64) << 24
-        ^ (buf[4] as u64) << 32
-        ^ (buf[5] as u64) << 40
-        ^ (buf[6] as u64) << 48
-        ^ (buf[7] as u64) << 56;
-}
-
-#[inline(always)]
-fn write_u64(buf: &mut [u8], val: u64) {
-    if buf.len() < 8 {
-        panic!("Illegal");
-    }
-
-    buf[0] = val as u8;
-    buf[1] = (val >> 8) as u8;
-    buf[2] = (val >> 16) as u8;
-    buf[3] = (val >> 24) as u8;
-    buf[4] = (val >> 32) as u8;
-    buf[5] = (val >> 40) as u8;
-    buf[6] = (val >> 48) as u8;
-    buf[7] = (val >> 56) as u8;
-}
-
 pub fn x25519_gen_secret_key() -> [u8; 32] {
     let rng = SystemRandom::new();
     let mut private_key = [0u8; 32];
     rng.fill(&mut private_key[..]).unwrap();
-    return private_key;
+    private_key
 }
 
 pub fn x25519_public_key(secret_key: &[u8]) -> [u8; 32] {
@@ -538,10 +510,10 @@ pub fn x25519_shared_key(peer_key: &[u8], secret_key: &[u8]) -> [u8; 32] {
 
     assert!(peer_key.len() == 32);
     let u = Felem([
-        read_u64(&peer_key[0..8]),
-        read_u64(&peer_key[8..16]),
-        read_u64(&peer_key[16..24]),
-        read_u64(&peer_key[24..32]),
+        u64::from_le_bytes(make_array(&peer_key[0..])),
+        u64::from_le_bytes(make_array(&peer_key[8..])),
+        u64::from_le_bytes(make_array(&peer_key[16..])),
+        u64::from_le_bytes(make_array(&peer_key[24..])),
     ]);
 
     scalar[0] &= 248;
@@ -553,44 +525,40 @@ pub fn x25519_shared_key(peer_key: &[u8], secret_key: &[u8]) -> [u8; 32] {
     let mut z_2 = Felem([0, 0, 0, 0]);
     let mut x_3 = u;
     let mut z_3 = Felem([1, 0, 0, 0]);
-    let a24 = Felem([121665, 0, 0, 0]);
+    let a24 = Felem([121666, 0, 0, 0]);
     let mut swap = 0;
 
-    let mut byte_idx: i8 = 31;
-    let mut bit_idx = 6;
+    for pos in (0..=254).rev() {
+        let bit_val = u64::from((scalar[pos / 8] >> (pos & 7)) & 1);
 
-    while byte_idx >= 0 {
-        while bit_idx >= 0 {
-            let bit_val = (scalar[byte_idx as usize] >> bit_idx) & 1;
+        swap ^= bit_val;
+        let (mut x2, mut x3) = constant_time_swap(x_2, x_3, swap);
+        let (mut z2, mut z3) = constant_time_swap(z_2, z_3, swap);
+        swap = bit_val;
 
-            swap ^= bit_val;
-            let (x2, x3) = constant_time_swap(x_2, x_3, swap);
-            let (z2, z3) = constant_time_swap(z_2, z_3, swap);
-            swap = bit_val;
+        let mut tmp0 = x3 - z3;
+        let mut tmp1 = x2 - z2;
+        x2 = x2 + z2;
+        z2 = x3 + z3;
 
-            let a = x2 + z2;
-            let b = x2 - z2;
+        z3 = x2 * tmp0;
+        z2 = z2 * tmp1;
 
-            let aa = a.sqr(1);
-            let bb = b.sqr(1);
+        tmp0 = tmp1.sqr(1);
+        tmp1 = x2.sqr(1);
+        x3 = z3 + z2;
+        z2 = z3 - z2;
 
-            let c = x3 + z3;
-            let d = x3 - z3;
+        x_2 = tmp1 * tmp0;
+        tmp1 = tmp1 - tmp0;
+        z2 = z2.sqr(1);
 
-            let cb = c * b;
-            let da = d * a;
+        z3 = a24 * tmp1;
+        x_3 = x3.sqr(1);
+        tmp0 = tmp0 + z3;
 
-            let e = aa - bb;
-
-            x_3 = (da + cb).sqr(1);
-            z_3 = x_1 * (da - cb).sqr(1);
-            x_2 = aa * bb;
-            z_2 = e * (aa + a24 * e);
-
-            bit_idx -= 1;
-        }
-        bit_idx = 7;
-        byte_idx -= 1;
+        z_3 = x_1 * z2;
+        z_2 = tmp1 * tmp0;
     }
 
     let (x2, _) = constant_time_swap(x_2, x_3, swap);
@@ -598,10 +566,10 @@ pub fn x25519_shared_key(peer_key: &[u8], secret_key: &[u8]) -> [u8; 32] {
 
     let key = mod_final_25519(x2 * mod_inv_25519(z2));
 
-    write_u64(&mut shared_key[0..8], key.0[0]);
-    write_u64(&mut shared_key[8..16], key.0[1]);
-    write_u64(&mut shared_key[16..24], key.0[2]);
-    write_u64(&mut shared_key[24..32], key.0[3]);
+    shared_key[0..8].copy_from_slice(&key.0[0].to_le_bytes());
+    shared_key[8..16].copy_from_slice(&key.0[1].to_le_bytes());
+    shared_key[16..24].copy_from_slice(&key.0[2].to_le_bytes());
+    shared_key[24..32].copy_from_slice(&key.0[3].to_le_bytes());
 
     shared_key
 }

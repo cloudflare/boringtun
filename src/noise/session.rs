@@ -118,7 +118,7 @@ impl ReceivingKeyCounterValidator {
         }
         self.set_bit(counter);
         self.next = counter + 1;
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -146,9 +146,10 @@ impl Session {
     // Returns true if receiving counter is good to use
     fn receiving_counter_quick_check(&self, counter: u64) -> Result<(), WireGuardError> {
         let counter_validator = self.receiving_key_counter.lock();
-        match counter_validator.will_accept(counter) {
-            true => Ok(()),
-            false => Err(WireGuardError::InvalidCounter),
+        if counter_validator.will_accept(counter) {
+            Ok(())
+        } else {
+            Err(WireGuardError::InvalidCounter)
         }
     }
 

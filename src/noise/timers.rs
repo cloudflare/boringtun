@@ -201,7 +201,10 @@ impl Tunn {
 
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
         let current_session = self.current.load(Ordering::Acquire);
-        if let Some(_) = *self.sessions[current_session % super::N_SESSIONS].read() {
+        if self.sessions[current_session % super::N_SESSIONS]
+            .read()
+            .is_some()
+        {
             let time_current = Instant::now().duration_since(self.timers.time_started);
             let time_session_established =
                 Duration::from_secs(self.timer(TimerName::TimeSessionEstablished) as u64);

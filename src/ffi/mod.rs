@@ -184,7 +184,10 @@ pub unsafe extern "C" fn new_tunnel(
 
     if let Some(logger) = log_printer {
         tunnel.set_logger(
-            Box::new(move |e: &str| logger(CString::new(e).unwrap().as_ptr())),
+            Box::new(move |e: &str| {
+                let cstr = CString::new(e).unwrap();
+                logger(cstr.as_ptr())
+            }),
             Verbosity::from(log_level),
         );
     }

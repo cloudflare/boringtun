@@ -1,5 +1,6 @@
 mod tests;
 use super::super::noise::errors::*;
+use noise::make_array;
 use std::ops::Add;
 use std::ops::AddAssign;
 use std::ops::BitXorAssign;
@@ -15,17 +16,18 @@ struct Poly1305S([u64; 2]);
 struct Felem1305NonRed([u64; 4]);
 struct Poly1305;
 
+#[cfg_attr(feature = "cargo-clippy", allow(suspicious_arithmetic_impl))]
 impl Add for Felem1305 {
     type Output = Felem1305;
     #[inline(always)]
     fn add(self, other: Felem1305) -> Felem1305 {
-        let acc0 = self.0[0] as u128;
-        let acc1 = self.0[1] as u128;
-        let acc2 = self.0[2] as u128;
+        let acc0 = u128::from(self.0[0]);
+        let acc1 = u128::from(self.0[1]);
+        let acc2 = u128::from(self.0[2]);
 
-        let x0 = other.0[0] as u128;
-        let x1 = other.0[1] as u128;
-        let x2 = other.0[2] as u128;
+        let x0 = u128::from(other.0[0]);
+        let x1 = u128::from(other.0[1]);
+        let x2 = u128::from(other.0[2]);
 
         let acc0 = acc0.wrapping_add(x0);
         let acc1 = acc1.wrapping_add(x1).wrapping_add(acc0 >> 64);
@@ -35,37 +37,37 @@ impl Add for Felem1305 {
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(suspicious_arithmetic_impl))]
 impl Mul<Poly1305R> for Felem1305 {
     type Output = Felem1305NonRed;
     #[inline(always)]
     fn mul(self, other: Poly1305R) -> Felem1305NonRed {
-        let acc0 = self.0[0] as u128;
-        let acc1 = self.0[1] as u128;
-        let acc2 = self.0[2] as u128;
+        let acc0 = u128::from(self.0[0]);
+        let acc1 = u128::from(self.0[1]);
+        let acc2 = u128::from(self.0[2]);
 
-        let k0 = other.0[0] as u128;
-        let k1 = other.0[1] as u128;
+        let k0 = u128::from(other.0[0]);
+        let k1 = u128::from(other.0[1]);
 
-        let t0 = acc0 * k0;
-        let t1 = acc1 * k0;
-        let t1 = t1.wrapping_add(t0 >> 64);
-        let t2 = acc2 * k0;
-        let t2 = t2.wrapping_add(t1 >> 64);
-        let t0 = t0 as u64 as u128;
-        let t1 = t1 as u64 as u128;
-        let t2 = t2 as u64 as u128;
+        let mut t0 = acc0.wrapping_mul(k0);
+        let t1 = acc1.wrapping_mul(k0);
+        let mut t1 = t1.wrapping_add(t0 >> 64);
+        let mut t2 = acc2.wrapping_mul(k0);
+        t2 = t2.wrapping_add(t1 >> 64);
+        t0 &= 0xffff_ffff_ffff_ffff;
+        t1 &= 0xffff_ffff_ffff_ffff;
+        t2 &= 0xffff_ffff_ffff_ffff;
 
-        let t = acc0 * k1;
-        let t1 = t1.wrapping_add(t);
+        let mut t = acc0.wrapping_mul(k1);
+        t1 = t1.wrapping_add(t);
         let top = t1 >> 64;
-        let t1 = t1 as u64 as u128;
-        let t = acc1 * k1;
-        let t2 = t2.wrapping_add(top).wrapping_add(t);
-        let t3 = t2 >> 64;
-        let t2 = t2 as u64 as u128;
-        let t = acc2 * k1;
-        let t3 = t3.wrapping_add(t);
-        let t3 = t3 as u64;
+        t1 &= 0xffff_ffff_ffff_ffff;
+        t = acc1.wrapping_mul(k1);
+        t2 = t2.wrapping_add(top).wrapping_add(t);
+        let mut t3 = t2 >> 64;
+        t2 &= 0xffff_ffff_ffff_ffff;
+        t = acc2.wrapping_mul(k1);
+        t3 = t3.wrapping_add(t);
 
         Felem1305NonRed([t0 as u64, t1 as u64, t2 as u64, t3 as u64])
     }
@@ -75,28 +77,28 @@ impl Rem<Poly1305> for Felem1305NonRed {
     type Output = Felem1305;
     #[inline(always)]
     fn rem(self, _: Poly1305) -> Felem1305 {
-        let acc0 = self.0[0] as u128;
-        let acc1 = self.0[1] as u128;
-        let acc2 = self.0[2] as u128;
+        let acc0 = u128::from(self.0[0]);
+        let acc1 = u128::from(self.0[1]);
+        let acc2 = u128::from(self.0[2]);
 
         let t0 = acc2 & 0xfffffffffffffffc;
-        let t1 = self.0[3] as u128;
-        let t2 = (((acc2 as u64) >> 2) | (t1 as u64) << 62) as u128;
+        let t1 = u128::from(self.0[3]);
+        let t2 = u128::from((self.0[2] >> 2) | (self.0[3] << 62));
         let t3 = t1 >> 2;
 
         let acc2 = acc2 & 0x3;
 
-        let acc0 = acc0.wrapping_add(t0);
-        let acc1 = acc1.wrapping_add(t1).wrapping_add(acc0 >> 64);
-        let acc2 = acc2.wrapping_add(acc1 >> 64);
+        let mut acc0 = acc0.wrapping_add(t0);
+        let mut acc1 = acc1.wrapping_add(t1).wrapping_add(acc0 >> 64);
+        let mut acc2 = acc2.wrapping_add(acc1 >> 64);
 
-        let acc0 = acc0 as u64 as u128;
-        let acc1 = acc1 as u64 as u128;
-        let acc2 = acc2 as u64 as u128;
+        acc0 &= 0xffff_ffff_ffff_ffff;
+        acc1 &= 0xffff_ffff_ffff_ffff;
+        acc2 &= 0xffff_ffff_ffff_ffff;
 
-        let acc0 = acc0.wrapping_add(t2);
-        let acc1 = acc1.wrapping_add(t3).wrapping_add(acc0 >> 64);
-        let acc2 = acc2.wrapping_add(acc1 >> 64);
+        acc0 = acc0.wrapping_add(t2);
+        acc1 = acc1.wrapping_add(t3).wrapping_add(acc0 >> 64);
+        acc2 = acc2.wrapping_add(acc1 >> 64);
 
         Felem1305([acc0 as u64, acc1 as u64, acc2 as u64])
     }
@@ -113,8 +115,8 @@ impl Rem<Poly1305> for Felem1305 {
 impl From<[u32; 4]> for Felem1305 {
     fn from(x: [u32; 4]) -> Self {
         Felem1305([
-            (x[0] as u64) | ((x[1] as u64) << 32),
-            (x[2] as u64) | ((x[3] as u64) << 32),
+            u64::from(x[0]) | (u64::from(x[1]) << 32),
+            u64::from(x[2]) | (u64::from(x[3]) << 32),
             1,
         ])
     }
@@ -166,58 +168,6 @@ pub struct ChaCha20Poly1305 {
     key: [u32; 8],
 }
 
-#[inline(always)]
-fn get_u32_le(m: &[u8]) -> u32 {
-    assert!(m.len() >= 4);
-    (m[0] as u32) | (m[1] as u32) << 8 | (m[2] as u32) << 16 | (m[3] as u32) << 24
-}
-
-#[inline(always)]
-fn get_u64_le(m: &[u8]) -> u64 {
-    assert!(m.len() >= 8);
-    (m[0] as u64)
-        | (m[1] as u64) << 8
-        | (m[2] as u64) << 16
-        | (m[3] as u64) << 24
-        | (m[4] as u64) << 32
-        | (m[5] as u64) << 40
-        | (m[6] as u64) << 48
-        | (m[7] as u64) << 56
-}
-
-#[inline(always)]
-pub fn store_u32_le(v: u32, m: &mut [u8]) {
-    assert!(m.len() >= 4);
-    m[0] = (v & 0xff) as u8;
-    m[1] = (v >> 8 & 0xff) as u8;
-    m[2] = (v >> 16 & 0xff) as u8;
-    m[3] = (v >> 24 & 0xff) as u8;
-}
-
-#[inline(always)]
-pub fn u32_to_le(v: u32) -> [u8; 4] {
-    let mut ret = [0u8; 4];
-    ret[0] = (v & 0xff) as u8;
-    ret[1] = (v >> 8 & 0xff) as u8;
-    ret[2] = (v >> 16 & 0xff) as u8;
-    ret[3] = (v >> 24 & 0xff) as u8;
-    ret
-}
-
-#[inline(always)]
-pub fn u64_to_le(v: u64) -> [u8; 8] {
-    let mut ret = [0u8; 8];
-    ret[0] = (v & 0xff) as u8;
-    ret[1] = (v >> 8 & 0xff) as u8;
-    ret[2] = (v >> 16 & 0xff) as u8;
-    ret[3] = (v >> 24 & 0xff) as u8;
-    ret[4] = (v >> 32 & 0xff) as u8;
-    ret[5] = (v >> 40 & 0xff) as u8;
-    ret[6] = (v >> 48 & 0xff) as u8;
-    ret[7] = (v >> 56 & 0xff) as u8;
-    ret
-}
-
 macro_rules! PUTU32LE {
     ($b:ident, $off:expr, $val:expr) => {
         $b[$off] = $val as u8;
@@ -230,12 +180,12 @@ macro_rules! PUTU32LE {
 fn poly_keys(stream: [u32; 16]) -> (Poly1305R, Poly1305S) {
     (
         Poly1305R([
-            ((stream[0] as u64) | ((stream[1] as u64) << 32)) & 0x0FFFFFFC0FFFFFFF,
-            ((stream[2] as u64) | ((stream[3] as u64) << 32)) & 0x0FFFFFFC0FFFFFFC,
+            (u64::from(stream[0]) | (u64::from(stream[1]) << 32)) & 0x0FFFFFFC0FFFFFFF,
+            (u64::from(stream[2]) | (u64::from(stream[3]) << 32)) & 0x0FFFFFFC0FFFFFFC,
         ]),
         Poly1305S([
-            (stream[4] as u64) | ((stream[5] as u64) << 32),
-            (stream[6] as u64) | ((stream[7] as u64) << 32),
+            u64::from(stream[4]) | (u64::from(stream[5]) << 32),
+            u64::from(stream[6]) | (u64::from(stream[7]) << 32),
         ]),
     )
 }
@@ -253,10 +203,10 @@ fn poly_step_u8_slice(acc: Felem1305, x: &[u8], k: Poly1305R) -> Felem1305 {
     poly_step(
         acc,
         [
-            get_u32_le(&x[0 * 4..1 * 4]),
-            get_u32_le(&x[1 * 4..2 * 4]),
-            get_u32_le(&x[2 * 4..3 * 4]),
-            get_u32_le(&x[3 * 4..4 * 4]),
+            u32::from_le_bytes(make_array(&x[0..])),
+            u32::from_le_bytes(make_array(&x[4..])),
+            u32::from_le_bytes(make_array(&x[8..])),
+            u32::from_le_bytes(make_array(&x[12..])),
         ],
         k,
     )
@@ -283,34 +233,32 @@ fn poly_final(acc: Felem1305, aad_len: u64, pt_len: u64, k: Poly1305R, e: Poly13
     ];
     let acc = poly_step(acc, x, k);
 
-    let mut t0 = acc.0[0] as u128;
-    let mut t1 = acc.0[1] as u128;
-    let mut t2 = acc.0[2] as u128;
-    let mut t3 = 0_u128;
+    let mut t0 = u128::from(acc.0[0]);
+    let t1 = u128::from(acc.0[1]);
+    let mut t2 = u128::from(acc.0[2]);
 
     let mut acc0 = t0;
     let mut acc1 = t1;
 
     t0 = t2 & 0xfffffffffffffffc;
-    t1 = t3;
+    t2 >>= 2;
 
-    t2 = (((t2 as u64) >> 2) | ((t3 as u64) << 62)) as u128;
-    t3 = t3 >> 2;
+    acc0 = acc0.wrapping_add(t0);
+    acc1 = acc1.wrapping_add(acc0 >> 64);
 
-    acc0 += t0;
-    acc1 += t1 + (acc0 >> 64);
+    acc0 &= 0xffff_ffff_ffff_ffff;
+    acc1 &= 0xffff_ffff_ffff_ffff;
 
-    acc0 = acc0 as u64 as u128;
-    acc1 = acc1 as u64 as u128;
+    acc0 = acc0.wrapping_add(t2);
+    acc1 = acc1.wrapping_add(acc0 >> 64);
 
-    acc0 += t2;
-    acc1 += t3 + (acc0 >> 64);
+    acc0 &= 0xffff_ffff_ffff_ffff;
+    acc1 &= 0xffff_ffff_ffff_ffff;
 
-    acc0 = acc0 as u64 as u128;
-    acc1 = acc1 as u64 as u128;
-
-    acc0 += e.0[0] as u128;
-    acc1 += (e.0[1] as u128) + (acc0 >> 64);
+    acc0 = acc0.wrapping_add(u128::from(e.0[0]));
+    acc1 = acc1
+        .wrapping_add(u128::from(e.0[1]))
+        .wrapping_add(acc0 >> 64);
 
     (acc0 as u64, acc1 as u64)
 }
@@ -381,14 +329,14 @@ impl ChaCha20Poly1305 {
         assert_eq!(key.len(), 32);
         ChaCha20Poly1305 {
             key: [
-                get_u32_le(&key[0..]),
-                get_u32_le(&key[4..]),
-                get_u32_le(&key[8..]),
-                get_u32_le(&key[12..]),
-                get_u32_le(&key[16..]),
-                get_u32_le(&key[20..]),
-                get_u32_le(&key[24..]),
-                get_u32_le(&key[28..]),
+                u32::from_le_bytes(make_array(&key[0..])),
+                u32::from_le_bytes(make_array(&key[4..])),
+                u32::from_le_bytes(make_array(&key[8..])),
+                u32::from_le_bytes(make_array(&key[12..])),
+                u32::from_le_bytes(make_array(&key[16..])),
+                u32::from_le_bytes(make_array(&key[20..])),
+                u32::from_le_bytes(make_array(&key[24..])),
+                u32::from_le_bytes(make_array(&key[28..])),
             ],
         }
     }
@@ -409,10 +357,10 @@ impl ChaCha20Poly1305 {
             acc = poly_step(
                 acc,
                 [
-                    get_u32_le(&cur[0..]),
-                    get_u32_le(&cur[4..]),
-                    get_u32_le(&cur[8..]),
-                    get_u32_le(&cur[12..]),
+                    u32::from_le_bytes(make_array(&cur[0..])),
+                    u32::from_le_bytes(make_array(&cur[4..])),
+                    u32::from_le_bytes(make_array(&cur[8..])),
+                    u32::from_le_bytes(make_array(&cur[12..])),
                 ],
                 poly_key,
             );
@@ -426,10 +374,10 @@ impl ChaCha20Poly1305 {
             acc = poly_step(
                 acc,
                 [
-                    get_u32_le(&arr[0..]),
-                    get_u32_le(&arr[4..]),
-                    get_u32_le(&arr[8..]),
-                    get_u32_le(&arr[12..]),
+                    u32::from_le_bytes(make_array(&arr[0..])),
+                    u32::from_le_bytes(make_array(&arr[4..])),
+                    u32::from_le_bytes(make_array(&arr[8..])),
+                    u32::from_le_bytes(make_array(&arr[12..])),
                 ],
                 poly_key,
             );
@@ -437,7 +385,7 @@ impl ChaCha20Poly1305 {
         }
 
         loop {
-            if pt.len() == 0 {
+            if pt.is_empty() {
                 break;
             }
 
@@ -450,22 +398,22 @@ impl ChaCha20Poly1305 {
                 pt = &pt[64..];
 
                 let pt32: [u32; 16] = [
-                    get_u32_le(&pt_block[0..]),
-                    get_u32_le(&pt_block[4..]),
-                    get_u32_le(&pt_block[8..]),
-                    get_u32_le(&pt_block[12..]),
-                    get_u32_le(&pt_block[16..]),
-                    get_u32_le(&pt_block[20..]),
-                    get_u32_le(&pt_block[24..]),
-                    get_u32_le(&pt_block[28..]),
-                    get_u32_le(&pt_block[32..]),
-                    get_u32_le(&pt_block[36..]),
-                    get_u32_le(&pt_block[40..]),
-                    get_u32_le(&pt_block[44..]),
-                    get_u32_le(&pt_block[48..]),
-                    get_u32_le(&pt_block[52..]),
-                    get_u32_le(&pt_block[56..]),
-                    get_u32_le(&pt_block[60..]),
+                    u32::from_le_bytes(make_array(&pt_block[0..])),
+                    u32::from_le_bytes(make_array(&pt_block[4..])),
+                    u32::from_le_bytes(make_array(&pt_block[8..])),
+                    u32::from_le_bytes(make_array(&pt_block[12..])),
+                    u32::from_le_bytes(make_array(&pt_block[16..])),
+                    u32::from_le_bytes(make_array(&pt_block[20..])),
+                    u32::from_le_bytes(make_array(&pt_block[24..])),
+                    u32::from_le_bytes(make_array(&pt_block[28..])),
+                    u32::from_le_bytes(make_array(&pt_block[32..])),
+                    u32::from_le_bytes(make_array(&pt_block[36..])),
+                    u32::from_le_bytes(make_array(&pt_block[40..])),
+                    u32::from_le_bytes(make_array(&pt_block[44..])),
+                    u32::from_le_bytes(make_array(&pt_block[48..])),
+                    u32::from_le_bytes(make_array(&pt_block[52..])),
+                    u32::from_le_bytes(make_array(&pt_block[56..])),
+                    u32::from_le_bytes(make_array(&pt_block[60..])),
                 ];
 
                 for i in 0..16 {
@@ -495,28 +443,28 @@ impl ChaCha20Poly1305 {
                 PUTU32LE!(pt_block, 60, blk[15]);
 
                 ct[enced..enced + 64].copy_from_slice(&pt_block);
-                enced = enced + 64;
+                enced += 64;
             } else {
                 let mut pt_block = [0u8; 64];
                 pt_block[..pt.len()].copy_from_slice(&pt[..]);
 
                 let pt32: [u32; 16] = [
-                    get_u32_le(&pt_block[0..]),
-                    get_u32_le(&pt_block[4..]),
-                    get_u32_le(&pt_block[8..]),
-                    get_u32_le(&pt_block[12..]),
-                    get_u32_le(&pt_block[16..]),
-                    get_u32_le(&pt_block[20..]),
-                    get_u32_le(&pt_block[24..]),
-                    get_u32_le(&pt_block[28..]),
-                    get_u32_le(&pt_block[32..]),
-                    get_u32_le(&pt_block[36..]),
-                    get_u32_le(&pt_block[40..]),
-                    get_u32_le(&pt_block[44..]),
-                    get_u32_le(&pt_block[48..]),
-                    get_u32_le(&pt_block[52..]),
-                    get_u32_le(&pt_block[56..]),
-                    get_u32_le(&pt_block[60..]),
+                    u32::from_le_bytes(make_array(&pt_block[0..])),
+                    u32::from_le_bytes(make_array(&pt_block[4..])),
+                    u32::from_le_bytes(make_array(&pt_block[8..])),
+                    u32::from_le_bytes(make_array(&pt_block[12..])),
+                    u32::from_le_bytes(make_array(&pt_block[16..])),
+                    u32::from_le_bytes(make_array(&pt_block[20..])),
+                    u32::from_le_bytes(make_array(&pt_block[24..])),
+                    u32::from_le_bytes(make_array(&pt_block[28..])),
+                    u32::from_le_bytes(make_array(&pt_block[32..])),
+                    u32::from_le_bytes(make_array(&pt_block[36..])),
+                    u32::from_le_bytes(make_array(&pt_block[40..])),
+                    u32::from_le_bytes(make_array(&pt_block[44..])),
+                    u32::from_le_bytes(make_array(&pt_block[48..])),
+                    u32::from_le_bytes(make_array(&pt_block[52..])),
+                    u32::from_le_bytes(make_array(&pt_block[56..])),
+                    u32::from_le_bytes(make_array(&pt_block[60..])),
                 ];
 
                 for i in 0..16 {
@@ -556,7 +504,7 @@ impl ChaCha20Poly1305 {
                 }
 
                 ct[enced..enced + pt.len()].copy_from_slice(&pt_block[..pt.len()]);
-                enced = enced + pt.len();
+                enced += pt.len();
                 break;
             }
         }
@@ -574,11 +522,13 @@ impl ChaCha20Poly1305 {
 
         let acc = acc % Poly1305;
 
-        let mut acc0 = acc.0[0] as u128;
-        let mut acc1 = acc.0[1] as u128;
+        let mut acc0 = u128::from(acc.0[0]);
+        let mut acc1 = u128::from(acc.0[1]);
 
-        acc0 += poly_enc.0[0] as u128;
-        acc1 += (poly_enc.0[1] as u128).wrapping_add(acc0 >> 64);
+        acc0 = acc0.wrapping_add(u128::from(poly_enc.0[0]));
+        acc1 = acc1
+            .wrapping_add(acc0 >> 64)
+            .wrapping_add(u128::from(poly_enc.0[1]));
 
         ct[enced] = acc0 as u8;
         ct[enced + 1] = (acc0 >> 8) as u8;
@@ -613,14 +563,14 @@ impl ChaCha20Poly1305 {
         state[12] += 1;
 
         let poly_key = Poly1305R([
-            ((blk[0] as u64) + ((blk[1] as u64) << 32)) & 0x0FFFFFFC0FFFFFFF,
-            ((blk[2] as u64) + ((blk[3] as u64) << 32)) & 0x0FFFFFFC0FFFFFFC,
+            (u64::from(blk[0]) + (u64::from(blk[1]) << 32)) & 0x0FFFFFFC0FFFFFFF,
+            (u64::from(blk[2]) + (u64::from(blk[3]) << 32)) & 0x0FFFFFFC0FFFFFFC,
         ]);
 
-        let poly_enc = [
-            (blk[4] as u64) + ((blk[5] as u64) << 32),
-            (blk[6] as u64) + ((blk[7] as u64) << 32),
-        ];
+        let poly_enc = Poly1305S([
+            u64::from(blk[4]) + (u64::from(blk[5]) << 32),
+            u64::from(blk[6]) + (u64::from(blk[7]) << 32),
+        ]);
 
         let mut acc = Felem1305([0_u64; 3]);
         let mut hashed = 0;
@@ -632,10 +582,10 @@ impl ChaCha20Poly1305 {
             acc = poly_step(
                 acc,
                 [
-                    get_u32_le(&arr[0..]),
-                    get_u32_le(&arr[4..]),
-                    get_u32_le(&arr[8..]),
-                    get_u32_le(&arr[12..]),
+                    u32::from_le_bytes(make_array(&arr[0..])),
+                    u32::from_le_bytes(make_array(&arr[4..])),
+                    u32::from_le_bytes(make_array(&arr[8..])),
+                    u32::from_le_bytes(make_array(&arr[12..])),
                 ],
                 poly_key,
             );
@@ -649,10 +599,10 @@ impl ChaCha20Poly1305 {
             acc = poly_step(
                 acc,
                 [
-                    get_u32_le(&arr[0..]),
-                    get_u32_le(&arr[4..]),
-                    get_u32_le(&arr[8..]),
-                    get_u32_le(&arr[12..]),
+                    u32::from_le_bytes(make_array(&arr[0..])),
+                    u32::from_le_bytes(make_array(&arr[4..])),
+                    u32::from_le_bytes(make_array(&arr[8..])),
+                    u32::from_le_bytes(make_array(&arr[12..])),
                 ],
                 poly_key,
             );
@@ -673,22 +623,22 @@ impl ChaCha20Poly1305 {
                 ct = &ct[64..];
 
                 let pt32: [u32; 16] = [
-                    get_u32_le(&pt_block[0..]),
-                    get_u32_le(&pt_block[4..]),
-                    get_u32_le(&pt_block[8..]),
-                    get_u32_le(&pt_block[12..]),
-                    get_u32_le(&pt_block[16..]),
-                    get_u32_le(&pt_block[20..]),
-                    get_u32_le(&pt_block[24..]),
-                    get_u32_le(&pt_block[28..]),
-                    get_u32_le(&pt_block[32..]),
-                    get_u32_le(&pt_block[36..]),
-                    get_u32_le(&pt_block[40..]),
-                    get_u32_le(&pt_block[44..]),
-                    get_u32_le(&pt_block[48..]),
-                    get_u32_le(&pt_block[52..]),
-                    get_u32_le(&pt_block[56..]),
-                    get_u32_le(&pt_block[60..]),
+                    u32::from_le_bytes(make_array(&pt_block[0..])),
+                    u32::from_le_bytes(make_array(&pt_block[4..])),
+                    u32::from_le_bytes(make_array(&pt_block[8..])),
+                    u32::from_le_bytes(make_array(&pt_block[12..])),
+                    u32::from_le_bytes(make_array(&pt_block[16..])),
+                    u32::from_le_bytes(make_array(&pt_block[20..])),
+                    u32::from_le_bytes(make_array(&pt_block[24..])),
+                    u32::from_le_bytes(make_array(&pt_block[28..])),
+                    u32::from_le_bytes(make_array(&pt_block[32..])),
+                    u32::from_le_bytes(make_array(&pt_block[36..])),
+                    u32::from_le_bytes(make_array(&pt_block[40..])),
+                    u32::from_le_bytes(make_array(&pt_block[44..])),
+                    u32::from_le_bytes(make_array(&pt_block[48..])),
+                    u32::from_le_bytes(make_array(&pt_block[52..])),
+                    u32::from_le_bytes(make_array(&pt_block[56..])),
+                    u32::from_le_bytes(make_array(&pt_block[60..])),
                 ];
 
                 acc = poly_step(acc, [pt32[0], pt32[1], pt32[2], pt32[3]], poly_key);
@@ -718,7 +668,7 @@ impl ChaCha20Poly1305 {
                 PUTU32LE!(pt_block, 60, blk[15]);
 
                 pt[enced..enced + 64].copy_from_slice(&pt_block);
-                enced = enced + 64;
+                enced += 64;
             } else {
                 let left = ct.len() - 16;
                 let mut pt_block = [0u8; 64];
@@ -726,22 +676,22 @@ impl ChaCha20Poly1305 {
                 ct = &ct[left..];
 
                 let pt32: [u32; 16] = [
-                    get_u32_le(&pt_block[0..]),
-                    get_u32_le(&pt_block[4..]),
-                    get_u32_le(&pt_block[8..]),
-                    get_u32_le(&pt_block[12..]),
-                    get_u32_le(&pt_block[16..]),
-                    get_u32_le(&pt_block[20..]),
-                    get_u32_le(&pt_block[24..]),
-                    get_u32_le(&pt_block[28..]),
-                    get_u32_le(&pt_block[32..]),
-                    get_u32_le(&pt_block[36..]),
-                    get_u32_le(&pt_block[40..]),
-                    get_u32_le(&pt_block[44..]),
-                    get_u32_le(&pt_block[48..]),
-                    get_u32_le(&pt_block[52..]),
-                    get_u32_le(&pt_block[56..]),
-                    get_u32_le(&pt_block[60..]),
+                    u32::from_le_bytes(make_array(&pt_block[0..])),
+                    u32::from_le_bytes(make_array(&pt_block[4..])),
+                    u32::from_le_bytes(make_array(&pt_block[8..])),
+                    u32::from_le_bytes(make_array(&pt_block[12..])),
+                    u32::from_le_bytes(make_array(&pt_block[16..])),
+                    u32::from_le_bytes(make_array(&pt_block[20..])),
+                    u32::from_le_bytes(make_array(&pt_block[24..])),
+                    u32::from_le_bytes(make_array(&pt_block[28..])),
+                    u32::from_le_bytes(make_array(&pt_block[32..])),
+                    u32::from_le_bytes(make_array(&pt_block[36..])),
+                    u32::from_le_bytes(make_array(&pt_block[40..])),
+                    u32::from_le_bytes(make_array(&pt_block[44..])),
+                    u32::from_le_bytes(make_array(&pt_block[48..])),
+                    u32::from_le_bytes(make_array(&pt_block[52..])),
+                    u32::from_le_bytes(make_array(&pt_block[56..])),
+                    u32::from_le_bytes(make_array(&pt_block[60..])),
                 ];
 
                 acc = poly_step(acc, [pt32[0], pt32[1], pt32[2], pt32[3]], poly_key);
@@ -784,7 +734,7 @@ impl ChaCha20Poly1305 {
                 }
 
                 pt[enced..enced + left].copy_from_slice(&pt_block[..left]);
-                enced = enced + left;
+                enced += left;
                 break;
             }
         }
@@ -800,40 +750,38 @@ impl ChaCha20Poly1305 {
             poly_key,
         );
 
-        let mut t0 = acc.0[0] as u128;
-        let mut t1 = acc.0[1] as u128;
-        let mut t2 = acc.0[2] as u128;
-        let mut t3 = 0_u128;
+        let mut t0 = u128::from(acc.0[0]);
+        let t1 = u128::from(acc.0[1]);
+        let mut t2 = u128::from(acc.0[2]);
 
         let mut acc0 = t0;
         let mut acc1 = t1;
 
         t0 = t2 & 0xfffffffffffffffc;
-        t1 = t3;
+        t2 >>= 2;
 
-        t2 = (((t2 as u64) >> 2) | ((t3 as u64) << 62)) as u128;
-        t3 = t3 >> 2;
+        acc0 = acc0.wrapping_add(t0);
+        acc1 = acc1.wrapping_add(acc0 >> 64);
 
-        acc0 += t0;
-        acc1 += t1 + (acc0 >> 64);
+        acc0 &= 0xffff_ffff_ffff_ffff;
+        acc1 &= 0xffff_ffff_ffff_ffff;
 
-        acc0 = acc0 as u64 as u128;
-        acc1 = acc1 as u64 as u128;
+        acc0 = acc0.wrapping_add(t2);
+        acc1 = acc1.wrapping_add(acc0 >> 64);
 
-        acc0 += t2;
-        acc1 += t3 + (acc0 >> 64);
+        acc0 &= 0xffff_ffff_ffff_ffff;
+        acc1 &= 0xffff_ffff_ffff_ffff;
 
-        acc0 = acc0 as u64 as u128;
-        acc1 = acc1 as u64 as u128;
-
-        acc0 += poly_enc[0] as u128;
-        acc1 += (poly_enc[1] as u128) + (acc0 >> 64);
+        acc0 = acc0.wrapping_add(u128::from(poly_enc.0[0]));
+        acc1 = acc1
+            .wrapping_add(u128::from(poly_enc.0[1]))
+            .wrapping_add(acc0 >> 64);
 
         let acc0 = acc0 as u64;
         let acc1 = acc1 as u64;
 
-        let ref_acc0 = get_u64_le(&ct[0..]);
-        let ref_acc1 = get_u64_le(&ct[8..]);
+        let ref_acc0 = u64::from_le_bytes(make_array(&ct[0..]));
+        let ref_acc1 = u64::from_le_bytes(make_array(&ct[8..]));
 
         let ok = ((ref_acc0 ^ acc0) | (ref_acc1 ^ acc1)) == 0;
         (enced, ok)
@@ -901,13 +849,13 @@ impl ChaCha20Poly1305 {
         let mut acc = Felem1305([0_u64; 3]);
 
         let poly_key = Poly1305R([
-            ((a[0] as u64) + ((a[1] as u64) << 32)) & 0x0FFFFFFC0FFFFFFF,
-            ((a[2] as u64) + ((a[3] as u64) << 32)) & 0x0FFFFFFC0FFFFFFC,
+            (u64::from(a[0]) + (u64::from(a[1]) << 32)) & 0x0FFFFFFC0FFFFFFF,
+            (u64::from(a[2]) + (u64::from(a[3]) << 32)) & 0x0FFFFFFC0FFFFFFC,
         ]);
 
         let poly_enc = Poly1305S([
-            (b[0] as u64) + ((b[1] as u64) << 32),
-            (b[2] as u64) + ((b[3] as u64) << 32),
+            u64::from(b[0]) + (u64::from(b[1]) << 32),
+            u64::from(b[2]) + (u64::from(b[3]) << 32),
         ]);
 
         let mut hashed = 0;
@@ -935,22 +883,22 @@ impl ChaCha20Poly1305 {
                 assert!(pt.len() >= 64);
 
                 let ct_block = [
-                    a[4] ^ get_u32_le(&pt[0 * 4..1 * 4]),
-                    a[5] ^ get_u32_le(&pt[1 * 4..2 * 4]),
-                    a[6] ^ get_u32_le(&pt[2 * 4..3 * 4]),
-                    a[7] ^ get_u32_le(&pt[3 * 4..4 * 4]),
-                    b[4] ^ get_u32_le(&pt[4 * 4..5 * 4]),
-                    b[5] ^ get_u32_le(&pt[5 * 4..6 * 4]),
-                    b[6] ^ get_u32_le(&pt[6 * 4..7 * 4]),
-                    b[7] ^ get_u32_le(&pt[7 * 4..8 * 4]),
-                    c[4] ^ get_u32_le(&pt[8 * 4..9 * 4]),
-                    c[5] ^ get_u32_le(&pt[9 * 4..10 * 4]),
-                    c[6] ^ get_u32_le(&pt[10 * 4..11 * 4]),
-                    c[7] ^ get_u32_le(&pt[11 * 4..12 * 4]),
-                    d[4] ^ get_u32_le(&pt[12 * 4..13 * 4]),
-                    d[5] ^ get_u32_le(&pt[13 * 4..14 * 4]),
-                    d[6] ^ get_u32_le(&pt[14 * 4..15 * 4]),
-                    d[7] ^ get_u32_le(&pt[15 * 4..16 * 4]),
+                    a[4] ^ u32::from_le_bytes(make_array(&pt[0..])),
+                    a[5] ^ u32::from_le_bytes(make_array(&pt[4..])),
+                    a[6] ^ u32::from_le_bytes(make_array(&pt[8..])),
+                    a[7] ^ u32::from_le_bytes(make_array(&pt[12..])),
+                    b[4] ^ u32::from_le_bytes(make_array(&pt[16..])),
+                    b[5] ^ u32::from_le_bytes(make_array(&pt[20..])),
+                    b[6] ^ u32::from_le_bytes(make_array(&pt[24..])),
+                    b[7] ^ u32::from_le_bytes(make_array(&pt[28..])),
+                    c[4] ^ u32::from_le_bytes(make_array(&pt[32..])),
+                    c[5] ^ u32::from_le_bytes(make_array(&pt[36..])),
+                    c[6] ^ u32::from_le_bytes(make_array(&pt[40..])),
+                    c[7] ^ u32::from_le_bytes(make_array(&pt[44..])),
+                    d[4] ^ u32::from_le_bytes(make_array(&pt[48..])),
+                    d[5] ^ u32::from_le_bytes(make_array(&pt[52..])),
+                    d[6] ^ u32::from_le_bytes(make_array(&pt[56..])),
+                    d[7] ^ u32::from_le_bytes(make_array(&pt[60..])),
                 ];
 
                 acc = poly_step(
@@ -975,22 +923,22 @@ impl ChaCha20Poly1305 {
                 );
 
                 let mut ct_block_8 = [0u8; 64];
-                ct_block_8[0 * 4..1 * 4].copy_from_slice(&u32_to_le(ct_block[0]));
-                ct_block_8[1 * 4..2 * 4].copy_from_slice(&u32_to_le(ct_block[1]));
-                ct_block_8[2 * 4..3 * 4].copy_from_slice(&u32_to_le(ct_block[2]));
-                ct_block_8[3 * 4..4 * 4].copy_from_slice(&u32_to_le(ct_block[3]));
-                ct_block_8[4 * 4..5 * 4].copy_from_slice(&u32_to_le(ct_block[4]));
-                ct_block_8[5 * 4..6 * 4].copy_from_slice(&u32_to_le(ct_block[5]));
-                ct_block_8[6 * 4..7 * 4].copy_from_slice(&u32_to_le(ct_block[6]));
-                ct_block_8[7 * 4..8 * 4].copy_from_slice(&u32_to_le(ct_block[7]));
-                ct_block_8[8 * 4..9 * 4].copy_from_slice(&u32_to_le(ct_block[8]));
-                ct_block_8[9 * 4..10 * 4].copy_from_slice(&u32_to_le(ct_block[9]));
-                ct_block_8[10 * 4..11 * 4].copy_from_slice(&u32_to_le(ct_block[10]));
-                ct_block_8[11 * 4..12 * 4].copy_from_slice(&u32_to_le(ct_block[11]));
-                ct_block_8[12 * 4..13 * 4].copy_from_slice(&u32_to_le(ct_block[12]));
-                ct_block_8[13 * 4..14 * 4].copy_from_slice(&u32_to_le(ct_block[13]));
-                ct_block_8[14 * 4..15 * 4].copy_from_slice(&u32_to_le(ct_block[14]));
-                ct_block_8[15 * 4..16 * 4].copy_from_slice(&u32_to_le(ct_block[15]));
+                ct_block_8[0..4].copy_from_slice(&(ct_block[0]).to_le_bytes());
+                ct_block_8[4..2 * 4].copy_from_slice(&(ct_block[1]).to_le_bytes());
+                ct_block_8[2 * 4..3 * 4].copy_from_slice(&(ct_block[2]).to_le_bytes());
+                ct_block_8[3 * 4..4 * 4].copy_from_slice(&(ct_block[3]).to_le_bytes());
+                ct_block_8[4 * 4..5 * 4].copy_from_slice(&(ct_block[4]).to_le_bytes());
+                ct_block_8[5 * 4..6 * 4].copy_from_slice(&(ct_block[5]).to_le_bytes());
+                ct_block_8[6 * 4..7 * 4].copy_from_slice(&(ct_block[6]).to_le_bytes());
+                ct_block_8[7 * 4..8 * 4].copy_from_slice(&(ct_block[7]).to_le_bytes());
+                ct_block_8[8 * 4..9 * 4].copy_from_slice(&(ct_block[8]).to_le_bytes());
+                ct_block_8[9 * 4..10 * 4].copy_from_slice(&(ct_block[9]).to_le_bytes());
+                ct_block_8[10 * 4..11 * 4].copy_from_slice(&(ct_block[10]).to_le_bytes());
+                ct_block_8[11 * 4..12 * 4].copy_from_slice(&(ct_block[11]).to_le_bytes());
+                ct_block_8[12 * 4..13 * 4].copy_from_slice(&(ct_block[12]).to_le_bytes());
+                ct_block_8[13 * 4..14 * 4].copy_from_slice(&(ct_block[13]).to_le_bytes());
+                ct_block_8[14 * 4..15 * 4].copy_from_slice(&(ct_block[14]).to_le_bytes());
+                ct_block_8[15 * 4..16 * 4].copy_from_slice(&(ct_block[15]).to_le_bytes());
                 ct[out..out + 64].copy_from_slice(&ct_block_8);
                 pt = &pt[64..];
                 out += 64;
@@ -1006,22 +954,22 @@ impl ChaCha20Poly1305 {
                 assert!(pt.len() >= 64);
 
                 let ct_block = [
-                    a[8] ^ get_u32_le(&pt[0 * 4..1 * 4]),
-                    a[9] ^ get_u32_le(&pt[1 * 4..2 * 4]),
-                    a[10] ^ get_u32_le(&pt[2 * 4..3 * 4]),
-                    a[11] ^ get_u32_le(&pt[3 * 4..4 * 4]),
-                    b[8] ^ get_u32_le(&pt[4 * 4..5 * 4]),
-                    b[9] ^ get_u32_le(&pt[5 * 4..6 * 4]),
-                    b[10] ^ get_u32_le(&pt[6 * 4..7 * 4]),
-                    b[11] ^ get_u32_le(&pt[7 * 4..8 * 4]),
-                    c[8] ^ get_u32_le(&pt[8 * 4..9 * 4]),
-                    c[9] ^ get_u32_le(&pt[9 * 4..10 * 4]),
-                    c[10] ^ get_u32_le(&pt[10 * 4..11 * 4]),
-                    c[11] ^ get_u32_le(&pt[11 * 4..12 * 4]),
-                    d[8] ^ get_u32_le(&pt[12 * 4..13 * 4]),
-                    d[9] ^ get_u32_le(&pt[13 * 4..14 * 4]),
-                    d[10] ^ get_u32_le(&pt[14 * 4..15 * 4]),
-                    d[11] ^ get_u32_le(&pt[15 * 4..16 * 4]),
+                    a[8] ^ u32::from_le_bytes(make_array(&pt[0..])),
+                    a[9] ^ u32::from_le_bytes(make_array(&pt[4..])),
+                    a[10] ^ u32::from_le_bytes(make_array(&pt[8..])),
+                    a[11] ^ u32::from_le_bytes(make_array(&pt[12..])),
+                    b[8] ^ u32::from_le_bytes(make_array(&pt[16..])),
+                    b[9] ^ u32::from_le_bytes(make_array(&pt[20..])),
+                    b[10] ^ u32::from_le_bytes(make_array(&pt[24..])),
+                    b[11] ^ u32::from_le_bytes(make_array(&pt[28..])),
+                    c[8] ^ u32::from_le_bytes(make_array(&pt[32..])),
+                    c[9] ^ u32::from_le_bytes(make_array(&pt[36..])),
+                    c[10] ^ u32::from_le_bytes(make_array(&pt[40..])),
+                    c[11] ^ u32::from_le_bytes(make_array(&pt[44..])),
+                    d[8] ^ u32::from_le_bytes(make_array(&pt[48..])),
+                    d[9] ^ u32::from_le_bytes(make_array(&pt[52..])),
+                    d[10] ^ u32::from_le_bytes(make_array(&pt[56..])),
+                    d[11] ^ u32::from_le_bytes(make_array(&pt[60..])),
                 ];
 
                 acc = poly_step(
@@ -1046,22 +994,22 @@ impl ChaCha20Poly1305 {
                 );
 
                 let mut ct_block_8 = [0u8; 64];
-                ct_block_8[0 * 4..1 * 4].copy_from_slice(&u32_to_le(ct_block[0]));
-                ct_block_8[1 * 4..2 * 4].copy_from_slice(&u32_to_le(ct_block[1]));
-                ct_block_8[2 * 4..3 * 4].copy_from_slice(&u32_to_le(ct_block[2]));
-                ct_block_8[3 * 4..4 * 4].copy_from_slice(&u32_to_le(ct_block[3]));
-                ct_block_8[4 * 4..5 * 4].copy_from_slice(&u32_to_le(ct_block[4]));
-                ct_block_8[5 * 4..6 * 4].copy_from_slice(&u32_to_le(ct_block[5]));
-                ct_block_8[6 * 4..7 * 4].copy_from_slice(&u32_to_le(ct_block[6]));
-                ct_block_8[7 * 4..8 * 4].copy_from_slice(&u32_to_le(ct_block[7]));
-                ct_block_8[8 * 4..9 * 4].copy_from_slice(&u32_to_le(ct_block[8]));
-                ct_block_8[9 * 4..10 * 4].copy_from_slice(&u32_to_le(ct_block[9]));
-                ct_block_8[10 * 4..11 * 4].copy_from_slice(&u32_to_le(ct_block[10]));
-                ct_block_8[11 * 4..12 * 4].copy_from_slice(&u32_to_le(ct_block[11]));
-                ct_block_8[12 * 4..13 * 4].copy_from_slice(&u32_to_le(ct_block[12]));
-                ct_block_8[13 * 4..14 * 4].copy_from_slice(&u32_to_le(ct_block[13]));
-                ct_block_8[14 * 4..15 * 4].copy_from_slice(&u32_to_le(ct_block[14]));
-                ct_block_8[15 * 4..16 * 4].copy_from_slice(&u32_to_le(ct_block[15]));
+                ct_block_8[0..4].copy_from_slice(&(ct_block[0]).to_le_bytes());
+                ct_block_8[4..2 * 4].copy_from_slice(&(ct_block[1]).to_le_bytes());
+                ct_block_8[2 * 4..3 * 4].copy_from_slice(&(ct_block[2]).to_le_bytes());
+                ct_block_8[3 * 4..4 * 4].copy_from_slice(&(ct_block[3]).to_le_bytes());
+                ct_block_8[4 * 4..5 * 4].copy_from_slice(&(ct_block[4]).to_le_bytes());
+                ct_block_8[5 * 4..6 * 4].copy_from_slice(&(ct_block[5]).to_le_bytes());
+                ct_block_8[6 * 4..7 * 4].copy_from_slice(&(ct_block[6]).to_le_bytes());
+                ct_block_8[7 * 4..8 * 4].copy_from_slice(&(ct_block[7]).to_le_bytes());
+                ct_block_8[8 * 4..9 * 4].copy_from_slice(&(ct_block[8]).to_le_bytes());
+                ct_block_8[9 * 4..10 * 4].copy_from_slice(&(ct_block[9]).to_le_bytes());
+                ct_block_8[10 * 4..11 * 4].copy_from_slice(&(ct_block[10]).to_le_bytes());
+                ct_block_8[11 * 4..12 * 4].copy_from_slice(&(ct_block[11]).to_le_bytes());
+                ct_block_8[12 * 4..13 * 4].copy_from_slice(&(ct_block[12]).to_le_bytes());
+                ct_block_8[13 * 4..14 * 4].copy_from_slice(&(ct_block[13]).to_le_bytes());
+                ct_block_8[14 * 4..15 * 4].copy_from_slice(&(ct_block[14]).to_le_bytes());
+                ct_block_8[15 * 4..16 * 4].copy_from_slice(&(ct_block[15]).to_le_bytes());
                 ct[out..out + 64].copy_from_slice(&ct_block_8);
                 pt = &pt[64..];
                 out += 64;
@@ -1077,22 +1025,22 @@ impl ChaCha20Poly1305 {
                 assert!(pt.len() >= 64);
 
                 let ct_block = [
-                    a[12] ^ get_u32_le(&pt[0 * 4..1 * 4]),
-                    a[13] ^ get_u32_le(&pt[1 * 4..2 * 4]),
-                    a[14] ^ get_u32_le(&pt[2 * 4..3 * 4]),
-                    a[15] ^ get_u32_le(&pt[3 * 4..4 * 4]),
-                    b[12] ^ get_u32_le(&pt[4 * 4..5 * 4]),
-                    b[13] ^ get_u32_le(&pt[5 * 4..6 * 4]),
-                    b[14] ^ get_u32_le(&pt[6 * 4..7 * 4]),
-                    b[15] ^ get_u32_le(&pt[7 * 4..8 * 4]),
-                    c[12] ^ get_u32_le(&pt[8 * 4..9 * 4]),
-                    c[13] ^ get_u32_le(&pt[9 * 4..10 * 4]),
-                    c[14] ^ get_u32_le(&pt[10 * 4..11 * 4]),
-                    c[15] ^ get_u32_le(&pt[11 * 4..12 * 4]),
-                    d[12] ^ get_u32_le(&pt[12 * 4..13 * 4]),
-                    d[13] ^ get_u32_le(&pt[13 * 4..14 * 4]),
-                    d[14] ^ get_u32_le(&pt[14 * 4..15 * 4]),
-                    d[15] ^ get_u32_le(&pt[15 * 4..16 * 4]),
+                    a[12] ^ u32::from_le_bytes(make_array(&pt[0..])),
+                    a[13] ^ u32::from_le_bytes(make_array(&pt[4..])),
+                    a[14] ^ u32::from_le_bytes(make_array(&pt[8..])),
+                    a[15] ^ u32::from_le_bytes(make_array(&pt[12..])),
+                    b[12] ^ u32::from_le_bytes(make_array(&pt[16..])),
+                    b[13] ^ u32::from_le_bytes(make_array(&pt[20..])),
+                    b[14] ^ u32::from_le_bytes(make_array(&pt[24..])),
+                    b[15] ^ u32::from_le_bytes(make_array(&pt[28..])),
+                    c[12] ^ u32::from_le_bytes(make_array(&pt[32..])),
+                    c[13] ^ u32::from_le_bytes(make_array(&pt[36..])),
+                    c[14] ^ u32::from_le_bytes(make_array(&pt[40..])),
+                    c[15] ^ u32::from_le_bytes(make_array(&pt[44..])),
+                    d[12] ^ u32::from_le_bytes(make_array(&pt[48..])),
+                    d[13] ^ u32::from_le_bytes(make_array(&pt[52..])),
+                    d[14] ^ u32::from_le_bytes(make_array(&pt[56..])),
+                    d[15] ^ u32::from_le_bytes(make_array(&pt[60..])),
                 ];
 
                 acc = poly_step(
@@ -1117,58 +1065,56 @@ impl ChaCha20Poly1305 {
                 );
 
                 let mut ct_block_8 = [0u8; 64];
-                ct_block_8[0 * 4..1 * 4].copy_from_slice(&u32_to_le(ct_block[0]));
-                ct_block_8[1 * 4..2 * 4].copy_from_slice(&u32_to_le(ct_block[1]));
-                ct_block_8[2 * 4..3 * 4].copy_from_slice(&u32_to_le(ct_block[2]));
-                ct_block_8[3 * 4..4 * 4].copy_from_slice(&u32_to_le(ct_block[3]));
-                ct_block_8[4 * 4..5 * 4].copy_from_slice(&u32_to_le(ct_block[4]));
-                ct_block_8[5 * 4..6 * 4].copy_from_slice(&u32_to_le(ct_block[5]));
-                ct_block_8[6 * 4..7 * 4].copy_from_slice(&u32_to_le(ct_block[6]));
-                ct_block_8[7 * 4..8 * 4].copy_from_slice(&u32_to_le(ct_block[7]));
-                ct_block_8[8 * 4..9 * 4].copy_from_slice(&u32_to_le(ct_block[8]));
-                ct_block_8[9 * 4..10 * 4].copy_from_slice(&u32_to_le(ct_block[9]));
-                ct_block_8[10 * 4..11 * 4].copy_from_slice(&u32_to_le(ct_block[10]));
-                ct_block_8[11 * 4..12 * 4].copy_from_slice(&u32_to_le(ct_block[11]));
-                ct_block_8[12 * 4..13 * 4].copy_from_slice(&u32_to_le(ct_block[12]));
-                ct_block_8[13 * 4..14 * 4].copy_from_slice(&u32_to_le(ct_block[13]));
-                ct_block_8[14 * 4..15 * 4].copy_from_slice(&u32_to_le(ct_block[14]));
-                ct_block_8[15 * 4..16 * 4].copy_from_slice(&u32_to_le(ct_block[15]));
+                ct_block_8[0..4].copy_from_slice(&(ct_block[0]).to_le_bytes());
+                ct_block_8[4..2 * 4].copy_from_slice(&(ct_block[1]).to_le_bytes());
+                ct_block_8[2 * 4..3 * 4].copy_from_slice(&(ct_block[2]).to_le_bytes());
+                ct_block_8[3 * 4..4 * 4].copy_from_slice(&(ct_block[3]).to_le_bytes());
+                ct_block_8[4 * 4..5 * 4].copy_from_slice(&(ct_block[4]).to_le_bytes());
+                ct_block_8[5 * 4..6 * 4].copy_from_slice(&(ct_block[5]).to_le_bytes());
+                ct_block_8[6 * 4..7 * 4].copy_from_slice(&(ct_block[6]).to_le_bytes());
+                ct_block_8[7 * 4..8 * 4].copy_from_slice(&(ct_block[7]).to_le_bytes());
+                ct_block_8[8 * 4..9 * 4].copy_from_slice(&(ct_block[8]).to_le_bytes());
+                ct_block_8[9 * 4..10 * 4].copy_from_slice(&(ct_block[9]).to_le_bytes());
+                ct_block_8[10 * 4..11 * 4].copy_from_slice(&(ct_block[10]).to_le_bytes());
+                ct_block_8[11 * 4..12 * 4].copy_from_slice(&(ct_block[11]).to_le_bytes());
+                ct_block_8[12 * 4..13 * 4].copy_from_slice(&(ct_block[12]).to_le_bytes());
+                ct_block_8[13 * 4..14 * 4].copy_from_slice(&(ct_block[13]).to_le_bytes());
+                ct_block_8[14 * 4..15 * 4].copy_from_slice(&(ct_block[14]).to_le_bytes());
+                ct_block_8[15 * 4..16 * 4].copy_from_slice(&(ct_block[15]).to_le_bytes());
                 ct[out..out + 64].copy_from_slice(&ct_block_8);
                 out += 64;
                 acc = poly_len(acc, hashed as u64, out as u64, poly_key);
 
-                let mut t0 = acc.0[0] as u128;
-                let mut t1 = acc.0[1] as u128;
-                let mut t2 = acc.0[2] as u128;
-                let mut t3 = 0_u128;
+                let mut t0 = u128::from(acc.0[0]);
+                let t1 = u128::from(acc.0[1]);
+                let mut t2 = u128::from(acc.0[2]);
 
                 let mut acc0 = t0;
                 let mut acc1 = t1;
 
-                t0 = t2 & 0xfffffffffffffffc;
-                t1 = t3;
+                t0 = t2 & 0xffff_ffff_ffff_fffc;
+                t2 >>= 2;
 
-                t2 = (((t2 as u64) >> 2) | ((t3 as u64) << 62)) as u128;
-                t3 = t3 >> 2;
+                acc0 = acc0.wrapping_add(t0);
+                acc1 = acc1.wrapping_add(acc0 >> 64);
 
-                acc0 += t0;
-                acc1 += t1 + (acc0 >> 64);
+                acc0 &= 0xffff_ffff_ffff_ffff;
+                acc1 &= 0xffff_ffff_ffff_ffff;
 
-                acc0 = acc0 as u64 as u128;
-                acc1 = acc1 as u64 as u128;
+                acc0 = acc0.wrapping_add(t2);
+                acc1 = acc1.wrapping_add(acc0 >> 64);
 
-                acc0 += t2;
-                acc1 += t3 + (acc0 >> 64);
+                acc0 &= 0xffff_ffff_ffff_ffff;
+                acc1 &= 0xffff_ffff_ffff_ffff;
 
-                acc0 = acc0 as u64 as u128;
-                acc1 = acc1 as u64 as u128;
-
-                acc0 += poly_enc.0[0] as u128;
-                acc1 += (poly_enc.0[1] as u128) + (acc0 >> 64);
+                acc0 = acc0.wrapping_add(u128::from(poly_enc.0[0]));
+                acc1 = acc1
+                    .wrapping_add(u128::from(poly_enc.0[1]))
+                    .wrapping_add(acc0 >> 64);
 
                 assert!(ct.len() >= out + 16);
-                ct[out..out + 8].copy_from_slice(&u64_to_le(acc0 as u64));
-                ct[out + 8..out + 16].copy_from_slice(&u64_to_le(acc1 as u64));
+                ct[out..out + 8].copy_from_slice(&(acc0 as u64).to_le_bytes());
+                ct[out + 8..out + 16].copy_from_slice(&(acc1 as u64).to_le_bytes());
                 return out + 16;
             } else {
                 stream_block = [
@@ -1179,21 +1125,22 @@ impl ChaCha20Poly1305 {
             }
         }
 
-        if pt.len() > 0 {
+        if !pt.is_empty() {
             // Partial block
             let mut last_pt = [0u8; 16];
             let mut base = 0;
 
             while pt.len() >= 16 {
                 assert!(pt.len() >= 16);
-                stream_block[base + 0] ^= get_u32_le(&pt[0 * 4..1 * 4]);
-                stream_block[base + 1] ^= get_u32_le(&pt[1 * 4..2 * 4]);
-                stream_block[base + 2] ^= get_u32_le(&pt[2 * 4..3 * 4]);
-                stream_block[base + 3] ^= get_u32_le(&pt[3 * 4..4 * 4]);
+
+                stream_block[base] ^= u32::from_le_bytes(make_array(&pt[0..]));
+                stream_block[base + 1] ^= u32::from_le_bytes(make_array(&pt[4..]));
+                stream_block[base + 2] ^= u32::from_le_bytes(make_array(&pt[8..]));
+                stream_block[base + 3] ^= u32::from_le_bytes(make_array(&pt[12..]));
                 acc = poly_step(
                     acc,
                     [
-                        stream_block[base + 0],
+                        stream_block[base],
                         stream_block[base + 1],
                         stream_block[base + 2],
                         stream_block[base + 3],
@@ -1201,38 +1148,38 @@ impl ChaCha20Poly1305 {
                     poly_key,
                 );
                 let mut ct_block_8 = [0u8; 16];
-                ct_block_8[0 * 4..1 * 4].copy_from_slice(&u32_to_le(stream_block[base + 0]));
-                ct_block_8[1 * 4..2 * 4].copy_from_slice(&u32_to_le(stream_block[base + 1]));
-                ct_block_8[2 * 4..3 * 4].copy_from_slice(&u32_to_le(stream_block[base + 2]));
-                ct_block_8[3 * 4..4 * 4].copy_from_slice(&u32_to_le(stream_block[base + 3]));
+                ct_block_8[0..4].copy_from_slice(&(stream_block[base]).to_le_bytes());
+                ct_block_8[4..2 * 4].copy_from_slice(&(stream_block[base + 1]).to_le_bytes());
+                ct_block_8[2 * 4..3 * 4].copy_from_slice(&(stream_block[base + 2]).to_le_bytes());
+                ct_block_8[3 * 4..4 * 4].copy_from_slice(&(stream_block[base + 3]).to_le_bytes());
                 ct[out..out + 16].copy_from_slice(&ct_block_8);
                 pt = &pt[16..];
                 out += 16;
                 base += 4;
             }
 
-            if pt.len() > 0 {
+            if !pt.is_empty() {
                 last_pt[..pt.len()].copy_from_slice(&pt[..]);
-                stream_block[base + 0] ^= get_u32_le(&last_pt[0 * 4..1 * 4]);
-                stream_block[base + 1] ^= get_u32_le(&last_pt[1 * 4..2 * 4]);
-                stream_block[base + 2] ^= get_u32_le(&last_pt[2 * 4..3 * 4]);
-                stream_block[base + 3] ^= get_u32_le(&last_pt[3 * 4..4 * 4]);
+                stream_block[base] ^= u32::from_le_bytes(make_array(&last_pt[0..]));
+                stream_block[base + 1] ^= u32::from_le_bytes(make_array(&last_pt[4..]));
+                stream_block[base + 2] ^= u32::from_le_bytes(make_array(&last_pt[8..]));
+                stream_block[base + 3] ^= u32::from_le_bytes(make_array(&last_pt[12..]));
 
                 let mut ct_block_8 = [0u8; 16];
-                ct_block_8[0 * 4..1 * 4].copy_from_slice(&u32_to_le(stream_block[base + 0]));
-                ct_block_8[1 * 4..2 * 4].copy_from_slice(&u32_to_le(stream_block[base + 1]));
-                ct_block_8[2 * 4..3 * 4].copy_from_slice(&u32_to_le(stream_block[base + 2]));
-                ct_block_8[3 * 4..4 * 4].copy_from_slice(&u32_to_le(stream_block[base + 3]));
+                ct_block_8[0..4].copy_from_slice(&(stream_block[base]).to_le_bytes());
+                ct_block_8[4..2 * 4].copy_from_slice(&(stream_block[base + 1]).to_le_bytes());
+                ct_block_8[2 * 4..3 * 4].copy_from_slice(&(stream_block[base + 2]).to_le_bytes());
+                ct_block_8[3 * 4..4 * 4].copy_from_slice(&(stream_block[base + 3]).to_le_bytes());
                 for i in pt.len()..16 {
                     ct_block_8[i] = 0;
                 }
                 acc = poly_step(
                     acc,
                     [
-                        get_u32_le(&ct_block_8[0 * 4..1 * 4]),
-                        get_u32_le(&ct_block_8[1 * 4..2 * 4]),
-                        get_u32_le(&ct_block_8[2 * 4..3 * 4]),
-                        get_u32_le(&ct_block_8[3 * 4..4 * 4]),
+                        u32::from_le_bytes(make_array(&ct_block_8[0..])),
+                        u32::from_le_bytes(make_array(&ct_block_8[4..])),
+                        u32::from_le_bytes(make_array(&ct_block_8[8..])),
+                        u32::from_le_bytes(make_array(&ct_block_8[12..])),
                     ],
                     poly_key,
                 );
@@ -1243,8 +1190,8 @@ impl ChaCha20Poly1305 {
 
         let (a0, a1) = poly_final(acc, hashed as u64, out as u64, poly_key, poly_enc);
         assert!(ct.len() >= out + 16);
-        ct[out..out + 8].copy_from_slice(&u64_to_le(a0));
-        ct[out + 8..out + 16].copy_from_slice(&u64_to_le(a1));
+        ct[out..out + 8].copy_from_slice(&a0.to_le_bytes());
+        ct[out + 8..out + 16].copy_from_slice(&a1.to_le_bytes());
         return out + 16;
     }
 
@@ -1285,9 +1232,9 @@ impl ChaCha20Poly1305 {
             self.key[6],
             self.key[7],
             0,
-            get_u32_le(&nonce[0..]),
-            get_u32_le(&nonce[4..]),
-            get_u32_le(&nonce[8..]),
+            u32::from_le_bytes(make_array(&nonce[0..])),
+            u32::from_le_bytes(make_array(&nonce[4..])),
+            u32::from_le_bytes(make_array(&nonce[8..])),
         ]
     }
 
@@ -1306,10 +1253,10 @@ impl ChaCha20Poly1305 {
             self.key[5],
             self.key[6],
             self.key[7],
-            get_u32_le(&nonce[0..]),
-            get_u32_le(&nonce[4..]),
-            get_u32_le(&nonce[8..]),
-            get_u32_le(&nonce[12..]),
+            u32::from_le_bytes(make_array(&nonce[0..])),
+            u32::from_le_bytes(make_array(&nonce[4..])),
+            u32::from_le_bytes(make_array(&nonce[8..])),
+            u32::from_le_bytes(make_array(&nonce[12..])),
         ];
 
         let state = chacha20_block(state, true);
@@ -1330,8 +1277,8 @@ impl ChaCha20Poly1305 {
             state[15],
             0,
             0,
-            get_u32_le(&nonce[16..]),
-            get_u32_le(&nonce[20..]),
+            u32::from_le_bytes(make_array(&nonce[16..])),
+            u32::from_le_bytes(make_array(&nonce[20..])),
         ]
     }
 
@@ -1433,9 +1380,11 @@ impl ChaCha20Poly1305 {
         if ok {
             return Ok(n);
         }
-        for i in 0..plaintext.len() {
-            plaintext[i] = 0;
+
+        for p in plaintext {
+            *p = 0;
         }
+
         Err(WireGuardError::InvalidAeadTag)
     }
 }

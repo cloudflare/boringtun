@@ -108,7 +108,7 @@ impl Tai64N {
         //   return Err(WireGuardError::InvalidTai64nTimestamp);
         //}
 
-        return Ok(Tai64N { secs, nano });
+        Ok(Tai64N { secs, nano })
     }
 
     pub fn after(&self, other: &Tai64N) -> bool {
@@ -328,7 +328,7 @@ impl Handshake {
     fn inc_index(&mut self) -> u32 {
         let index = self.next_index;
         let idx8 = index as u8;
-        self.next_index = (index & !0xff) | (idx8.wrapping_add(1)) as u32;
+        self.next_index = (index & !0xff) | u32::from(idx8.wrapping_add(1));
         index
     }
 
@@ -727,7 +727,7 @@ impl Handshake {
             peer_index,
         };
 
-        return self.format_handshake_response(dst);
+        self.format_handshake_response(dst)
     }
 
     fn format_handshake_response<'a>(

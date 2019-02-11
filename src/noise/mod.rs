@@ -43,6 +43,8 @@ pub enum Verbosity {
     All,
 }
 
+type LogFunction = Box<Fn(&str) + Send>;
+
 /// Tunnel represents a point-to-point WireGuard connection
 pub struct Tunn {
     handshake: spin::Mutex<handshake::Handshake>, // The handshake currently in progress
@@ -51,7 +53,7 @@ pub struct Tunn {
     packet_queue: spin::Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
     timers: timers::Timers, // Keeps tabs on the expiring timers
 
-    logger: Option<spin::Mutex<Box<Fn(&str) + Send>>>,
+    logger: Option<spin::Mutex<LogFunction>>,
     verbosity: Verbosity,
 }
 
@@ -85,7 +87,7 @@ impl Tunn {
     }
 
     /// Set the log function and logging level for the tunnel
-    pub fn set_logger(&mut self, logger: Box<Fn(&str) + Send>, verbosity: Verbosity) {
+    pub fn set_logger(&mut self, logger: LogFunction, verbosity: Verbosity) {
         self.logger = Some(spin::Mutex::new(logger));
         self.verbosity = verbosity;
     }
@@ -192,7 +194,7 @@ impl Tunn {
                     // On error, return packet to the queue
                     self.requeue_packet(packet);
                 }
-                r @ _ => return r,
+                r => return r,
             }
         }
         TunnResult::Done
@@ -227,7 +229,7 @@ impl Tunn {
         }
         // Extract the reciever index
         let idx = u32::from_le_bytes([
-            src[session::IDX_OFF + 0],
+            src[session::IDX_OFF],
             src[session::IDX_OFF + 1],
             src[session::IDX_OFF + 2],
             src[session::IDX_OFF + 3],
@@ -256,13 +258,13 @@ impl Tunn {
 
         match packet[0] >> 4 {
             4 if packet.len() >= IPV4_MIN_HEADER_SIZE => Some(IpAddr::from([
-                packet[IPV4_DST_IP_OFF + 0],
+                packet[IPV4_DST_IP_OFF],
                 packet[IPV4_DST_IP_OFF + 1],
                 packet[IPV4_DST_IP_OFF + 2],
                 packet[IPV4_DST_IP_OFF + 3],
             ])),
             6 if packet.len() >= IPV6_MIN_HEADER_SIZE => Some(IpAddr::from([
-                packet[IPV6_DST_IP_OFF + 0],
+                packet[IPV6_DST_IP_OFF],
                 packet[IPV6_DST_IP_OFF + 1],
                 packet[IPV6_DST_IP_OFF + 2],
                 packet[IPV6_DST_IP_OFF + 3],
@@ -287,18 +289,18 @@ impl Tunn {
         let (packet_len, src_ip_address) = match packet.len() {
             0 => return TunnResult::Done, // This is keepalive, and not an error
             _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => (
-                u16::from_be_bytes([packet[IPV4_LEN_OFF + 0], packet[IPV4_LEN_OFF + 1]]) as usize,
+                u16::from_be_bytes([packet[IPV4_LEN_OFF], packet[IPV4_LEN_OFF + 1]]) as usize,
                 IpAddr::from([
-                    packet[IPV4_SRC_IP_OFF + 0],
+                    packet[IPV4_SRC_IP_OFF],
                     packet[IPV4_SRC_IP_OFF + 1],
                     packet[IPV4_SRC_IP_OFF + 2],
                     packet[IPV4_SRC_IP_OFF + 3],
                 ]),
             ),
             _ if packet[0] >> 4 == 6 && packet.len() >= IPV6_MIN_HEADER_SIZE => (
-                u16::from_be_bytes([packet[IPV6_LEN_OFF + 0], packet[IPV6_LEN_OFF + 1]]) as usize,
+                u16::from_be_bytes([packet[IPV6_LEN_OFF], packet[IPV6_LEN_OFF + 1]]) as usize,
                 IpAddr::from([
-                    packet[IPV6_SRC_IP_OFF + 0],
+                    packet[IPV6_SRC_IP_OFF],
                     packet[IPV6_SRC_IP_OFF + 1],
                     packet[IPV6_SRC_IP_OFF + 2],
                     packet[IPV6_SRC_IP_OFF + 3],
