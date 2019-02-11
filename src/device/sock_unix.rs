@@ -69,11 +69,11 @@ impl UNIXSocket {
         };
 
         for (i, c) in address.chars().enumerate() {
-            addr.sun_path[i] = c as i8;
+            addr.sun_path[i] = c as _;
         }
 
         match unsafe {
-            unlink(&addr.sun_path as *const i8);
+            unlink(&addr.sun_path as _);
             bind(
                 self.fd,
                 &addr as *const sockaddr_un as *const sockaddr,
