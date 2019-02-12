@@ -11,12 +11,6 @@ pub fn errno_str() -> String {
 const TUNSETIFF: u64 = 0x400454ca;
 
 #[repr(C)]
-pub struct ctl_info {
-    pub ctl_id: uint32_t,
-    pub ctl_name: [c_uchar; 96],
-}
-
-#[repr(C)]
 union IfrIfru {
     ifru_addr: sockaddr,
     ifru_addr_v4: sockaddr_in,
@@ -112,7 +106,7 @@ impl TunSocket {
     fn write(&self, buf: &[u8]) -> usize {
         match unsafe { write(self.fd, &buf[0] as *const u8 as _, buf.len() as _) } {
             -1 => 0,
-            n @ _ => n as usize,
+            n => n as usize,
         }
     }
 

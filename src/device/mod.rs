@@ -17,7 +17,6 @@ use crypto::x25519::X25519Key;
 use noise::handshake::parse_handshake_anon;
 use std::collections::HashMap;
 use std::convert::From;
-use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
@@ -46,7 +45,9 @@ pub enum Error {
     IOCtl(String),
     Connect(String),
     SetSockOpt(String),
+    #[cfg(target_os = "macos")]
     InvalidTunnelName,
+    #[cfg(target_os = "macos")]
     GetSockOpt(String),
     UDPRead(String),
     #[cfg(target_os = "linux")]
@@ -213,6 +214,7 @@ impl Device {
 
         #[cfg(target_os = "macos")]
         {
+            use std::io::Write;
             // Only for macOS write the actual socket name into WG_TUN_NAME_FILE
             std::env::var("WG_TUN_NAME_FILE")
                 .and_then(|name_file| {
