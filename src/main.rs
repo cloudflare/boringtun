@@ -12,10 +12,10 @@ mod device;
 pub mod ffi;
 pub mod noise;
 
-//use device::event::*;
 use daemonize::Daemonize;
 use device::*;
 use std::env;
+use std::env::var;
 use std::fs::File;
 use std::sync::Arc;
 use std::thread;
@@ -25,41 +25,30 @@ fn print_usage(bin: &str) {
     println!("{} [-f/--foreground] INTERFACE-NAME", bin);
 }
 
-struct WireGuard {}
+fn start_device(name: &str) {
+    match Device::new(name) {
+        Ok(new_device) => {
+            let dev = Arc::new(DeviceHandle::new(new_device));
+            let mut threads = vec![];
 
-impl WireGuard {
-    pub fn new() -> WireGuard {
-        WireGuard {}
-    }
+            let nthreads = match var("WG_THREADS") {
+                Ok(val) => usize::from_str_radix(&val, 10).unwrap(),
+                Err(_) => 4,
+            };
 
-    pub fn register_device(&mut self, name: &str) -> bool {
-        match Device::new(name) {
-            Ok(new_device) => {
-                let dev = Arc::new(DeviceHandle::new(new_device));
-                let mut threads = vec![];
-
-                let nthreads = match std::env::var("WG_THREADS") {
-                    Ok(val) => usize::from_str_radix(&val, 10).unwrap(),
-                    Err(_) => 4,
-                };
-
-                for _ in 0..nthreads {
-                    threads.push({
-                        let dev = Arc::clone(&dev);
-                        thread::spawn(move || dev.event_loop())
-                    });
-                }
-
-                for t in threads {
-                    t.join().unwrap();
-                }
-
-                true
+            for _ in 0..nthreads {
+                threads.push({
+                    let dev = Arc::clone(&dev);
+                    thread::spawn(move || dev.event_loop())
+                });
             }
-            Err(e) => {
-                println!("{:?}", e);
-                false
+
+            for t in threads {
+                t.join().unwrap();
             }
+        }
+        Err(e) => {
+            eprintln!("{:?}", e);
         }
     }
 }
@@ -99,8 +88,5 @@ fn main() {
         }
     }
 
-    let mut wg = WireGuard::new();
-    if !wg.register_device(&tun_name) {
-        return;
-    }
+    start_device(&tun_name);
 }

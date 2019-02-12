@@ -29,16 +29,6 @@ impl UNIXSocket {
         }
     }
 
-    pub fn set_non_blocking(self) -> Result<UNIXSocket, Error> {
-        match unsafe { fcntl(self.fd, F_GETFL) } {
-            -1 => Err(Error::FCntl(errno_str())),
-            flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
-                -1 => Err(Error::FCntl(errno_str())),
-                _ => Ok(self),
-            },
-        }
-    }
-
     pub fn bind(self, address: &str) -> Result<UNIXSocket, Error> {
         assert!(address.len() < 108);
         let mut addr = sockaddr_un {

@@ -17,6 +17,7 @@ use crypto::x25519::X25519Key;
 use noise::handshake::parse_handshake_anon;
 use std::collections::HashMap;
 use std::convert::From;
+use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
@@ -48,6 +49,7 @@ pub enum Error {
     InvalidTunnelName,
     GetSockOpt(String),
     UDPRead(String),
+    #[cfg(target_os = "linux")]
     Timer(String),
     IfaceRead(String),
 }
@@ -204,16 +206,28 @@ impl Device {
             ..Default::default()
         };
 
-        device.register_api_handler(name)?;
+        device.register_api_handler()?;
         device.register_iface_handler(Arc::clone(&device.iface))?;
         device.register_notifier()?;
         device.register_timer()?;
 
-        Ok(device)
-    }
+        #[cfg(target_os = "macos")]
+        {
+            // Only for macOS write the actual socket name into WG_TUN_NAME_FILE
+            std::env::var("WG_TUN_NAME_FILE")
+                .and_then(|name_file| {
+                    if name == "utun" {
+                        std::fs::File::create(name_file)
+                            .unwrap()
+                            .write_all(device.iface.name().unwrap().as_bytes())
+                            .unwrap();
+                    }
+                    Ok(())
+                })
+                .is_ok();
+        }
 
-    pub fn set_mtu(&self, mtu: i32) -> Result<(), Error> {
-        self.iface.set_mtu(mtu)
+        Ok(device)
     }
 
     fn open_listen_socket(&mut self, port: u16) -> Result<(), Error> {
@@ -324,7 +338,7 @@ impl Device {
                     match peer.update_timers(&mut dst[..]) {
                         TunnResult::Done => {}
                         TunnResult::Err(WireGuardError::ConnectionExpired) => {
-                            // TODO: close peer socket, remove from timers
+                            // TODO: close peer socket, remove from timers?
                         }
                         TunnResult::Err(e) => eprintln!("Timer error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {

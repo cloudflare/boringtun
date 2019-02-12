@@ -7,19 +7,13 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::AsRawFd;
 
 impl Device {
-    pub fn register_api_handler(&self, name: &str) -> Result<(), Error> {
+    pub fn register_api_handler(&self) -> Result<(), Error> {
         if let Err(_) = create_dir("/var/run/wireguard/") {};
-        let iface_name = self.iface.name()?;
-        let path = format!("/var/run/wireguard/{}.sock", iface_name);
+        let path = format!("/var/run/wireguard/{}.sock", self.iface.name()?);
 
         let api_sock = UNIXSocket::new()
             .and_then(|s| s.bind(&path))
             .and_then(|s| s.listen())?;
-
-        let mut name_file =
-            File::create(format!("/var/run/wireguard/{}.name", iface_name)).unwrap();
-
-        name_file.write_all(iface_name.as_bytes()).unwrap();
 
         let api_sock_ev = self.factory.new_event(
             api_sock.as_raw_fd(),
@@ -70,6 +64,10 @@ fn api_get(writer: &mut BufWriter<&File>, d: &Device) -> Option<i32> {
 
         if let Some(ref key) = p.preshared_key() {
             writer.write(format!("preshared_key={}\n", encode_hex(key)).as_ref());
+        }
+
+        if let Some(fwmark) = d.fwmark {
+            writer.write(format!("fwmark={}\n", fwmark).as_ref());
         }
 
         if let Some(ref addr) = p.endpoint().addr {

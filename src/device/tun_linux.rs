@@ -101,31 +101,6 @@ impl TunSocket {
         }
     }
 
-    pub fn set_mtu(&self, mtu: i32) -> Result<(), Error> {
-        let fd = match unsafe { socket(AF_INET, SOCK_STREAM, IPPROTO_IP) } {
-            -1 => return Err(Error::Socket(errno_str())),
-            fd @ _ => fd,
-        };
-
-        let name = self.name()?;
-
-        let iface_name: &[u8] = name.as_ref();
-        let mut ifr = ifreq {
-            ifr_name: [0; IF_NAMESIZE],
-            ifr_ifru: IfrIfru { ifru_mtu: mtu },
-        };
-
-        ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
-
-        if unsafe { ioctl(fd, SIOCSIFMTU, &ifr) } < 0 {
-            return Err(Error::IOCtl(errno_str()));
-        }
-
-        unsafe { close(fd) };
-
-        Ok(())
-    }
-
     pub fn write4(&self, src: &[u8]) -> usize {
         self.write(src)
     }

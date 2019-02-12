@@ -1,6 +1,9 @@
 use super::Error;
 use libc::*;
+use std::mem::size_of;
+use std::mem::size_of_val;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::ptr::null_mut;
 
 pub fn errno_str() -> String {
     let strerr = unsafe { strerror(*__error()) };
@@ -16,41 +19,7 @@ pub struct ctl_info {
     pub ctl_name: [c_uchar; 96],
 }
 
-#[repr(C)]
-union IfrIfru {
-    ifru_addr: sockaddr,
-    ifru_addr_v4: sockaddr_in,
-    ifru_addr_v6: sockaddr_in,
-    ifru_dstaddr: sockaddr,
-    ifru_broadaddr: sockaddr,
-    ifru_flags: c_short,
-    ifru_metric: c_int,
-    ifru_mtu: c_int,
-    ifru_phys: c_int,
-    ifru_media: c_int,
-    ifru_intval: c_int,
-    //ifru_data: caddr_t,
-    //ifru_devmtu: ifdevmtu,
-    //ifru_kpi: ifkpi,
-    ifru_wake_flags: uint32_t,
-    ifru_route_refcnt: uint32_t,
-    ifru_cap: [c_int; 2],
-    ifru_functional_type: uint32_t,
-}
-
-#[repr(C)]
-pub struct ifreq {
-    ifr_name: [c_uchar; IF_NAMESIZE],
-    ifr_ifru: IfrIfru,
-}
-
 const CTLIOCGINFO: uint64_t = 0x00000000c0644e03;
-const SIOCSIFMTU: uint64_t = 0x0000000080206934;
-const _SIOCSIFADDR: uint64_t = 0x000000008020690c;
-const _SIOGSIFMTU: uint64_t = 0x00000000c0206933;
-const _SIOCSIFNETMASK: uint64_t = 0x0000000080206916;
-const _SIOCGIFFLAGS: uint64_t = 0x00000000c0206911;
-const _SIOCSIFDSTADDR: uint64_t = 0x000000008020690e;
 
 #[derive(Default, Debug)]
 pub struct TunSocket {
@@ -106,7 +75,7 @@ impl TunSocket {
         }
 
         let addr = sockaddr_ctl {
-            sc_len: std::mem::size_of::<sockaddr_ctl>() as u8,
+            sc_len: size_of::<sockaddr_ctl>() as u8,
             sc_family: AF_SYSTEM as u8,
             ss_sysaddr: AF_SYS_CONTROL as u16,
             sc_id: info.ctl_id,
@@ -117,8 +86,8 @@ impl TunSocket {
         if unsafe {
             connect(
                 fd,
-                &addr as *const sockaddr_ctl as *const sockaddr,
-                std::mem::size_of::<sockaddr_ctl>() as u32,
+                &addr as *const sockaddr_ctl as _,
+                size_of_val(&addr) as _,
             )
         } < 0
         {
@@ -137,7 +106,7 @@ impl TunSocket {
                 self.fd,
                 SYSPROTO_CONTROL,
                 UTUN_OPT_IFNAME,
-                &mut tunnel_name[..] as *mut [u8] as *mut c_void,
+                &mut tunnel_name[0] as *mut u8 as *mut c_void,
                 &mut tunnel_name_len,
             )
         } < 0
@@ -159,30 +128,6 @@ impl TunSocket {
         }
     }
 
-    pub fn set_mtu(&self, mtu: i32) -> Result<(), Error> {
-        let fd = match unsafe { socket(AF_INET, SOCK_STREAM, IPPROTO_IP) } {
-            -1 => return Err(Error::Socket(errno_str())),
-            fd @ _ => fd,
-        };
-
-        let name = self.name()?;
-        let iface_name: &[u8] = name.as_ref();
-        let mut ifr = ifreq {
-            ifr_name: [0; IF_NAMESIZE],
-            ifr_ifru: IfrIfru { ifru_mtu: mtu },
-        };
-
-        ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
-
-        if unsafe { ioctl(fd, SIOCSIFMTU, &ifr) } < 0 {
-            return Err(Error::IOCtl(errno_str()));
-        }
-
-        unsafe { close(fd) };
-
-        Ok(())
-    }
-
     fn write(&self, src: &[u8], af: u8) -> usize {
         let mut hdr = [0u8, 0u8, 0u8, af as u8];
         let mut iov = [
@@ -197,11 +142,11 @@ impl TunSocket {
         ];
 
         let mut msg_hdr = msghdr {
-            msg_name: std::ptr::null_mut(),
+            msg_name: null_mut(),
             msg_namelen: 0,
             msg_iov: &mut iov[0],
             msg_iovlen: iov.len() as _,
-            msg_control: std::ptr::null_mut(),
+            msg_control: null_mut(),
             msg_controllen: 0,
             msg_flags: 0,
         };
@@ -235,11 +180,11 @@ impl TunSocket {
         ];
 
         let mut msg_hdr = msghdr {
-            msg_name: std::ptr::null_mut(),
+            msg_name: null_mut(),
             msg_namelen: 0,
             msg_iov: &mut iov[0],
             msg_iovlen: iov.len() as _,
-            msg_control: std::ptr::null_mut(),
+            msg_control: null_mut(),
             msg_controllen: 0,
             msg_flags: 0,
         };
@@ -247,7 +192,7 @@ impl TunSocket {
         match unsafe { recvmsg(self.fd, &mut msg_hdr, 0) } {
             -1 => Err(Error::IfaceRead(errno_str())),
             0..=4 => Ok(&mut dst[..0]),
-            n @ _ => Ok(&mut dst[..(n - 4) as usize]),
+            n => Ok(&mut dst[..(n - 4) as usize]),
         }
     }
 }
