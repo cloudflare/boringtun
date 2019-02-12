@@ -145,7 +145,7 @@ impl UDPSocket {
     }
 
     fn connect4(self, dst: &SocketAddrV4) -> Result<UDPSocket, Error> {
-        // assert_eq!(self.version, 4);
+        assert_eq!(self.version, 4);
         let addr = sockaddr_in {
             #[cfg(target_os = "macos")]
             sin_len: std::mem::size_of::<sockaddr_in>() as u8,
@@ -170,7 +170,7 @@ impl UDPSocket {
     }
 
     fn connect6(self, dst: &SocketAddrV6) -> Result<UDPSocket, Error> {
-        // assert_eq!(self.version, 6);
+        assert_eq!(self.version, 6);
         let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
         addr.sin6_family = AF_INET6 as _;
         addr.sin6_port = dst.port().to_be();
@@ -196,8 +196,7 @@ impl UDPSocket {
     }
 
     fn sendto4(&self, buf: &[u8], dst: SocketAddrV4) -> usize {
-        // assert_eq!(self.version, 4);
-
+        assert_eq!(self.version, 4);
         let addr = sockaddr_in {
             #[cfg(target_os = "macos")]
             sin_len: std::mem::size_of::<sockaddr_in>() as _,
@@ -225,8 +224,7 @@ impl UDPSocket {
     }
 
     fn sendto6(&self, buf: &[u8], dst: SocketAddrV6) -> usize {
-        // assert_eq!(self.version, 6);
-
+        assert_eq!(self.version, 6);
         let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
         addr.sin6_family = AF_INET6 as _;
         addr.sin6_port = dst.port().to_be();
@@ -247,8 +245,46 @@ impl UDPSocket {
         }
     }
 
-    // Receives a message on a non-connected UDP socket and returns its contents and origin address
     pub fn recvfrom<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
+        match self.version {
+            4 => self.recvfrom4(buf),
+            _ => self.recvfrom6(buf),
+        }
+    }
+
+    // Receives a message on a non-connected UDP socket and returns its contents and origin address
+    fn recvfrom6<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
+        let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
+        let mut addr_len: socklen_t = std::mem::size_of::<sockaddr_in6>() as socklen_t;
+
+        let n = unsafe {
+            recvfrom(
+                self.fd,
+                &mut buf[..] as *mut [u8] as *mut c_void,
+                buf.len(),
+                0,
+                &mut addr as *mut sockaddr_in6 as *mut sockaddr,
+                &mut addr_len,
+            )
+        };
+
+        if n == -1 {
+            return Err(Error::UDPRead(errno_str()));
+        }
+
+        // This is the endpoint
+        let origin = SocketAddrV6::new(
+            std::net::Ipv6Addr::from(addr.sin6_addr.s6_addr),
+            u16::from_be(addr.sin6_port),
+            0,
+            0,
+        );
+
+        Ok((SocketAddr::V6(origin), &mut buf[..n as usize]))
+    }
+
+    // Receives a message on a non-connected UDP socket and returns its contents and origin address
+    fn recvfrom4<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
         let mut addr = sockaddr_in {
             #[cfg(target_os = "macos")]
             sin_len: 0,
