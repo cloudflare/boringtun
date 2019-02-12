@@ -339,6 +339,13 @@ mod tests {
             let (peer_iface_socket_sender, client_iface_socket_sender, close) =
                 wireguard_test_pair();
 
+            client_iface_socket_sender
+                .set_read_timeout(Some(Duration::from_millis(200)))
+                .unwrap();
+            client_iface_socket_sender
+                .set_write_timeout(Some(Duration::from_millis(200)))
+                .unwrap();
+
             thread::spawn(move || loop {
                 let data = read_ipv4_packet(&peer_iface_socket_sender);
                 let data_string = str::from_utf8(&data).unwrap().to_uppercase().into_bytes();
@@ -347,18 +354,12 @@ mod tests {
 
             for _i in 0..64 {
                 write_ipv4_packet(&client_iface_socket_sender, b"test");
-            }
-
-            for _i in 0..64 {
                 let response = read_ipv4_packet(&client_iface_socket_sender);
                 assert_eq!(&response, b"TEST");
             }
 
             for _i in 0..64 {
                 write_ipv4_packet(&client_iface_socket_sender, b"check");
-            }
-
-            for _i in 0..64 {
                 let response = read_ipv4_packet(&client_iface_socket_sender);
                 assert_eq!(&response, b"CHECK");
             }
@@ -387,14 +388,14 @@ mod tests {
 
             file.write_all(
                 format!(
-                    "[Interface]
-Address = 192.168.2.{}
-ListenPort = {}
-PrivateKey = {}
-[Peer]
-PublicKey = {}
-AllowedIPs = 192.168.2.2/32
-Endpoint = localhost:{}",
+                    r#"[Interface]
+                        Address = 192.168.2.{}
+                        ListenPort = {}
+                        PrivateKey = {}
+                        [Peer]
+                        PublicKey = {}
+                        AllowedIPs = 192.168.2.2/32
+                        Endpoint = localhost:{}"#,
                     ip, port, key_pair.0, public_key, endpoint,
                 )
                 .as_bytes(),
@@ -407,8 +408,6 @@ Endpoint = localhost:{}",
                 .status()
                 .expect("Failed to run wg-quick");
 
-            WG_LOCK.unlock();
-
             WireGuardExt {
                 conf_file_name,
                 port,
@@ -420,7 +419,6 @@ Endpoint = localhost:{}",
 
     impl Drop for WireGuardExt {
         fn drop(&mut self) {
-            WG_LOCK.lock();
             // Stop wireguard
             Command::new("wg-quick")
                 .args(&["down", &self.conf_file_name])
@@ -437,6 +435,7 @@ Endpoint = localhost:{}",
         // Test the connection with wireguard-go is succesfully established
         // and we are getting ping from server
         let c_key_pair = key_pair();
+        let itr = 1000;
         let endpoint = NEXT_PORT.next() as u16;
         let wg = WireGuardExt::start(endpoint, &c_key_pair.1);
         let c_addr = format!("localhost:{}", endpoint);
@@ -458,10 +457,10 @@ Endpoint = localhost:{}",
         );
 
         c_iface
-            .set_read_timeout(Some(Duration::from_millis(200)))
+            .set_read_timeout(Some(Duration::from_millis(1000)))
             .unwrap();
 
-        for i in 0..10000 {
+        for i in 0..itr {
             write_ipv4_ping(&c_iface, b"test_ping", i as u16, wg.ip);
             assert_eq!(read_ipv4_ping(&c_iface, i as u16), b"test_ping",);
             thread::sleep(Duration::from_millis(30));
@@ -476,6 +475,7 @@ Endpoint = localhost:{}",
         // Test the connection with wireguard-go is succesfully established
         // when go is the initiator
         let c_key_pair = key_pair();
+        let itr = 1000;
 
         let endpoint = NEXT_PORT.next() as u16;
         let wg = WireGuardExt::start(endpoint, &c_key_pair.1);
@@ -495,7 +495,7 @@ Endpoint = localhost:{}",
         );
 
         c_iface
-            .set_read_timeout(Some(Duration::from_millis(200)))
+            .set_read_timeout(Some(Duration::from_millis(1000)))
             .unwrap();
 
         let t_addr = format!("192.168.2.{}:{}", wg.ip, NEXT_PORT.next());
@@ -503,17 +503,17 @@ Endpoint = localhost:{}",
         test_socket.connect("192.168.2.2:30000").unwrap();
 
         thread::spawn(move || {
-            for i in 0..30000 {
+            for i in 0..itr {
                 test_socket
                     .send(format!("This is a test message {}", i).as_bytes())
                     .unwrap();
-                thread::sleep(Duration::from_millis(2));
+                thread::sleep(Duration::from_millis(10));
             }
         });
 
         let mut src = [0u8; MAX_PACKET];
 
-        for i in 0..30000 {
+        for i in 0..itr {
             let m = c_iface.recv(&mut src).unwrap();
             assert_eq!(
                 &src[28..m], // Strip ip and udp headers
