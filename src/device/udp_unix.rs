@@ -88,7 +88,7 @@ impl UDPSocket {
     }
 
     #[cfg(target_os = "macos")]
-    pub fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
+    pub fn set_fwmark(&self, _: u32) -> Result<(), Error> {
         Ok(())
     }
 

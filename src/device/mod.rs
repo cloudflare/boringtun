@@ -96,6 +96,7 @@ pub struct Device {
     iface: Arc<TunSocket>,
     udp4: Option<Arc<UDPSocket>>,
     udp6: Option<Arc<UDPSocket>>,
+    fwmark: Option<u32>,
 
     peers: HashMap<X25519Key, Arc<Peer>>,
     peers_by_idx: HashMap<u32, Arc<Peer>>,
@@ -256,8 +257,26 @@ impl Device {
         self.key_pair = Some((private_key, public_key));
     }
 
-    fn set_fwmark(&mut self, _mark: u32) {
-        //panic!("TODO: fwmark");
+    fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
+        self.fwmark = Some(mark);
+
+        // First set fwmark on listeners
+        if let Some(ref sock) = self.udp4 {
+            sock.set_fwmark(mark)?;
+        }
+
+        if let Some(ref sock) = self.udp6 {
+            sock.set_fwmark(mark)?;
+        }
+
+        // Then on all currently connected sockets
+        for (_, p) in &self.peers {
+            if let Some(ref sock) = p.endpoint().conn {
+                sock.set_fwmark(mark)?
+            }
+        }
+
+        Ok(())
     }
 
     fn clear_peers(&mut self) {
@@ -423,7 +442,7 @@ impl Device {
                     };
                     // This packet was OK, that means we want to create a connected socket for this peer
                     peer.set_endpoint(addr);
-                    if let Ok(sock) = peer.connect_endpoint(d.listen_port) {
+                    if let Ok(sock) = peer.connect_endpoint(d.listen_port, d.fwmark) {
                         d.register_conn_handler(Arc::clone(peer), sock).unwrap();
                     }
 

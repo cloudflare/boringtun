@@ -1,4 +1,4 @@
-use super::{Descriptor, Error};
+use super::Error;
 use libc::*;
 use std::os::unix::io::{AsRawFd, RawFd};
 

@@ -127,7 +127,7 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> Opti
                     Err(_) => return Some(EINVAL),
                 },
                 "fwmark" => match val.parse::<u32>() {
-                    Ok(mark) => device.set_fwmark(mark),
+                    Ok(mark) => device.set_fwmark(mark).unwrap(),
                     Err(_) => return Some(EINVAL),
                 },
                 "replace_peers" => match val.parse::<bool>() {

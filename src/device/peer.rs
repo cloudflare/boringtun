@@ -113,7 +113,11 @@ impl Peer {
         };
     }
 
-    pub fn connect_endpoint(&self, port: u16) -> Result<Arc<UDPSocket>, Error> {
+    pub fn connect_endpoint(
+        &self,
+        port: u16,
+        fwmark: Option<u32>,
+    ) -> Result<Arc<UDPSocket>, Error> {
         let mut endpoint = self.endpoint.write();
 
         if let Some(_) = endpoint.conn {
@@ -133,6 +137,10 @@ impl Peer {
                 .and_then(|s| s.connect(&addr))?,
             None => panic!("Attempt to connect to undefined endpoint"),
         });
+
+        if let Some(fwmark) = fwmark {
+            udp_conn.set_fwmark(fwmark)?;
+        }
 
         self.log(
             Verbosity::Debug,
