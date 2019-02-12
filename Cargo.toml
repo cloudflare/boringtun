@@ -6,7 +6,7 @@ authors = ["Vlad Krasnov <vlad@cloudflare.com>"]
 [dependencies]
 base64 = "0.9.2"
 hex = "0.3.2"
-ring = { git = "https://github.com/briansmith/ring.git" }
+ring = "0.14"
 untrusted = "0.6.2"
 spin = { version = "0.4", default-features=false }
 chrono = "0.4"
