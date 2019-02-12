@@ -1,6 +1,7 @@
 /// Simple implementation of the client side of the WireGuard protocol
 extern crate base64;
 extern crate chrono;
+extern crate daemonize;
 extern crate hex;
 extern crate libc;
 extern crate ring;
@@ -12,8 +13,10 @@ pub mod ffi;
 pub mod noise;
 
 //use device::event::*;
+use daemonize::Daemonize;
 use device::*;
 use std::env;
+use std::fs::File;
 use std::sync::Arc;
 use std::thread;
 
@@ -64,7 +67,7 @@ impl WireGuard {
 fn main() {
     let mut args: Vec<_> = env::args().collect();
 
-    let (_background, tun_name) = match args.len() {
+    let (background, tun_name) = match args.len() {
         2 => {
             // A single argument means we have only the tunnel name as parameter
             (true, args.pop().unwrap())
@@ -79,6 +82,22 @@ fn main() {
         }
         _ => return print_usage(&args[0]),
     };
+
+    if background {
+        let stdout = File::create("/tmp/wireguard_cf.out").unwrap();
+        let stderr = File::create("/tmp/wireguard_cf.err").unwrap();
+
+        let daemonize = Daemonize::new()
+            .working_directory("/tmp") // for default behaviour.
+            .stdout(stdout) // Redirect stdout.
+            .stderr(stderr) // Redirect stderr.
+            .privileged_action(|| "Executed before drop privileges");
+
+        match daemonize.start() {
+            Ok(_) => println!("Success, daemonized"),
+            Err(e) => eprintln!("Error, {}", e),
+        }
+    }
 
     let mut wg = WireGuard::new();
     if !wg.register_device(&tun_name) {

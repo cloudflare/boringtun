@@ -1,6 +1,6 @@
-use super::{Descriptor, Error};
+use super::Error;
 use libc::*;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 
 pub fn errno_str() -> String {
     let strerr = unsafe { strerror(*__error()) };
@@ -63,8 +63,8 @@ impl Drop for TunSocket {
     }
 }
 
-impl Descriptor for TunSocket {
-    fn descriptor(&self) -> RawFd {
+impl AsRawFd for TunSocket {
+    fn as_raw_fd(&self) -> RawFd {
         self.fd
     }
 }

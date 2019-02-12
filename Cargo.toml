@@ -11,9 +11,14 @@ untrusted = "0.6.2"
 spin = { version = "0.4", default-features=false }
 chrono = "0.4"
 libc = "0.2"
+daemonize = "0.3"
 
 [target.'cfg(target_os="android")'.dependencies]
 jni = "0.10.2"
 
 [lib]
 crate-type = ["lib", "staticlib"]
+
+[[bin]]
+name = "wireguard-cf"
+path = "src/main.rs"

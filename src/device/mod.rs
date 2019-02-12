@@ -14,11 +14,11 @@ pub mod tun;
 pub mod udp;
 
 use crypto::x25519::X25519Key;
-use noise::handshake::*;
+use noise::handshake::parse_handshake_anon;
 use std::collections::HashMap;
 use std::convert::From;
 use std::net::{IpAddr, SocketAddr};
-use std::os::unix::io::RawFd;
+use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
 use allowed_ips::*;
@@ -50,10 +50,6 @@ pub enum Error {
     UDPRead(String),
     Timer(String),
     IfaceRead(String),
-}
-
-pub trait Descriptor {
-    fn descriptor(&self) -> RawFd;
 }
 
 pub struct DeviceHandle {
@@ -146,7 +142,7 @@ impl Device {
         // Update an existing peer
         if let Some(_) = self.peers.get(&pub_key) {
             // We already have a peer, we need to merge the existing config into the newly created one
-            panic!("Changin existing peers is not supported. Remove and add again instead.");
+            panic!("Modifying existing peers is not supported. Remove and add again instead.");
         }
 
         let next_index = self.next_index();
@@ -207,7 +203,7 @@ impl Device {
             ..Default::default()
         };
 
-        device.register_api_handler()?;
+        device.register_api_handler(name)?;
         device.register_iface_handler(Arc::clone(&device.iface))?;
         device.register_notifier()?;
         device.register_timer()?;
@@ -261,7 +257,7 @@ impl Device {
     }
 
     fn set_fwmark(&mut self, _mark: u32) {
-        panic!("TODO: fwmark");
+        //panic!("TODO: fwmark");
     }
 
     fn clear_peers(&mut self) {
@@ -342,7 +338,7 @@ impl Device {
 
     fn register_udp_handler(&self, udp: Arc<UDPSocket>) -> Result<(), Error> {
         let udp_ev = self.factory.new_event(
-            udp.descriptor(),
+            udp.as_raw_fd(),
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 // Handler that handles anonymous packets over UDP
                 const HANDSHAKE_INIT: (u8, usize) = (1, 148);
@@ -447,7 +443,7 @@ impl Device {
 
     fn register_conn_handler(&self, peer: Arc<Peer>, udp: Arc<UDPSocket>) -> Result<(), Error> {
         let conn_ev = self.factory.new_event(
-            udp.descriptor(),
+            udp.as_raw_fd(),
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 // The conn_handler handles packet received from a connected UDP socket, associated
                 // with a known peer, this saves us the hustle of finding the right peer. If another
@@ -502,7 +498,7 @@ impl Device {
 
     fn register_iface_handler(&self, iface: Arc<TunSocket>) -> Result<(), Error> {
         let iface_ev = self.factory.new_event(
-            self.iface.descriptor(),
+            self.iface.as_raw_fd(),
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 // The iface_handler handles packets received from the wireguard virtual network
                 // interface. The flow is as follows:

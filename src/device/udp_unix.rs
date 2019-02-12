@@ -1,7 +1,7 @@
-use super::{errno_str, Descriptor, Error};
+use super::{errno_str, Error};
 use libc::*;
-use std::net::*;
-use std::os::unix::io::RawFd;
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::os::unix::io::{AsRawFd, RawFd};
 
 // Recieves and sends packets over the network
 #[derive(Debug)]
@@ -19,8 +19,8 @@ impl Drop for UDPSocket {
     }
 }
 
-impl Descriptor for UDPSocket {
-    fn descriptor(&self) -> RawFd {
+impl AsRawFd for UDPSocket {
+    fn as_raw_fd(&self) -> RawFd {
         self.fd
     }
 }

@@ -1,21 +1,28 @@
-use super::*;
-use dev_lock::*;
+use super::{AllowedIP, Device, Error, SocketAddr, UNIXSocket, X25519Key};
+use dev_lock::LockReadGuard;
 use hex::encode as encode_hex;
-use libc::*;
+use libc::{EINVAL, EIO, EPROTO};
 use std::fs::{create_dir, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::os::unix::io::AsRawFd;
 
 impl Device {
-    pub fn register_api_handler(&self) -> Result<(), Error> {
+    pub fn register_api_handler(&self, name: &str) -> Result<(), Error> {
         if let Err(_) = create_dir("/var/run/wireguard/") {};
-        let path = format!("/var/run/wireguard/{}.sock", self.iface.name()?);
+        let iface_name = self.iface.name()?;
+        let path = format!("/var/run/wireguard/{}.sock", iface_name);
 
         let api_sock = UNIXSocket::new()
             .and_then(|s| s.bind(&path))
             .and_then(|s| s.listen())?;
 
+        let mut name_file =
+            File::create(format!("/var/run/wireguard/{}.name", iface_name)).unwrap();
+
+        name_file.write_all(iface_name.as_bytes()).unwrap();
+
         let api_sock_ev = self.factory.new_event(
-            api_sock.descriptor(),
+            api_sock.as_raw_fd(),
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 // This is the closure that listens on the api unix socket
                 let api_conn = match api_sock.accept() {
@@ -23,7 +30,6 @@ impl Device {
                     _ => return None,
                 };
 
-                let api_conn = api_conn.as_file();
                 let mut reader = BufReader::new(&api_conn);
                 let mut writer = BufWriter::new(&api_conn);
                 let mut cmd = String::new();

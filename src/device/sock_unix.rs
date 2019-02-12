@@ -1,16 +1,11 @@
-use super::{errno_str, Descriptor, Error};
+use super::{errno_str, Error};
 use libc::*;
 use std::fs::File;
-use std::os::unix::io::{FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
 // Accepts connections from the wg app
 #[derive(Default, Debug)]
 pub struct UNIXSocket {
-    fd: RawFd,
-}
-
-// Handles the control messages from the wg app
-pub struct UNIXConn {
     fd: RawFd,
 }
 
@@ -20,20 +15,8 @@ impl Drop for UNIXSocket {
     }
 }
 
-impl Drop for UNIXConn {
-    fn drop(&mut self) {
-        unsafe { close(self.fd) };
-    }
-}
-
-impl Descriptor for UNIXSocket {
-    fn descriptor(&self) -> RawFd {
-        self.fd
-    }
-}
-
-impl Descriptor for UNIXConn {
-    fn descriptor(&self) -> RawFd {
+impl AsRawFd for UNIXSocket {
+    fn as_raw_fd(&self) -> RawFd {
         self.fd
     }
 }
@@ -49,7 +32,7 @@ impl UNIXSocket {
     pub fn set_non_blocking(self) -> Result<UNIXSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
             -1 => Err(Error::FCntl(errno_str())),
-            flags @ _ => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
+            flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
                 -1 => Err(Error::FCntl(errno_str())),
                 _ => Ok(self),
             },
@@ -92,16 +75,10 @@ impl UNIXSocket {
         }
     }
 
-    pub fn accept(&self) -> Result<UNIXConn, Error> {
+    pub fn accept(&self) -> Result<File, Error> {
         match unsafe { accept(self.fd, std::ptr::null_mut(), std::ptr::null_mut()) } {
             -1 => Err(Error::Accept(errno_str())),
-            fd @ _ => Ok(UNIXConn { fd }),
+            fd @ _ => Ok(unsafe { File::from_raw_fd(fd) }),
         }
-    }
-}
-
-impl UNIXConn {
-    pub fn as_file(&self) -> File {
-        unsafe { File::from_raw_fd(self.descriptor()) }
     }
 }
