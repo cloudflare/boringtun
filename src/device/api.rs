@@ -1,7 +1,9 @@
 use super::{AllowedIP, Device, Error, SocketAddr, UNIXSocket, X25519Key};
 use dev_lock::LockReadGuard;
+use device::tun::errno;
+use device::Action;
 use hex::encode as encode_hex;
-use libc::{EINVAL, EIO, EPROTO};
+use libc::*;
 use std::fs::{create_dir, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::AsRawFd;
@@ -21,7 +23,7 @@ impl Device {
                 // This is the closure that listens on the api unix socket
                 let api_conn = match api_sock.accept() {
                     Ok(conn) => conn,
-                    _ => return None,
+                    _ => return Action::Continue,
                 };
 
                 let mut reader = BufReader::new(&api_conn);
@@ -39,12 +41,36 @@ impl Device {
                         .write(format!("errno={}\n\n", status.unwrap_or(0)).as_ref())
                         .ok();
                 }
-                None // Return None to indicate no further action is expected from the caller
+                Action::Continue
             }),
             false,
         );
         self.factory.register_event(&self.queue, &api_sock_ev)?;
-        Ok(())
+
+        // This is not a very nice hack to detect if the control socket was removed
+        // and exiting nicely as a result. We check every 3 seconds in a loop if the
+        // file was deleted by stating it.
+        // The problem is that on linux inotify can be used quite beautifully to detect
+        // deletion, and kqueue EVFILT_VNODE can be used for the same purpose, but that
+        // will require introducing new events, for no measureable benefit.
+        // TODO: Could this be an issue if we restart the service too quickly?
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+
+        let timer_ev = self.factory.new_periodic_event(
+            Box::new(move |d: &mut LockReadGuard<Device>| {
+                let mut st = unsafe { std::mem::zeroed() };
+                if -1 == unsafe { stat(path_cstr.as_ptr(), &mut st) } {
+                    if errno() == ENOENT {
+                        eprintln!("Control socket {:?} deleted, shutting down", path_cstr);
+                        d.trigger_exit();
+                        return Action::Exit;
+                    }
+                }
+                Action::Continue
+            }),
+            std::time::Duration::from_millis(3000),
+        )?;
+        self.factory.register_event(&self.queue, &timer_ev)
     }
 }
 
@@ -96,9 +122,9 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> Opti
         return Some(EIO);
     }
     let mut write_mark = want_write.unwrap();
-    write_mark.trigger_notifier();
+    write_mark.trigger_yield();
     let mut device = write_mark.write();
-    device.cancel_notifier();
+    device.cancel_yield();
 
     let mut cmd = String::new();
 

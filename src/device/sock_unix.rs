@@ -7,10 +7,16 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 #[derive(Default, Debug)]
 pub struct UNIXSocket {
     fd: RawFd,
+    path: Option<String>,
 }
 
 impl Drop for UNIXSocket {
     fn drop(&mut self) {
+        if let Some(ref path) = self.path {
+            let unlink_path = std::ffi::CString::new(path.as_str()).unwrap();
+            unsafe { unlink(unlink_path.as_ptr()) };
+        };
+
         unsafe { close(self.fd) };
     }
 }
@@ -25,11 +31,11 @@ impl UNIXSocket {
     pub fn new() -> Result<UNIXSocket, Error> {
         match unsafe { socket(AF_UNIX, SOCK_STREAM, 0) } {
             -1 => Err(Error::Socket(errno_str())),
-            fd @ _ => Ok(UNIXSocket { fd }),
+            fd @ _ => Ok(UNIXSocket { fd, path: None }),
         }
     }
 
-    pub fn bind(self, address: &str) -> Result<UNIXSocket, Error> {
+    pub fn bind(mut self, address: &str) -> Result<UNIXSocket, Error> {
         assert!(address.len() < 108);
         let mut addr = sockaddr_un {
             #[cfg(target_os = "macos")]
@@ -54,7 +60,10 @@ impl UNIXSocket {
             )
         } {
             -1 => Err(Error::Bind(errno_str())),
-            _ => Ok(self),
+            _ => {
+                self.path = Some(address.to_owned());
+                Ok(self)
+            }
         }
     }
 

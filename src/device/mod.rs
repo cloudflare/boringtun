@@ -55,6 +55,16 @@ pub enum Error {
     IfaceRead(String),
 }
 
+// What the event loop should do after a handler returns
+enum Action {
+    Continue, // Continue the loop
+    Yield,    // Yield the read lock and aquire it again
+    Exit,     // Stop the loop
+}
+
+// Event handler function
+type Handler = Box<Fn(&mut LockReadGuard<Device>) -> Action + Send + Sync>;
+
 pub struct DeviceHandle {
     device: Lock<Device>,
 }
@@ -66,17 +76,18 @@ impl DeviceHandle {
         }
     }
 
-    pub fn event_loop(&self) -> bool {
+    pub fn event_loop(&self) {
         loop {
             // The event loop keeps a read lock on the device, because we assume write access is rarely needed
             let mut device_lock = self.device.read();
             loop {
                 match device_lock.queue.wait() {
                     Ok(handler) => {
-                        if let Some(()) = (*handler)(&mut device_lock) {
-                            // In case a thread requires a write lock, it will call the notification
-                            // handler that returns Some(()), we then release the read lock briefly
-                            break;
+                        let action = (*handler)(&mut device_lock);
+                        match action {
+                            Action::Continue => {}
+                            Action::Yield => break,
+                            Action::Exit => return,
                         }
                     }
                     Err(e) => eprintln!("Poll error {:?}", e),
@@ -91,23 +102,22 @@ pub struct Device {
     key_pair: Option<(X25519Key, X25519Key)>,
     factory: EventFactory<Handler>,
     queue: EventPoll<Handler>,
-    notifier: Option<EventRef<Handler>>,
 
     listen_port: u16,
-    next_index: u32,
+    fwmark: Option<u32>,
 
     iface: Arc<TunSocket>,
     udp4: Option<Arc<UDPSocket>>,
     udp6: Option<Arc<UDPSocket>>,
-    fwmark: Option<u32>,
+
+    yield_notice: Option<EventRef<Handler>>,
+    exit_notice: Option<EventRef<Handler>>,
 
     peers: HashMap<X25519Key, Arc<Peer>>,
-    peers_by_idx: HashMap<u32, Arc<Peer>>,
     peers_by_ip: AllowedIps<Arc<Peer>>,
+    peers_by_idx: HashMap<u32, Arc<Peer>>,
+    next_index: u32,
 }
-
-// Event handler function
-type Handler = Box<Fn(&mut LockReadGuard<Device>) -> Option<()> + Send + Sync>;
 
 impl Device {
     fn next_index(&mut self) -> u32 {
@@ -209,7 +219,7 @@ impl Device {
 
         device.register_api_handler()?;
         device.register_iface_handler(Arc::clone(&device.iface))?;
-        device.register_notifier()?;
+        device.register_notifiers()?;
         device.register_timer()?;
 
         #[cfg(target_os = "macos")]
@@ -301,14 +311,20 @@ impl Device {
         self.peers_by_ip.clear();
     }
 
-    fn register_notifier(&mut self) -> Result<(), Error> {
-        let notification_ev = self
+    fn register_notifiers(&mut self) -> Result<(), Error> {
+        let yield_ev = self
             .factory
-            // The notification event handler simply returns Some(()) to let the waiter know
-            .new_notifier(Box::new(|_: &mut LockReadGuard<Device>| Some(())))?;
+            // The notification event handler simply returns Action::Yield
+            .new_notifier(Box::new(|_: &mut LockReadGuard<Device>| Action::Yield))?;
+        self.factory.register_event(&self.queue, &yield_ev)?;
+        self.yield_notice = Some(yield_ev);
 
-        self.factory.register_event(&self.queue, &notification_ev)?;
-        self.notifier = Some(notification_ev);
+        let exit_ev = self
+            .factory
+            // The notification event handler simply returns Action::Yield
+            .new_notifier(Box::new(|_: &mut LockReadGuard<Device>| Action::Exit))?;
+        self.factory.register_event(&self.queue, &exit_ev)?;
+        self.exit_notice = Some(exit_ev);
         Ok(())
     }
 
@@ -324,7 +340,7 @@ impl Device {
                 let udp6 = d.udp6.as_ref();
 
                 if udp4.is_none() || udp6.is_none() {
-                    return None;
+                    return Action::Continue;
                 }
 
                 let udp4 = udp4.unwrap();
@@ -352,8 +368,7 @@ impl Device {
                         _ => panic!("Unexpected result from update_timers"),
                     };
                 }
-
-                None
+                Action::Continue
             }),
             std::time::Duration::from_millis(250),
         )?;
@@ -361,14 +376,19 @@ impl Device {
         self.factory.register_event(&self.queue, &timer_ev)
     }
 
-    pub fn trigger_notifier(&self) {
+    pub fn trigger_yield(&self) {
         self.factory
-            .trigger_notification(self.notifier.as_ref().unwrap())
+            .trigger_notification(self.yield_notice.as_ref().unwrap())
     }
 
-    pub fn cancel_notifier(&self) {
+    pub fn trigger_exit(&self) {
         self.factory
-            .stop_notification(self.notifier.as_ref().unwrap())
+            .trigger_notification(self.exit_notice.as_ref().unwrap())
+    }
+
+    pub fn cancel_yield(&self) {
+        self.factory
+            .stop_notification(self.yield_notice.as_ref().unwrap())
     }
 
     fn register_udp_handler(&self, udp: Arc<UDPSocket>) -> Result<(), Error> {
@@ -467,8 +487,7 @@ impl Device {
                         break;
                     }
                 }
-
-                None
+                Action::Continue
             }),
             false,
         );
@@ -522,8 +541,7 @@ impl Device {
                         break;
                     }
                 }
-
-                None
+                Action::Continue
             }),
             false,
         );
@@ -585,7 +603,7 @@ impl Device {
                         }
                     }
                 }
-                None
+                Action::Continue
             }),
             false,
         );
