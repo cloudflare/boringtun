@@ -9,6 +9,8 @@ hex = "0.3.2"
 ring = "0.14"
 untrusted = "0.6.2"
 spin = { version = "0.4", default-features=false }
+
+[target.'cfg(not(target_os="windows"))'.dependencies]
 chrono = "0.4"
 libc = "0.2"
 daemonize = "0.3"
@@ -22,3 +24,7 @@ crate-type = ["lib", "staticlib"]
 [[bin]]
 name = "wireguard-cf"
 path = "src/main.rs"
+
+[[example]]
+name = "benchmarks"
+path = "src/benchmarks_example.rs"

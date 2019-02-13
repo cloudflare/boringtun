@@ -1,5 +1,5 @@
 /// C bindings for the WireGuard library
-mod benchmark;
+pub mod benchmark;
 use self::benchmark::do_benchmark;
 use super::crypto::x25519::x25519_public_key as pub_key;
 use super::crypto::x25519::*;

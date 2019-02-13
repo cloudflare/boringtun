@@ -1,9 +1,104 @@
-use super::super::crypto::blake2s::*;
-use super::super::crypto::x25519::*;
+use crypto::blake2s::*;
+use crypto::chacha20poly1305::*;
+use crypto::x25519::*;
 use ring::aead::*;
 use ring::{agreement, rand};
 
 use std::time::Instant;
+
+const ITR_DURATION: u64 = 1;
+const ITRS: u64 = 3;
+
+// Format f64 with US locale decimal separators
+// We don't care about speed or efficiency here
+// Assumes that f64 in this context is always smaller than u64::MAX and larger than 0
+fn format_float(number: f64) -> String {
+    let fract = number.fract();
+    let mut integer = number.trunc() as u64;
+
+    let mut formatted = format!("{:.2}", fract);
+    if integer == 0 {
+        // Return with the leading 0
+        return formatted;
+    }
+    // Strip the 0
+    formatted = formatted[1..].to_string();
+
+    loop {
+        let remainder = integer % 1000;
+        integer = integer / 1000;
+
+        if integer == 0 {
+            let mut new_str = format!("{:}", remainder);
+            new_str.push_str(&formatted);
+            formatted = new_str;
+            break;
+        }
+
+        let mut new_str = format!(",{:03}", remainder);
+        new_str.push_str(&formatted);
+        formatted = new_str;
+    }
+
+    formatted
+}
+
+fn run_bench(test_func: &mut FnMut() -> usize) -> f64 {
+    let mut best_time = std::f64::MAX;
+
+    // Take the best result out of ITRS runs
+    for _ in 0..ITRS {
+        let start_time = Instant::now();
+        let mut total_itr = 0;
+        loop {
+            for _ in 0..300 {
+                total_itr += test_func();
+            }
+            // Check time every 300 iterations
+            let time_since_started = Instant::now().duration_since(start_time);
+            if time_since_started.as_secs() >= ITR_DURATION {
+                // Stop the benchmark after ITR_DURATION
+                let total_time = time_since_started.as_secs() as f64
+                    + f64::from(time_since_started.subsec_nanos()) * 1e-9;
+                best_time = best_time.min((total_itr as f64) / total_time);
+                break;
+            }
+        }
+    }
+
+    best_time
+}
+
+fn bench_x25519_shared_key(name: bool, _: usize) -> String {
+    if name {
+        return "X25519 Shared Key: ".to_string();
+    }
+
+    let secret_key = [0x0f; 32];
+    let public_key = [0xf0; 32];
+
+    let result = run_bench(&mut move || {
+        let _ = x25519_shared_key(&secret_key, &public_key);
+        1
+    });
+
+    format!("{} ops/sec", format_float(result))
+}
+
+fn bench_x25519_public_key(name: bool, _: usize) -> String {
+    if name {
+        return "X25519 Public Key: ".to_string();
+    }
+
+    let secret_key = [0x0f; 32];
+
+    let result = run_bench(&mut move || {
+        let _ = x25519_public_key(&secret_key);
+        1
+    });
+
+    format!("{} ops/sec", format_float(result))
+}
 
 fn bench_blake2s(name: bool, n: usize) -> String {
     if name {
@@ -11,27 +106,35 @@ fn bench_blake2s(name: bool, n: usize) -> String {
     }
 
     let buf_in = vec![0u8; n];
-    let mut hashed = 0;
 
-    let start_time = Instant::now();
+    let result = run_bench(&mut move || {
+        Blake2s::new_hash().hash(&buf_in).finalize();
+        buf_in.len()
+    });
 
-    loop {
-        for _i in 0..100 {
-            hashed += n;
-            Blake2s::new_hash().hash(&buf_in).finalize();
-        }
+    format!("{} MiB/s", format_float(result / (1024. * 1024.)))
+}
 
-        if Instant::now().duration_since(start_time).as_secs() >= 3 {
-            break;
-        }
+fn bench_chacha20poly1305_ring(name: bool, n: usize) -> String {
+    if name {
+        return format!("(Ring) AEAD Seal {}B: ", n);
     }
 
-    let total_duration = Instant::now().duration_since(start_time);
-    let duration_in_seconds =
-        total_duration.as_secs() as f64 + f64::from(total_duration.subsec_nanos()) * 1e-9;
-    let hashed = (hashed as f64) / (1024. * 1024.);
+    let key = SealingKey::new(&CHACHA20_POLY1305, &[0x0fu8; 32]).unwrap();
+    let mut buf_in = vec![0u8; n + 16];
 
-    format!("{:.2} MiB/sec", hashed / duration_in_seconds)
+    let result = run_bench(&mut move || {
+        seal_in_place(
+            &key,
+            Nonce::assume_unique_for_key([0u8; 12]),
+            Aad::from(&[]),
+            &mut buf_in,
+            16,
+        )
+        .unwrap()
+    });
+
+    format!("{} MiB/s", format_float(result / (1024. * 1024.)))
 }
 
 fn bench_chacha20poly1305(name: bool, n: usize) -> String {
@@ -39,97 +142,20 @@ fn bench_chacha20poly1305(name: bool, n: usize) -> String {
         return format!("AEAD Seal {}B: ", n);
     }
 
+    let aead = ChaCha20Poly1305::new_aead(&[0u8; 32]);
+    let buf_in = vec![0u8; n];
     let mut buf_out = vec![0u8; n + 16];
-    let mut enced = 0;
 
-    let start_time = Instant::now();
-    let key = SealingKey::new(&CHACHA20_POLY1305, &[0u8; 32]).unwrap();
+    let result = run_bench(&mut move || aead.seal_wg(0, &[], &buf_in, &mut buf_out) - 16);
 
-    loop {
-        for _i in 0..100 {
-            enced += seal_in_place(
-                &key,
-                Nonce::assume_unique_for_key([0u8; 12]),
-                Aad::from(&[]),
-                &mut buf_out,
-                16,
-            )
-            .unwrap();
-        }
-
-        if Instant::now().duration_since(start_time).as_secs() >= 3 {
-            break;
-        }
-    }
-
-    let total_duration = Instant::now().duration_since(start_time);
-    let duration_in_seconds =
-        total_duration.as_secs() as f64 + f64::from(total_duration.subsec_nanos()) * 1e-9;
-    let enced = (enced as f64) / (1024. * 1024.);
-
-    format!("{:.2} MiB/sec", enced / duration_in_seconds)
+    format!("{} MiB/s", format_float(result / (1024. * 1024.)))
 }
 
-fn bench_blake2s_128(name: bool) -> String {
-    bench_blake2s(name, 128)
-}
-
-fn bench_blake2s_8192(name: bool) -> String {
-    bench_blake2s(name, 8192)
-}
-
-fn bench_chacha20poly1305_128(name: bool) -> String {
-    bench_chacha20poly1305(name, 128)
-}
-
-fn bench_chacha20poly1305_192(name: bool) -> String {
-    bench_chacha20poly1305(name, 192)
-}
-
-fn bench_chacha20poly1305_1300(name: bool) -> String {
-    bench_chacha20poly1305(name, 1300)
-}
-
-fn bench_chacha20poly1305_8192(name: bool) -> String {
-    bench_chacha20poly1305(name, 8192)
-}
-
-fn bench_x25519_shared_key(name: bool) -> String {
+fn bench_x25519_shared_key_ring(name: bool, _: usize) -> String {
     if name {
-        return "X25519 Shared Key: ".to_string();
+        return "(Ring) X25519 Shared Key: ".to_string();
     }
 
-    let mut x255 = 0;
-    let mut key = [0u8; 32];
-    let key2 = [0u8; 32];
-
-    let start_time = Instant::now();
-
-    loop {
-        for _i in 0..100 {
-            key = x25519_shared_key(&key, &key2);
-            x255 += 1;
-        }
-
-        if Instant::now().duration_since(start_time).as_secs() >= 3 {
-            break;
-        }
-    }
-
-    let total_duration = Instant::now().duration_since(start_time);
-    let duration_in_seconds =
-        total_duration.as_secs() as f64 + f64::from(total_duration.subsec_nanos()) * 1e-9;
-    let x255 = f64::from(x255);
-
-    format!("{:.2} ops/sec", x255 / duration_in_seconds)
-}
-
-fn bench_ring_shared_key(name: bool) -> String {
-    if name {
-        return "RING shared key: ".to_string();
-    }
-
-    let mut x255 = 0;
     let rng = rand::SystemRandom::new();
 
     let peer_public_key = {
@@ -138,126 +164,65 @@ fn bench_ring_shared_key(name: bool) -> String {
         peer_private_key.compute_public_key().unwrap()
     };
     let peer_public_key = untrusted::Input::from(peer_public_key.as_ref());
-
     let peer_public_key_alg = &agreement::X25519;
 
-    let start_time = Instant::now();
+    let result = run_bench(&mut move || {
+        let my_private_key =
+            agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng).unwrap();
 
-    // Make `my_public_key` a byte slice containing my public key. In a real
-    // application, this would be sent to the peer in an encoded protocol
-    // message.
+        agreement::agree_ephemeral(
+            my_private_key,
+            peer_public_key_alg,
+            peer_public_key,
+            ring::error::Unspecified,
+            |_key_material| Ok(()),
+        )
+        .unwrap();
+        1
+    });
 
-    loop {
-        for _i in 0..100 {
-            let my_private_key =
-                agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng).unwrap();
-
-            agreement::agree_ephemeral(
-                my_private_key,
-                peer_public_key_alg,
-                peer_public_key,
-                ring::error::Unspecified,
-                |_key_material| {
-                    // In a real application, we'd apply a KDF to the key material and the
-                    // public keys (as recommended in RFC 7748) and then derive session
-                    // keys from the result. We omit all that here.
-                    Ok(())
-                },
-            )
-            .unwrap();
-            x255 += 1;
-        }
-
-        if Instant::now().duration_since(start_time).as_secs() >= 3 {
-            break;
-        }
-    }
-
-    let total_duration = Instant::now().duration_since(start_time);
-    let duration_in_seconds =
-        total_duration.as_secs() as f64 + f64::from(total_duration.subsec_nanos()) * 1e-9;
-    let x255 = f64::from(x255);
-
-    format!("{:.2} ops/sec", x255 / duration_in_seconds)
+    format!("{} ops/sec", format_float(result))
 }
 
-fn bench_ring_pub_key(name: bool) -> String {
+fn bench_x25519_public_key_ring(name: bool, _: usize) -> String {
     if name {
-        return "RING public key: ".to_string();
+        return "(Ring) X25519 Public Key: ".to_string();
     }
 
-    let mut x255 = 0;
     let rng = rand::SystemRandom::new();
 
-    let start_time = Instant::now();
-
-    loop {
-        for _i in 0..100 {
-            let my_private_key =
-                agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng).unwrap();
-            my_private_key.compute_public_key().unwrap();
-            x255 += 1;
-        }
-
-        if Instant::now().duration_since(start_time).as_secs() >= 3 {
-            break;
-        }
-    }
-
-    let total_duration = Instant::now().duration_since(start_time);
-    let duration_in_seconds =
-        total_duration.as_secs() as f64 + f64::from(total_duration.subsec_nanos()) * 1e-9;
-    let x255 = f64::from(x255);
-
-    format!("{:.2} ops/sec", x255 / duration_in_seconds)
-}
-
-fn bench_x25519_pub_key(name: bool) -> String {
-    if name {
-        return "X25519 Public Key: ".to_string();
-    }
-
-    let mut x255 = 0;
-    let mut key = [0u8; 32];
-
-    let start_time = Instant::now();
-
-    loop {
-        for _i in 0..100 {
-            key = x25519_public_key(&key);
-            x255 += 1;
-        }
-
-        if Instant::now().duration_since(start_time).as_secs() >= 3 {
-            break;
-        }
-    }
-
-    let total_duration = Instant::now().duration_since(start_time);
-    let duration_in_seconds =
-        total_duration.as_secs() as f64 + f64::from(total_duration.subsec_nanos()) * 1e-9;
-    let x255 = f64::from(x255);
-
-    format!("{:.2} ops/sec", x255 / duration_in_seconds)
+    let result = run_bench(&mut move || {
+        let my_private_key =
+            agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng).unwrap();
+        my_private_key.compute_public_key().unwrap();
+        1
+    });
+    format!("{} ops/sec", format_float(result))
 }
 
 pub fn do_benchmark(name: bool, idx: usize) -> Option<String> {
-    let benchmarks: Vec<fn(bool) -> String> = vec![
-        bench_x25519_pub_key,
-        bench_x25519_shared_key,
-        bench_ring_pub_key,
-        bench_ring_shared_key,
-        bench_blake2s_128,
-        bench_blake2s_8192,
-        bench_chacha20poly1305_128,
-        bench_chacha20poly1305_192,
-        bench_chacha20poly1305_1300,
-        bench_chacha20poly1305_8192,
+    let benchmarks: Vec<(fn(bool, usize) -> String, usize)> = vec![
+        (bench_x25519_public_key, 0),
+        (bench_x25519_shared_key, 0),
+        (bench_x25519_public_key_ring, 0),
+        (bench_x25519_shared_key_ring, 0),
+        (bench_blake2s, 128),
+        (bench_blake2s, 1024),
+        (bench_chacha20poly1305, 128),
+        (bench_chacha20poly1305, 192),
+        (bench_chacha20poly1305, 1400),
+        (bench_chacha20poly1305, 8192),
+        (bench_chacha20poly1305_ring, 128),
+        (bench_chacha20poly1305_ring, 192),
+        (bench_chacha20poly1305_ring, 1400),
+        (bench_chacha20poly1305_ring, 8192),
     ];
 
     if idx >= benchmarks.len() {
         return None;
     }
 
-    Some(benchmarks[idx](name))
+    let fnc = benchmarks[idx].0;
+    let param = benchmarks[idx].1;
+    Some(fnc(name, param))
 }
