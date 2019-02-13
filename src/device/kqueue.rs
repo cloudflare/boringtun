@@ -141,6 +141,21 @@ where
         events[index] = Some(data);
     }
 
+    // This function is only safe to call when the event loop is not running and the file is about to close
+    pub unsafe fn clear_event_by_fd(&self, index: RawFd) {
+        let mut events = self.events.lock();
+        assert!(index >= 0);
+        let index = index as usize;
+        events[index].take().and_then(|ev| {
+            let mut ev = Box::from_raw(ev);
+            ev.event.flags = EV_DELETE;
+            for queue in ev.queues.iter() {
+                kevent(*queue, &ev.event, 1, null_mut(), 0, null());
+            }
+            Some(())
+        });
+    }
+
     /// Register a new event with the factory, if the trigger is closed the event becomes stale
     /// once indicates the event should be dropped immidiately after first occurance
     pub fn new_event(&self, trigger: RawFd, handler: H, once: bool) -> EventRef<H> {

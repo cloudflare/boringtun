@@ -49,6 +49,7 @@ pub enum Error {
     InvalidTunnelName,
     #[cfg(target_os = "macos")]
     GetSockOpt(String),
+    GetSockName(String),
     UDPRead(String),
     #[cfg(target_os = "linux")]
     Timer(String),
@@ -69,8 +70,31 @@ pub struct DeviceHandle {
     device: Lock<Device>,
 }
 
+#[derive(Default)]
+pub struct Device {
+    key_pair: Option<(X25519Key, X25519Key)>,
+    factory: EventFactory<Handler>,
+    queue: EventPoll<Handler>,
+
+    listen_port: u16,
+    fwmark: Option<u32>,
+
+    iface: Arc<TunSocket>,
+    udp4: Option<Arc<UDPSocket>>,
+    udp6: Option<Arc<UDPSocket>>,
+
+    yield_notice: Option<EventRef<Handler>>,
+    exit_notice: Option<EventRef<Handler>>,
+
+    peers: HashMap<X25519Key, Arc<Peer>>,
+    peers_by_ip: AllowedIps<Arc<Peer>>,
+    peers_by_idx: HashMap<u32, Arc<Peer>>,
+    next_index: u32,
+}
+
 impl DeviceHandle {
-    pub fn new(device: Device) -> DeviceHandle {
+    pub fn new(mut device: Device) -> DeviceHandle {
+        device.open_listen_socket(0).unwrap();
         DeviceHandle {
             device: Lock::new(device),
         }
@@ -95,28 +119,6 @@ impl DeviceHandle {
             }
         }
     }
-}
-
-#[derive(Default)]
-pub struct Device {
-    key_pair: Option<(X25519Key, X25519Key)>,
-    factory: EventFactory<Handler>,
-    queue: EventPoll<Handler>,
-
-    listen_port: u16,
-    fwmark: Option<u32>,
-
-    iface: Arc<TunSocket>,
-    udp4: Option<Arc<UDPSocket>>,
-    udp6: Option<Arc<UDPSocket>>,
-
-    yield_notice: Option<EventRef<Handler>>,
-    exit_notice: Option<EventRef<Handler>>,
-
-    peers: HashMap<X25519Key, Arc<Peer>>,
-    peers_by_ip: AllowedIps<Arc<Peer>>,
-    peers_by_idx: HashMap<u32, Arc<Peer>>,
-    next_index: u32,
 }
 
 impl Device {
@@ -242,21 +244,34 @@ impl Device {
         Ok(device)
     }
 
-    fn open_listen_socket(&mut self, port: u16) -> Result<(), Error> {
-        if let Some(_) = &self.udp4 {
-            //TODO: handle port change - iterate over the peers, and establish new connections
-            panic!("Changing the listen port is not allowed yet");
+    fn open_listen_socket(&mut self, mut port: u16) -> Result<(), Error> {
+        //Binds the network facing interfaces
+
+        // First close any existing open socket, and remove them from the event loop
+        self.udp4
+            .as_ref()
+            .and_then(|s| unsafe { Some(self.factory.clear_event_by_fd(s.as_raw_fd())) });
+
+        self.udp6
+            .as_ref()
+            .and_then(|s| unsafe { Some(self.factory.clear_event_by_fd(s.as_raw_fd())) });
+
+        for (_, p) in &self.peers {
+            p.shutdown_endpoint();
         }
 
-        //Binds the network facing interfaces
-        self.listen_port = port;
-
+        // Then open new sockets and bind to the port
         let udp_sock4 = Arc::new(
             UDPSocket::new()
                 .and_then(|s| s.set_non_blocking())
                 .and_then(|s| s.set_reuse_port())
                 .and_then(|s| s.bind(port))?,
         );
+
+        if port == 0 {
+            // Random port was assigned
+            port = udp_sock4.port()?;
+        }
 
         let udp_sock6 = Arc::new(
             UDPSocket::new6()
@@ -269,6 +284,8 @@ impl Device {
         self.register_udp_handler(Arc::clone(&udp_sock6))?;
         self.udp4 = Some(udp_sock4);
         self.udp6 = Some(udp_sock6);
+
+        self.listen_port = port;
 
         Ok(())
     }

@@ -71,6 +71,17 @@ impl UDPSocket {
         }
     }
 
+    pub fn port(&self) -> Result<(u16), Error> {
+        assert_eq!(self.version, 4);
+        let mut addr: sockaddr_in = unsafe { std::mem::zeroed() };
+        let mut addr_len = std::mem::size_of_val(&addr) as _;
+
+        match unsafe { getsockname(self.fd, &mut addr as *mut sockaddr_in as _, &mut addr_len) } {
+            -1 => Err(Error::GetSockName(errno_str())),
+            _ => Ok(u16::from_be(addr.sin_port)),
+        }
+    }
+
     #[cfg(target_os = "linux")]
     pub fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
         match unsafe {
