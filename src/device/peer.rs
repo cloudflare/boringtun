@@ -51,7 +51,7 @@ impl Peer {
         tunnel: Box<Tunn>,
         index: u32,
         endpoint: Option<SocketAddr>,
-        allowed_ips: &Vec<AllowedIP>,
+        allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
     ) -> Peer {
@@ -120,7 +120,7 @@ impl Peer {
     ) -> Result<Arc<UDPSocket>, Error> {
         let mut endpoint = self.endpoint.write();
 
-        if let Some(_) = endpoint.conn {
+        if endpoint.conn.is_some() {
             return Err(Error::Connect("Connected".to_owned()));
         }
 
@@ -169,10 +169,7 @@ impl Peer {
     }
 
     pub fn is_allowed_ip(&self, addr: IpAddr) -> bool {
-        match self.allowed_ips.find(addr) {
-            Some(_) => true,
-            None => false,
-        }
+        self.allowed_ips.find(addr).is_some()
     }
 
     pub fn allowed_ips(&self) -> Iter<(())> {
@@ -183,7 +180,7 @@ impl Peer {
         self.tunnel.time_since_last_handshake()
     }
 
-    pub fn preshared_key<'a>(&'a self) -> Option<&'a [u8; 32]> {
+    pub fn preshared_key(&self) -> Option<&[u8; 32]> {
         self.preshared_key.as_ref()
     }
 

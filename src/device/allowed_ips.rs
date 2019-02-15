@@ -1,4 +1,5 @@
-use std::net::*;
+/// A trie of IP/cidr addresses
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub struct AllowedIps<D> {
     v4: Option<Node32<D>>,
@@ -42,7 +43,7 @@ impl<D> AllowedIps<D> {
         remove128(&mut self.v6, predicate);
     }
 
-    pub fn iter<'a>(&'a self) -> Iter<'a, D> {
+    pub fn iter(&self) -> Iter<D> {
         Iter::new(&self.v4, &self.v6)
     }
 }
@@ -185,9 +186,10 @@ macro_rules! build_node {
                     let new_node = $name::Leaf(new_key, new_bits, data);
                     let old_node = $name::Leaf(old_key, old_bits, cur_data);
 
-                    let (left, right) = match diff_bit {
-                        true => (old_node, new_node),
-                        false => (new_node, old_node),
+                    let (left, right) = if diff_bit {
+                        (old_node, new_node)
+                    } else {
+                        (new_node, old_node)
                     };
 
                     *node = Some($name::Node(
@@ -214,10 +216,7 @@ macro_rules! build_node {
                         // We matched the node key fully, and need to traverse further
                         let next_bit = (key >> (BM1 - shared_bits)) & 1 == 1; // Decide if traverse left or right
                         {
-                            let dir = match next_bit {
-                                false => &mut left,
-                                true => &mut right,
-                            };
+                            let dir = if next_bit { &mut right } else { &mut left };
                             $insert(dir, key << (shared_bits + 1), bits - shared_bits - 1, data);
                         }
                         *node = Some($name::Node(cur_key, cur_bits, left, right));
@@ -235,9 +234,10 @@ macro_rules! build_node {
                     let new_node = $name::Leaf(new_key, new_bits, data);
                     let old_node = $name::Node(old_key, old_bits, left, right);
 
-                    let (left, right) = match diff_bit {
-                        true => (old_node, new_node),
-                        false => (new_node, old_node),
+                    let (left, right) = if diff_bit {
+                        (old_node, new_node)
+                    } else {
+                        (new_node, old_node)
                     };
 
                     *node = Some($name::Node(

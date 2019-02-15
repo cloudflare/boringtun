@@ -205,7 +205,7 @@ where
                     .as_secs()
                     .checked_mul(1_000_000_000)
                     .unwrap()
-                    .checked_add(period.subsec_nanos() as _)
+                    .checked_add(u64::from(period.subsec_nanos()))
                     .unwrap() as _,
                 udata: null_mut(),
             },
@@ -231,7 +231,7 @@ where
     pub fn new_poll(&self) -> Result<EventPoll<H>, Error> {
         let epoll = match unsafe { kqueue() } {
             -1 => return Err(Error::EventQueue(errno_str())),
-            epoll @ _ => epoll,
+            epoll => epoll,
         };
 
         Ok(EventPoll {
@@ -260,7 +260,7 @@ where
             events[event.trigger as usize] = None;
         }
 
-        let mut kev = ev_data.event.clone();
+        let mut kev = ev_data.event;
         kev.flags |= EV_ADD;
 
         match unsafe { kevent(epoll.epoll, &kev, 1, null_mut(), 0, null()) } {
@@ -279,7 +279,7 @@ where
             panic!("Can only trigger a notification event");
         }
 
-        let mut kev = ev_data.event.clone();
+        let mut kev = ev_data.event;
         kev.fflags = NOTE_TRIGGER;
 
         for queue in ev_data.queues.iter() {
@@ -296,7 +296,7 @@ where
             panic!("Can only stop a notification event");
         }
 
-        let mut kev = ev_data.event.clone();
+        let mut kev = ev_data.event;
         kev.flags = EV_DISABLE;
         kev.fflags = 0;
 

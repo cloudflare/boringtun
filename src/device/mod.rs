@@ -156,9 +156,9 @@ impl Device {
         }
 
         // Update an existing peer
-        if let Some(_) = self.peers.get(&pub_key) {
+        if self.peers.get(&pub_key).is_some() {
             // We already have a peer, we need to merge the existing config into the newly created one
-            panic!("Modifying existing peers is not supported. Remove and add again instead.");
+            panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
         }
 
         let next_index = self.next_index();
@@ -166,13 +166,7 @@ impl Device {
             .key_pair
             .as_ref()
             .expect("Private key must be set first");
-        let mut tunn = Tunn::new(
-            &device_key_pair.0,
-            &pub_key,
-            preshared_key.clone(),
-            next_index,
-        )
-        .unwrap();
+        let mut tunn = Tunn::new(&device_key_pair.0, &pub_key, preshared_key, next_index).unwrap();
 
         {
             let pub_key = pub_key.as_bytes();
@@ -182,7 +176,7 @@ impl Device {
             );
             tunn.set_logger(
                 Box::new(move |e: &str| println!("{:?} {} {}", chrono::Utc::now(), peer_name, e)),
-                Verbosity::from(Verbosity::Debug),
+                Verbosity::Debug,
             );
         }
 
@@ -248,16 +242,18 @@ impl Device {
         //Binds the network facing interfaces
 
         // First close any existing open socket, and remove them from the event loop
-        self.udp4
-            .as_ref()
-            .and_then(|s| unsafe { Some(self.factory.clear_event_by_fd(s.as_raw_fd())) });
+        self.udp4.take().and_then(|s| unsafe {
+            self.factory.clear_event_by_fd(s.as_raw_fd());
+            Some(())
+        });
 
-        self.udp6
-            .as_ref()
-            .and_then(|s| unsafe { Some(self.factory.clear_event_by_fd(s.as_raw_fd())) });
+        self.udp6.take().and_then(|s| unsafe {
+            self.factory.clear_event_by_fd(s.as_raw_fd());
+            Some(())
+        });
 
-        for (_, p) in &self.peers {
-            p.shutdown_endpoint();
+        for peer in self.peers.values() {
+            peer.shutdown_endpoint();
         }
 
         // Then open new sockets and bind to the port
@@ -292,8 +288,8 @@ impl Device {
 
     fn set_key(&mut self, private_key: X25519Key) {
         if let Some(..) = &self.key_pair {
-            for (_, ref p) in &self.peers {
-                p.set_static_private(private_key.as_bytes());
+            for peer in self.peers.values() {
+                peer.set_static_private(private_key.as_bytes());
             }
         }
         let public_key = private_key.public_key();
@@ -313,8 +309,8 @@ impl Device {
         }
 
         // Then on all currently connected sockets
-        for (_, p) in &self.peers {
-            if let Some(ref sock) = p.endpoint().conn {
+        for peer in self.peers.values() {
+            if let Some(ref sock) = peer.endpoint().conn {
                 sock.set_fwmark(mark)?
             }
         }
@@ -364,7 +360,7 @@ impl Device {
                 let udp6 = udp6.unwrap();
 
                 // Go over every peers and invoke the timer function
-                for (_, peer) in peer_map {
+                for peer in peer_map.values() {
                     let endpoint_addr = match peer.endpoint().addr {
                         Some(addr) => addr,
                         None => continue,

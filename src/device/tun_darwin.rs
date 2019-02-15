@@ -23,7 +23,7 @@ pub struct ctl_info {
     pub ctl_name: [c_uchar; 96],
 }
 
-const CTLIOCGINFO: uint64_t = 0x00000000c0644e03;
+const CTLIOCGINFO: uint64_t = 0x0000_0000_c064_4e03;
 
 #[derive(Default, Debug)]
 pub struct TunSocket {
@@ -64,7 +64,7 @@ impl TunSocket {
 
         let fd = match unsafe { socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL) } {
             -1 => return Err(Error::Socket(errno_str())),
-            fd @ _ => fd,
+            fd => fd,
         };
 
         let mut info = ctl_info {
@@ -125,7 +125,7 @@ impl TunSocket {
     pub fn set_non_blocking(self) -> Result<TunSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
             -1 => Err(Error::FCntl(errno_str())),
-            flags @ _ => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
+            flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
                 -1 => Err(Error::FCntl(errno_str())),
                 _ => Ok(self),
             },
@@ -145,7 +145,7 @@ impl TunSocket {
             },
         ];
 
-        let mut msg_hdr = msghdr {
+        let msg_hdr = msghdr {
             msg_name: null_mut(),
             msg_namelen: 0,
             msg_iov: &mut iov[0],
@@ -155,9 +155,9 @@ impl TunSocket {
             msg_flags: 0,
         };
 
-        match unsafe { sendmsg(self.fd, &mut msg_hdr, 0) } {
+        match unsafe { sendmsg(self.fd, &msg_hdr, 0) } {
             -1 => 0,
-            n @ _ => n as usize,
+            n => n as usize,
         }
     }
 

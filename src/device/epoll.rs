@@ -81,7 +81,7 @@ where
         // When we want to stop the event, we read once from the file descriptor.something
         let efd = match unsafe { eventfd(0, EFD_NONBLOCK) } {
             -1 => return Err(Error::EventQueue(errno_str())),
-            efd @ _ => efd,
+            efd  => efd,
         };
 
         // TODO: avoid code duplication with new_event
@@ -185,7 +185,7 @@ where
         // The periodic event on Linux uses the timerfd
         let tfd = match unsafe { timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK) } {
             -1 => return Err(Error::Timer(errno_str())),
-            efd @ _ => efd,
+            efd  => efd,
         };
 
         let ts = timespec {
@@ -233,7 +233,7 @@ where
     pub fn new_poll(&self) -> Result<EventPoll<H>, Error> {
         let epoll = match unsafe { epoll_create(1) } {
             -1 => return Err(Error::EventQueue(errno_str())),
-            epoll @ _ => epoll,
+            epoll  => epoll,
         };
 
         Ok(EventPoll {

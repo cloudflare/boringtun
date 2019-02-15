@@ -3,16 +3,14 @@ use libc::*;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::{AsRawFd, RawFd};
 
-// Recieves and sends packets over the network
+/// Recieves and sends UDP packets over the network
 #[derive(Debug)]
 pub struct UDPSocket {
     fd: RawFd,
     version: u8,
 }
 
-unsafe impl Send for UDPSocket {}
-unsafe impl Sync for UDPSocket {}
-
+/// Socket is closed when it goes out of scope
 impl Drop for UDPSocket {
     fn drop(&mut self) {
         unsafe { close(self.fd) };
@@ -25,37 +23,35 @@ impl AsRawFd for UDPSocket {
     }
 }
 
-impl Default for UDPSocket {
-    fn default() -> UDPSocket {
-        UDPSocket { fd: -1, version: 0 }
-    }
-}
-
 impl UDPSocket {
+    /// Create a new IPv4 UDP socket
     pub fn new() -> Result<UDPSocket, Error> {
         match unsafe { socket(AF_INET, SOCK_DGRAM, 0) } {
             -1 => Err(Error::Socket(errno_str())),
-            fd @ _ => Ok(UDPSocket { fd, version: 4 }),
+            fd => Ok(UDPSocket { fd, version: 4 }),
         }
     }
 
+    /// Create a new IPv6 UDP socket
     pub fn new6() -> Result<UDPSocket, Error> {
         match unsafe { socket(AF_INET6, SOCK_DGRAM, 0) } {
             -1 => Err(Error::Socket(errno_str())),
-            fd @ _ => Ok(UDPSocket { fd, version: 6 }),
+            fd => Ok(UDPSocket { fd, version: 6 }),
         }
     }
 
+    /// Set socket mode to non blocking
     pub fn set_non_blocking(self) -> Result<UDPSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
             -1 => Err(Error::FCntl(errno_str())),
-            flags @ _ => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
+            flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
                 -1 => Err(Error::FCntl(errno_str())),
                 _ => Ok(self),
             },
         }
     }
 
+    /// Set the SO_REUSEPORT option, so multiple sockets can bind on the same port
     pub fn set_reuse_port(self) -> Result<UDPSocket, Error> {
         match unsafe {
             setsockopt(
@@ -71,11 +67,15 @@ impl UDPSocket {
         }
     }
 
+    /// Query the local port the socket is bound to
+    /// # Panics
+    /// If socket is IPv6
     pub fn port(&self) -> Result<(u16), Error> {
-        assert_eq!(self.version, 4);
+        if self.version != 4 {
+            panic!("Can only query ports of IPv4 sockets");
+        }
         let mut addr: sockaddr_in = unsafe { std::mem::zeroed() };
         let mut addr_len = std::mem::size_of_val(&addr) as _;
-
         match unsafe { getsockname(self.fd, &mut addr as *mut sockaddr_in as _, &mut addr_len) } {
             -1 => Err(Error::GetSockName(errno_str())),
             _ => Ok(u16::from_be(addr.sin_port)),
@@ -83,6 +83,8 @@ impl UDPSocket {
     }
 
     #[cfg(target_os = "linux")]
+    /// Set the mark on all packets sent by this socket using SO_MARK
+    /// Only available on Linux
     pub fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
         match unsafe {
             setsockopt(
@@ -103,13 +105,16 @@ impl UDPSocket {
         Ok(())
     }
 
+    /// Bind the socket to a local port
     pub fn bind(self, port: u16) -> Result<UDPSocket, Error> {
         if self.version == 6 {
             return self.bind6(port);
         }
 
-        assert_eq!(self.version, 4);
+        self.bind4(port)
+    }
 
+    fn bind4(self, port: u16) -> Result<UDPSocket, Error> {
         let addr = sockaddr_in {
             #[cfg(target_os = "macos")]
             sin_len: std::mem::size_of::<sockaddr_in>() as u8,
@@ -148,6 +153,9 @@ impl UDPSocket {
         }
     }
 
+    /// Connect a socket to a remote address, must call bind prior to connect
+    /// # Panics
+    /// When connecting an IPv4 socket to an IPv6 address and vice versa
     pub fn connect(self, dst: &SocketAddr) -> Result<UDPSocket, Error> {
         match dst {
             SocketAddr::V4(dst) => self.connect4(dst),
@@ -163,7 +171,7 @@ impl UDPSocket {
             sin_family: AF_INET as _,
             sin_port: dst.port().to_be(),
             sin_addr: in_addr {
-                s_addr: u32::from(dst.ip().clone()).to_be(),
+                s_addr: u32::from(*dst.ip()).to_be(),
             },
             sin_zero: [0; 8],
         };
@@ -199,6 +207,9 @@ impl UDPSocket {
         }
     }
 
+    /// Send buf to a remote address, returns 0 on error, or amount of data send on success
+    /// # Panics
+    /// When sending from an IPv4 socket to an IPv6 address and vice versa
     pub fn sendto(&self, buf: &[u8], dst: SocketAddr) -> usize {
         match dst {
             SocketAddr::V4(addr) => self.sendto4(buf, addr),
@@ -214,7 +225,7 @@ impl UDPSocket {
             sin_family: AF_INET as _,
             sin_port: dst.port().to_be(),
             sin_addr: in_addr {
-                s_addr: u32::from(dst.ip().clone()).to_be(),
+                s_addr: u32::from(*dst.ip()).to_be(),
             },
             sin_zero: [0; 8],
         };
@@ -230,7 +241,7 @@ impl UDPSocket {
             )
         } {
             -1 => 0,
-            n @ _ => n as usize,
+            n => n as usize,
         }
     }
 
@@ -252,10 +263,11 @@ impl UDPSocket {
             )
         } {
             -1 => 0,
-            n @ _ => n as usize,
+            n => n as usize,
         }
     }
 
+    /// Receives a message on a non-connected UDP socket and returns its contents and origin address
     pub fn recvfrom<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
         match self.version {
             4 => self.recvfrom4(buf),
@@ -263,7 +275,6 @@ impl UDPSocket {
         }
     }
 
-    // Receives a message on a non-connected UDP socket and returns its contents and origin address
     fn recvfrom6<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
         let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
         let mut addr_len: socklen_t = std::mem::size_of::<sockaddr_in6>() as socklen_t;
@@ -294,7 +305,6 @@ impl UDPSocket {
         Ok((SocketAddr::V6(origin), &mut buf[..n as usize]))
     }
 
-    // Receives a message on a non-connected UDP socket and returns its contents and origin address
     fn recvfrom4<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
         let mut addr = sockaddr_in {
             #[cfg(target_os = "macos")]
@@ -330,24 +340,27 @@ impl UDPSocket {
         Ok((SocketAddr::V4(origin), &mut buf[..n as usize]))
     }
 
+    /// Receives a message on a connected UDP socket and returns its contents
     pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         match unsafe { recv(self.fd, &mut dst[0] as *mut u8 as _, dst.len(), 0) } {
             -1 => Err(Error::UDPRead(errno_str())),
-            n @ _ => Ok(&mut dst[..n as usize]),
+            n => Ok(&mut dst[..n as usize]),
         }
     }
 
+    /// Sends a message on a connected UDP socket. Returns number of bytes succesfully sent.
     pub fn write(&self, src: &[u8]) -> usize {
         UDPSocket::write_fd(self.fd, src)
     }
 
-    pub fn write_fd(fd: RawFd, src: &[u8]) -> usize {
+    fn write_fd(fd: RawFd, src: &[u8]) -> usize {
         match unsafe { send(fd, &src[0] as *const u8 as _, src.len(), 0) } {
             -1 => 0,
-            n @ _ => n as usize,
+            n => n as usize,
         }
     }
 
+    /// Calls shutdown on a connected socket. This will trigger an EOF in the event queue.
     pub fn shutdown(&self) {
         unsafe { shutdown(self.fd, SHUT_RDWR) };
     }

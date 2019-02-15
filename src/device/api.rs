@@ -10,7 +10,7 @@ use std::os::unix::io::AsRawFd;
 
 impl Device {
     pub fn register_api_handler(&self) -> Result<(), Error> {
-        if let Err(_) = create_dir("/var/run/wireguard/") {};
+        create_dir("/var/run/wireguard/").is_ok();
         let path = format!("/var/run/wireguard/{}.sock", self.iface.name()?);
 
         let api_sock = UNIXSocket::new()
@@ -29,7 +29,7 @@ impl Device {
                 let mut reader = BufReader::new(&api_conn);
                 let mut writer = BufWriter::new(&api_conn);
                 let mut cmd = String::new();
-                if let Ok(_) = reader.read_line(&mut cmd) {
+                if reader.read_line(&mut cmd).is_ok() {
                     cmd.pop(); // pop the new line character
                     let status = match cmd.as_ref() {
                         "get=1" => api_get(&mut writer, d),
@@ -59,12 +59,10 @@ impl Device {
         let timer_ev = self.factory.new_periodic_event(
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 let mut st = unsafe { std::mem::zeroed() };
-                if -1 == unsafe { stat(path_cstr.as_ptr(), &mut st) } {
-                    if errno() == ENOENT {
-                        eprintln!("Control socket {:?} deleted, shutting down", path_cstr);
-                        d.trigger_exit();
-                        return Action::Exit;
-                    }
+                if -1 == unsafe { stat(path_cstr.as_ptr(), &mut st) } && errno() == ENOENT {
+                    eprintln!("Control socket {:?} deleted, shutting down", path_cstr);
+                    d.trigger_exit();
+                    return Action::Exit;
                 }
                 Action::Continue
             }),
@@ -130,7 +128,7 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> Opti
 
     while let Ok(_) = reader.read_line(&mut cmd) {
         cmd.pop(); // remove newline if any
-        if cmd.len() == 0 {
+        if cmd.is_empty() {
             return None; // Done
         }
         {
@@ -183,7 +181,7 @@ fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519Ke
 
     while let Ok(_) = reader.read_line(&mut cmd) {
         cmd.pop(); // remove newline if any
-        if cmd.len() == 0 {
+        if cmd.is_empty() {
             d.update_peer(
                 pub_key,
                 remove,

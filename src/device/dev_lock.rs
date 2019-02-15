@@ -47,7 +47,7 @@ impl<T> Lock<T> {
 
 impl<T: ?Sized> Lock<T> {
     /// Aquire a read lock
-    pub fn read<'a>(&'a self) -> LockReadGuard<'a, T> {
+    pub fn read(&self) -> LockReadGuard<T> {
         loop {
             let try_lock = self.lock.fetch_add(1, Ordering::SeqCst); // Increment readers counter optimistically
             if try_lock < MSB_MASK {
@@ -71,7 +71,7 @@ impl<T: ?Sized> Lock<T> {
 impl<'a, T: ?Sized> LockReadGuard<'a, T> {
     /// Notify of an intent to upgrade the lock to a write lock
     /// Returns None if another thread wants to write, or performs a write
-    pub fn mark_want_write<'b>(&'b mut self) -> Option<UpgradableReadGuard<'b, T>> {
+    pub fn mark_want_write(&mut self) -> Option<UpgradableReadGuard<T>> {
         // We mark for write, by setting the MSB
         let try_mark = self.lock.fetch_or(MSB_MASK, Ordering::SeqCst);
         if try_mark < MSB_MASK {
@@ -88,7 +88,7 @@ impl<'a, T: ?Sized> LockReadGuard<'a, T> {
 
 impl<'a, T: ?Sized> UpgradableReadGuard<'a, T> {
     /// Aquire a write lock
-    pub fn write<'b>(&'b mut self) -> LockWriteGuard<'b, T> {
+    pub fn write(&mut self) -> LockWriteGuard<T> {
         while self.lock.load(Ordering::SeqCst) != (MSB_MASK + 1) {
             // Because we already hold the read lock, wait until count drops to 1, this is essentially a spinlock
             std::sync::atomic::spin_loop_hint()
