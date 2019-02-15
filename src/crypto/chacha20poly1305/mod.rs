@@ -134,8 +134,9 @@ impl ChaCha20Poly1305 {
 
             plaintext_stream[remainder / 4] &=
                 (0xffff_ffff_u64 >> (32 - (8 * (remainder as u32 % 4)))) as u32;
-            for i in (remainder / 4 + 1)..16 {
-                plaintext_stream[i] = 0;
+
+            for p in plaintext_stream.iter_mut().skip(remainder / 4 + 1) {
+                *p = 0;
             }
 
             poly1305.hash_u32(&plaintext_stream[0..]);
@@ -258,10 +259,10 @@ impl ChaCha20Poly1305 {
 
     fn aead_init_wg(&self, nonce_ctr: u64) -> [u32; 16] {
         [
-            0x61707865,
-            0x3320646e,
-            0x79622d32,
-            0x6b206574,
+            0x6170_7865,
+            0x3320_646e,
+            0x7962_2d32,
+            0x6b20_6574,
             self.key[0],
             self.key[1],
             self.key[2],
@@ -280,10 +281,10 @@ impl ChaCha20Poly1305 {
     fn aead_init(&self, nonce: &[u8]) -> [u32; 16] {
         assert_eq!(nonce.len(), 12);
         [
-            0x61707865,
-            0x3320646e,
-            0x79622d32,
-            0x6b206574,
+            0x6170_7865,
+            0x3320_646e,
+            0x7962_2d32,
+            0x6b20_6574,
             self.key[0],
             self.key[1],
             self.key[2],
@@ -302,10 +303,10 @@ impl ChaCha20Poly1305 {
     fn xaead_init(&self, nonce: &[u8]) -> [u32; 16] {
         assert_eq!(nonce.len(), 24);
         let state = [
-            0x61707865,
-            0x3320646e,
-            0x79622d32,
-            0x6b206574,
+            0x6170_7865,
+            0x3320_646e,
+            0x7962_2d32,
+            0x6b20_6574,
             self.key[0],
             self.key[1],
             self.key[2],
@@ -324,10 +325,10 @@ impl ChaCha20Poly1305 {
 
         // First 128 and last 128 bit form the key for XChaCha20
         [
-            0x61707865,
-            0x3320646e,
-            0x79622d32,
-            0x6b206574,
+            0x6170_7865,
+            0x3320_646e,
+            0x7962_2d32,
+            0x6b20_6574,
             state[0],
             state[1],
             state[2],

@@ -281,7 +281,7 @@ impl Handshake {
         let params = NoiseParams::new(static_private, peer_static_public, preshared_key);
 
         Handshake {
-            params: params,
+            params,
             next_index: global_idx,
             rng: SystemRandom::new(),
             state: HandshakeState::None,

@@ -23,8 +23,10 @@ impl Poly1305 {
     pub fn new(key_stream: &[u32]) -> Poly1305 {
         Poly1305 {
             r_key: Poly1305R([
-                (u64::from(key_stream[0]) | (u64::from(key_stream[1]) << 32)) & 0x0FFFFFFC0FFFFFFF,
-                (u64::from(key_stream[2]) | (u64::from(key_stream[3]) << 32)) & 0x0FFFFFFC0FFFFFFC,
+                (u64::from(key_stream[0]) | (u64::from(key_stream[1]) << 32))
+                    & 0x0FFF_FFFC_0FFF_FFFF,
+                (u64::from(key_stream[2]) | (u64::from(key_stream[3]) << 32))
+                    & 0x0FFF_FFFC_0FFF_FFFC,
             ]),
             s_key: Poly1305S([
                 u64::from(key_stream[4]) | (u64::from(key_stream[5]) << 32),
@@ -84,8 +86,8 @@ impl Poly1305 {
         acc0 = acc0.wrapping_add(s0);
         acc1 = acc1.wrapping_add(acc0 >> 64).wrapping_add(s1);
 
-        &ret[0..8].copy_from_slice(&(acc0 as u64).to_le_bytes()[..]);
-        &ret[8..16].copy_from_slice(&(acc1 as u64).to_le_bytes()[..]);
+        ret[0..8].copy_from_slice(&(acc0 as u64).to_le_bytes()[..]);
+        ret[8..16].copy_from_slice(&(acc1 as u64).to_le_bytes()[..]);
 
         ret
     }
@@ -157,7 +159,7 @@ impl Rem<Poly1305Poly> for Felem1305NonRed {
         let mut acc1 = u128::from(self.0[1]);
         let mut acc2 = u128::from(self.0[2]);
 
-        let t0 = acc2 & 0xfffffffffffffffc;
+        let t0 = acc2 & 0xffff_ffff_ffff_fffc;
         let t1 = u128::from(self.0[3]);
         let t2 = u128::from((self.0[2] >> 2) | (self.0[3] << 62));
         let t3 = t1 >> 2;

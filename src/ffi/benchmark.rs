@@ -26,7 +26,7 @@ fn format_float(number: f64) -> String {
 
     loop {
         let remainder = integer % 1000;
-        integer = integer / 1000;
+        integer /= 1000;
 
         if integer == 0 {
             let mut new_str = format!("{:}", remainder);
@@ -200,8 +200,10 @@ fn bench_x25519_public_key_ring(name: bool, _: usize) -> String {
     format!("{} ops/sec", format_float(result))
 }
 
+type BenchFnc = fn(bool, usize) -> String;
+
 pub fn do_benchmark(name: bool, idx: usize) -> Option<String> {
-    let benchmarks: Vec<(fn(bool, usize) -> String, usize)> = vec![
+    let benchmarks: Vec<(BenchFnc, usize)> = vec![
         (bench_x25519_public_key, 0),
         (bench_x25519_shared_key, 0),
         (bench_x25519_public_key_ring, 0),

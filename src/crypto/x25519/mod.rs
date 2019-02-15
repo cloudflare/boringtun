@@ -72,7 +72,7 @@ impl X25519Key {
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(suspicious_arithmetic_impl))]
+#[cfg_attr(feature = "cargo-clippy", allow(clippy::suspicious_arithmetic_impl))]
 impl Add for Felem {
     type Output = Felem;
     #[inline(always)]
@@ -108,16 +108,16 @@ impl Add for Felem {
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(suspicious_arithmetic_impl))]
+#[cfg_attr(feature = "cargo-clippy", allow(clippy::suspicious_arithmetic_impl))]
 impl Sub for Felem {
     type Output = Felem;
     #[inline(always)]
     fn sub(self, other: Felem) -> Felem {
         static POLY_X4: [u128; 4] = [
-            0x1ffffffffffffffb4,
-            0x1fffffffffffffffe,
-            0x1fffffffffffffffe,
-            0x1fffffffffffffffe,
+            0x1_ffff_ffff_ffff_ffb4,
+            0x1_ffff_ffff_ffff_fffe,
+            0x1_ffff_ffff_ffff_fffe,
+            0x1_ffff_ffff_ffff_fffe,
         ];
 
         let x0 = u128::from(self.0[0]);
@@ -160,7 +160,7 @@ impl Sub for Felem {
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(suspicious_arithmetic_impl))]
+#[cfg_attr(feature = "cargo-clippy", allow(clippy::suspicious_arithmetic_impl))]
 impl Mul for Felem {
     type Output = Felem;
     #[inline(always)]
@@ -440,12 +440,12 @@ fn mod_final_25519(x: Felem) -> Felem {
 }
 
 fn mod_inv_25519(x: Felem) -> Felem {
-    let _1 = x;
-    let _10 = x.sqr(1);
-    let _1001 = _10.sqr(2) * _1;
-    let _1011 = _1001 * _10;
+    let m1 = x;
+    let m10 = x.sqr(1);
+    let m1001 = m10.sqr(2) * m1;
+    let m1011 = m1001 * m10;
 
-    let x5 = _1011.sqr(1) * _1001;
+    let x5 = m1011.sqr(1) * m1001;
     let x10 = x5.sqr(5) * x5;
     let x20 = x10.sqr(10) * x10;
     let x40 = x20.sqr(20) * x20;
@@ -454,7 +454,7 @@ fn mod_inv_25519(x: Felem) -> Felem {
 
     let t = x100.sqr(100) * x100;
     let t2 = t.sqr(50) * x50;
-    t2.sqr(5) * _1011
+    t2.sqr(5) * m1011
 }
 
 #[inline(always)]
@@ -525,7 +525,7 @@ pub fn x25519_shared_key(peer_key: &[u8], secret_key: &[u8]) -> [u8; 32] {
     let mut z_2 = Felem([0, 0, 0, 0]);
     let mut x_3 = u;
     let mut z_3 = Felem([1, 0, 0, 0]);
-    let a24 = Felem([121666, 0, 0, 0]);
+    let a24 = Felem([121_666, 0, 0, 0]);
     let mut swap = 0;
 
     for pos in (0..=254).rev() {
