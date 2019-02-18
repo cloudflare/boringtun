@@ -219,18 +219,16 @@ impl Session {
         let mut nonce = [0u8; 12];
         nonce[4..12].copy_from_slice(&receiving_key_counter.to_le_bytes());
         dst[..src.len() - DATA_OFF].copy_from_slice(&src[DATA_OFF..]);
-        open_in_place(
+        let packet = open_in_place(
             &self.receiver,
             Nonce::assume_unique_for_key(nonce),
             Aad::from(&[]),
             0,
             &mut dst[..src.len() - DATA_OFF],
         )
-        .map_err(|_| WireGuardError::InvalidAeadTag)
-        .and_then(|packet| {
-            // After decryption is done, check counter again, and mark as recieved
-            self.receiving_counter_mark(receiving_key_counter)?;
-            Ok(packet)
-        })
+        .map_err(|_| WireGuardError::InvalidAeadTag)?;
+        // After decryption is done, check counter again, and mark as recieved
+        self.receiving_counter_mark(receiving_key_counter)?;
+        Ok(packet)
     }
 }
