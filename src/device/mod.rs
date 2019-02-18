@@ -1,6 +1,7 @@
 pub mod allowed_ips;
 pub mod api;
 pub mod dev_lock;
+pub mod drop_privileges;
 pub mod peer;
 #[cfg_attr(any(target_os = "macos", target_os = "ios"), path = "kqueue.rs")]
 #[cfg_attr(target_os = "linux", path = "epoll.rs")]
@@ -54,6 +55,7 @@ pub enum Error {
     #[cfg(target_os = "linux")]
     Timer(String),
     IfaceRead(String),
+    DropPrivileges(String),
 }
 
 // What the event loop should do after a handler returns

@@ -13,6 +13,7 @@ pub mod ffi;
 pub mod noise;
 
 use daemonize::Daemonize;
+use device::drop_privileges::*;
 use device::*;
 use std::env;
 use std::env::var;
@@ -42,6 +43,8 @@ fn start_device(name: &str) {
                     thread::spawn(move || dev.event_loop())
                 });
             }
+
+            drop_privileges().unwrap();
 
             for t in threads {
                 t.join().unwrap();
