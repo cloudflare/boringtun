@@ -33,12 +33,10 @@ impl Device {
                     let status = match cmd.as_ref() {
                         "get=1" => api_get(&mut writer, d),
                         "set=1" => api_set(&mut reader, d),
-                        _ => Some(EIO),
+                        _ => EIO,
                     };
 
-                    writer
-                        .write(format!("errno={}\n\n", status.unwrap_or(0)).as_ref())
-                        .ok();
+                    writer.write(format!("errno={}\n\n", status).as_ref()).ok();
                 }
                 Action::Continue
             }),
@@ -70,7 +68,7 @@ impl Device {
 }
 
 #[allow(unused_must_use)]
-fn api_get(writer: &mut BufWriter<&File>, d: &Device) -> Option<i32> {
+fn api_get(writer: &mut BufWriter<&File>, d: &Device) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
         writer.write(format!("private_key={}\n", encode_hex(k.0.as_bytes())).as_ref());
@@ -107,14 +105,14 @@ fn api_get(writer: &mut BufWriter<&File>, d: &Device) -> Option<i32> {
         writer.write(format!("rx_bytes={}\n", p.get_rx_bytes()).as_ref());
         writer.write(format!("tx_bytes={}\n", p.get_tx_bytes()).as_ref());
     }
-    None
+    0
 }
 
-fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> Option<i32> {
+fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> i32 {
     // We need to get a write lock on the device first
     let want_write = d.mark_want_write();
     if want_write.is_none() {
-        return Some(EIO);
+        return EIO;
     }
     let mut write_mark = want_write.unwrap();
     write_mark.trigger_yield();
@@ -126,12 +124,12 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> Opti
     while let Ok(_) = reader.read_line(&mut cmd) {
         cmd.pop(); // remove newline if any
         if cmd.is_empty() {
-            return None; // Done
+            return 0; // Done
         }
         {
             let parsed_cmd: Vec<&str> = cmd.split('=').collect();
             if parsed_cmd.len() != 2 {
-                return Some(EPROTO);
+                return EPROTO;
             }
 
             let (key, val) = (parsed_cmd[0], parsed_cmd[1]);
@@ -139,34 +137,34 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> Opti
             match key {
                 "private_key" => match val.parse::<X25519Key>() {
                     Ok(key) => device.set_key(key),
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "listen_port" => match val.parse::<u16>() {
                     Ok(port) => device.open_listen_socket(port).unwrap(),
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "fwmark" => match val.parse::<u32>() {
                     Ok(mark) => device.set_fwmark(mark).unwrap(),
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "replace_peers" => match val.parse::<bool>() {
                     Ok(true) => device.clear_peers(),
                     Ok(false) => {}
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "public_key" => match val.parse::<X25519Key>() {
                     Ok(key) => return api_set_peer(reader, &mut device, key),
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
-                _ => return Some(EINVAL),
+                _ => return EINVAL,
             }
         }
         cmd.clear();
     }
-    None
+    0
 }
 
-fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519Key) -> Option<i32> {
+fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519Key) -> i32 {
     let mut cmd = String::new();
 
     let mut remove = false;
@@ -188,12 +186,12 @@ fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519Ke
                 keepalive,
                 preshared_key,
             );
-            return None; // Done
+            return 0; // Done
         }
         {
             let parsed_cmd: Vec<&str> = cmd.split('=').collect();
             if parsed_cmd.len() != 2 {
-                return Some(EPROTO);
+                return EPROTO;
             }
 
             let (key, val) = (parsed_cmd[0], parsed_cmd[1]);
@@ -202,28 +200,28 @@ fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519Ke
                 "remove" => match val.parse::<bool>() {
                     Ok(true) => remove = true,
                     Ok(false) => remove = false,
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "preshared_key" => match val.parse::<X25519Key>() {
                     Ok(key) => preshared_key = Some(key.inner()),
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "endpoint" => match val.parse::<SocketAddr>() {
                     Ok(addr) => endpoint = Some(addr),
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "persistent_keepalive_interval" => match val.parse::<u16>() {
                     Ok(interval) => keepalive = Some(interval),
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "replace_allowed_ips" => match val.parse::<bool>() {
                     Ok(true) => replace_ips = true,
                     Ok(false) => replace_ips = false,
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "allowed_ip" => match val.parse::<AllowedIP>() {
                     Ok(ip) => allowed_ips.push(ip),
-                    Err(_) => return Some(EINVAL),
+                    Err(_) => return EINVAL,
                 },
                 "public_key" => {
                     d.update_peer(
@@ -237,17 +235,17 @@ fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519Ke
                     );
                     match val.parse::<X25519Key>() {
                         Ok(key) => return api_set_peer(reader, d, key),
-                        Err(_) => return Some(EINVAL),
+                        Err(_) => return EINVAL,
                     }
                 }
                 "protocol_version" => match val.parse::<u32>() {
                     Ok(1) => {}
-                    _ => return Some(EINVAL),
+                    _ => return EINVAL,
                 },
-                _ => return Some(EINVAL),
+                _ => return EINVAL,
             }
         }
         cmd.clear();
     }
-    None
+    0
 }
