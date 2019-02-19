@@ -2,10 +2,6 @@ use super::Error;
 use libc::*;
 use std::os::unix::io::{AsRawFd, RawFd};
 
-pub fn errno() -> i32 {
-    unsafe {*__errno_location()}
-}
-
 pub fn errno_str() -> String {
     let strerr = unsafe { strerror(*__errno_location()) };
     let c_str = unsafe { std::ffi::CStr::from_ptr(strerr) };

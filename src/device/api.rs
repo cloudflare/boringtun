@@ -1,6 +1,5 @@
 use super::{AllowedIP, Device, Error, SocketAddr, UNIXSocket, X25519Key};
 use dev_lock::LockReadGuard;
-use device::tun::errno;
 use device::Action;
 use hex::encode as encode_hex;
 use libc::*;
@@ -54,17 +53,15 @@ impl Device {
         // deletion, and kqueue EVFILT_VNODE can be used for the same purpose, but that
         // will require introducing new events, for no measureable benefit.
         // TODO: Could this be an issue if we restart the service too quickly?
-        let path_cstr = std::ffi::CString::new(path).unwrap();
-
         let timer_ev = self.factory.new_periodic_event(
             Box::new(move |d: &mut LockReadGuard<Device>| {
-                let mut st = unsafe { std::mem::zeroed() };
-                if -1 == unsafe { stat(path_cstr.as_ptr(), &mut st) } && errno() == ENOENT {
-                    eprintln!("Control socket {:?} deleted, shutting down", path_cstr);
+                let path = std::path::Path::new(&path);
+                if path.exists() {
+                    Action::Continue
+                } else {
                     d.trigger_exit();
-                    return Action::Exit;
+                    Action::Exit
                 }
-                Action::Continue
             }),
             std::time::Duration::from_millis(3000),
         )?;

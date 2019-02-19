@@ -5,10 +5,6 @@ use std::mem::size_of_val;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::null_mut;
 
-pub fn errno() -> i32 {
-    unsafe { *__error() }
-}
-
 pub fn errno_str() -> String {
     let strerr = unsafe { strerror(*__error()) };
     let c_str = unsafe { std::ffi::CStr::from_ptr(strerr) };
