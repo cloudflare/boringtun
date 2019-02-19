@@ -46,7 +46,6 @@ pub enum Error {
     IOCtl(String),
     Connect(String),
     SetSockOpt(String),
-    #[cfg(target_os = "macos")]
     InvalidTunnelName,
     #[cfg(target_os = "macos")]
     GetSockOpt(String),

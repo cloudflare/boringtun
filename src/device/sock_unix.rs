@@ -48,7 +48,7 @@ impl UNIXSocket {
             sun_path: [0; 104],
         };
 
-        if address.len() < addr.sun_path.len() {
+        if address.len() >= addr.sun_path.len() {
             return Err(Error::Bind("Path is too long".to_owned()));
         }
 

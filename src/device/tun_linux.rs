@@ -58,18 +58,22 @@ impl AsRawFd for TunSocket {
 
 impl TunSocket {
     pub fn new(name: &str) -> Result<TunSocket, Error> {
-        let fd = match unsafe { open(&b"/dev/net/tun\0"[0] as *const u8 as _, O_RDWR) } {
+        let fd = match unsafe { open(b"/dev/net/tun\0".as_ptr() as _, O_RDWR) } {
             -1 => return Err(Error::Socket(errno_str())),
             fd @ _ => fd,
         };
 
-        let iface_name: &[u8] = name.as_ref();
+        let iface_name = name.as_bytes();
         let mut ifr = ifreq {
             ifr_name: [0; IFNAMSIZ],
             ifr_ifru: IfrIfru {
                 ifru_flags: IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE,
             },
         };
+
+        if iface_name.len() >= ifr.ifr_name.len() {
+            return Err(Error::InvalidTunnelName);
+        }
 
         ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
 
@@ -104,14 +108,14 @@ impl TunSocket {
     }
 
     fn write(&self, buf: &[u8]) -> usize {
-        match unsafe { write(self.fd, &buf[0] as *const u8 as _, buf.len() as _) } {
+        match unsafe { write(self.fd, buf.as_ptr() as _, buf.len() as _) } {
             -1 => 0,
             n => n as usize,
         }
     }
 
     pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
-        match unsafe { read(self.fd, &mut dst[0] as *mut u8 as _, dst.len()) } {
+        match unsafe { read(self.fd, dst.as_mut_ptr() as _, dst.len()) } {
             -1 => Err(Error::IfaceRead(errno_str())),
             n @ _ => Ok(&mut dst[..n as usize]),
         }
