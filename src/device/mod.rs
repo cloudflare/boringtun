@@ -66,7 +66,7 @@ enum Action {
 }
 
 // Event handler function
-type Handler = Box<Fn(&mut LockReadGuard<Device>) -> Action + Send + Sync>;
+type Handler = Box<dyn Fn(&mut LockReadGuard<Device>) -> Action + Send + Sync>;
 
 pub struct DeviceHandle {
     device: Lock<Device>,
@@ -137,8 +137,7 @@ impl Device {
             peer.shutdown_endpoint(); // close open udp socket and free the closure
             self.peers_by_idx.remove(&peer.index()); // peers_by_idx
             self.peers_by_ip
-                .remove(&|p: &Arc<Peer>| Arc::ptr_eq(&peer, p));
-            self.peers_by_ip.clear(); // peers_by_ip
+                .remove(&|p: &Arc<Peer>| Arc::ptr_eq(&peer, p)); // peers_by_ip
         }
     }
 
@@ -222,19 +221,12 @@ impl Device {
 
         #[cfg(target_os = "macos")]
         {
-            use std::io::Write;
             // Only for macOS write the actual socket name into WG_TUN_NAME_FILE
-            std::env::var("WG_TUN_NAME_FILE")
-                .and_then(|name_file| {
-                    if name == "utun" {
-                        std::fs::File::create(name_file)
-                            .unwrap()
-                            .write_all(device.iface.name().unwrap().as_bytes())
-                            .unwrap();
-                    }
-                    Ok(())
-                })
-                .is_ok();
+            if let Ok(name_file) = std::env::var("WG_TUN_NAME_FILE") {
+                if name == "utun" {
+                    std::fs::write(name_file, device.iface.name().unwrap().as_bytes()).unwrap();
+                }
+            }
         }
 
         Ok(device)
@@ -260,10 +252,10 @@ impl Device {
 
         // Then open new sockets and bind to the port
         let udp_sock4 = Arc::new(
-            UDPSocket::new()
-                .and_then(|s| s.set_non_blocking())
-                .and_then(|s| s.set_reuse_port())
-                .and_then(|s| s.bind(port))?,
+            UDPSocket::new()?
+                .set_non_blocking()?
+                .set_reuse_port()?
+                .bind(port)?,
         );
 
         if port == 0 {
@@ -272,10 +264,10 @@ impl Device {
         }
 
         let udp_sock6 = Arc::new(
-            UDPSocket::new6()
-                .and_then(|s| s.set_non_blocking())
-                .and_then(|s| s.set_reuse_port())
-                .and_then(|s| s.bind(port))?,
+            UDPSocket::new6()?
+                .set_non_blocking()?
+                .set_reuse_port()?
+                .bind(port)?,
         );
 
         self.register_udp_handler(Arc::clone(&udp_sock4))?;
@@ -348,7 +340,8 @@ impl Device {
             Box::new(|d: &mut LockReadGuard<Device>| {
                 // The timed event will check timer expiration of the peers
                 // TODO: split into several timers
-                let mut dst: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
+                // Allocate temporary buffer for update_timers to write to
+                let mut tmp_buff: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
                 let peer_map = &d.peers;
 
                 let udp4 = d.udp4.as_ref();
@@ -368,7 +361,7 @@ impl Device {
                         None => continue,
                     };
 
-                    match peer.update_timers(&mut dst[..]) {
+                    match peer.update_timers(&mut tmp_buff[..]) {
                         TunnResult::Done => {}
                         TunnResult::Err(WireGuardError::ConnectionExpired) => {
                             // TODO: close peer socket, remove from timers?

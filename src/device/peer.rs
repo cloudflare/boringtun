@@ -125,16 +125,16 @@ impl Peer {
         }
 
         let udp_conn = Arc::new(match endpoint.addr {
-            Some(addr @ SocketAddr::V4(_)) => UDPSocket::new()
-                .and_then(|s| s.set_non_blocking())
-                .and_then(|s| s.set_reuse_port())
-                .and_then(|s| s.bind(port))
-                .and_then(|s| s.connect(&addr))?,
-            Some(addr @ SocketAddr::V6(_)) => UDPSocket::new6()
-                .and_then(|s| s.set_non_blocking())
-                .and_then(|s| s.set_reuse_port())
-                .and_then(|s| s.bind(port))
-                .and_then(|s| s.connect(&addr))?,
+            Some(addr @ SocketAddr::V4(_)) => UDPSocket::new()?
+                .set_non_blocking()?
+                .set_reuse_port()?
+                .bind(port)?
+                .connect(&addr)?,
+            Some(addr @ SocketAddr::V6(_)) => UDPSocket::new6()?
+                .set_non_blocking()?
+                .set_reuse_port()?
+                .bind(port)?
+                .connect(&addr)?,
             None => panic!("Attempt to connect to undefined endpoint"),
         });
 

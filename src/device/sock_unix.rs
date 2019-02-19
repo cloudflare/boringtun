@@ -38,7 +38,6 @@ impl UNIXSocket {
 
     /// Bind the packet to a path, if path already exists it will remove it before binding
     pub fn bind(mut self, address: &str) -> Result<UNIXSocket, Error> {
-        assert!(address.len() < 108);
         let mut addr = sockaddr_un {
             #[cfg(target_os = "macos")]
             sun_len: std::mem::size_of::<sockaddr_un>() as u8,
@@ -48,6 +47,10 @@ impl UNIXSocket {
             #[cfg(target_os = "macos")]
             sun_path: [0; 104],
         };
+
+        if address.len() < addr.sun_path.len() {
+            return Err(Error::Bind("Path is too long".to_owned()));
+        }
 
         for (i, c) in address.chars().enumerate() {
             addr.sun_path[i] = c as _;

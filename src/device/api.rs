@@ -12,9 +12,7 @@ impl Device {
         create_dir("/var/run/wireguard/").is_ok();
         let path = format!("/var/run/wireguard/{}.sock", self.iface.name()?);
 
-        let api_sock = UNIXSocket::new()
-            .and_then(|s| s.bind(&path))
-            .and_then(|s| s.listen())?;
+        let api_sock = UNIXSocket::new()?.bind(&path)?.listen()?;
 
         let api_sock_ev = self.factory.new_event(
             api_sock.as_raw_fd(),

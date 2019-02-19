@@ -282,7 +282,7 @@ impl UDPSocket {
         let n = unsafe {
             recvfrom(
                 self.fd,
-                &mut buf[..] as *mut [u8] as *mut c_void,
+                buf.as_mut_ptr() as *mut c_void,
                 buf.len(),
                 0,
                 &mut addr as *mut sockaddr_in6 as *mut sockaddr,
@@ -319,7 +319,7 @@ impl UDPSocket {
         let n = unsafe {
             recvfrom(
                 self.fd,
-                &mut buf[..] as *mut [u8] as *mut c_void,
+                buf.as_mut_ptr() as *mut c_void,
                 buf.len(),
                 0,
                 &mut addr as *mut sockaddr_in as *mut sockaddr,

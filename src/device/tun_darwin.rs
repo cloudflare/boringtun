@@ -44,14 +44,18 @@ fn parse_utun_name(name: &str) -> Result<u32, Error> {
         return Err(Error::InvalidTunnelName);
     }
 
-    if name.len() == 4 {
-        return Ok(0);
+    match name.get(4..) {
+        None | Some("") => {
+            // The name is simply "utun"
+            Ok(0)
+        }
+        Some(idx) => {
+            // Everything past utun should represent an integer index
+            idx.parse::<u32>()
+                .map_err(|_| Error::InvalidTunnelName)
+                .map(|x| x + 1)
+        }
     }
-
-    name[4..]
-        .parse::<u32>()
-        .map_err(|_| Error::InvalidTunnelName)
-        .map(|x| x + 1)
 }
 
 impl TunSocket {
@@ -106,7 +110,7 @@ impl TunSocket {
                 self.fd,
                 SYSPROTO_CONTROL,
                 UTUN_OPT_IFNAME,
-                &mut tunnel_name[0] as *mut u8 as *mut c_void,
+                tunnel_name.as_mut_ptr() as _,
                 &mut tunnel_name_len,
             )
         } < 0
@@ -132,11 +136,11 @@ impl TunSocket {
         let mut hdr = [0u8, 0u8, 0u8, af as u8];
         let mut iov = [
             iovec {
-                iov_base: &mut hdr[0] as *mut u8 as _,
+                iov_base: hdr.as_mut_ptr() as _,
                 iov_len: hdr.len(),
             },
             iovec {
-                iov_base: &src[0] as *const u8 as _,
+                iov_base: src.as_ptr() as _,
                 iov_len: src.len(),
             },
         ];
@@ -170,11 +174,11 @@ impl TunSocket {
 
         let mut iov = [
             iovec {
-                iov_base: &mut hdr[0] as *mut u8 as _,
+                iov_base: hdr.as_mut_ptr() as _,
                 iov_len: hdr.len(),
             },
             iovec {
-                iov_base: &mut dst[0] as *mut u8 as _,
+                iov_base: dst.as_mut_ptr() as _,
                 iov_len: dst.len(),
             },
         ];
