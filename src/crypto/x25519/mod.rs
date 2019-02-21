@@ -1,6 +1,7 @@
 mod tests;
 
 use base64::decode;
+use noise::errors::WireGuardError;
 use noise::make_array;
 use ring::rand::*;
 use std::ops::Add;
@@ -8,74 +9,164 @@ use std::ops::Mul;
 use std::ops::Sub;
 use std::str::FromStr;
 
-#[derive(Debug, Eq, PartialEq, Hash, Default, Clone)]
-// TODO: implement Hash
-pub struct X25519Key([u8; 32]);
+#[repr(C)]
+#[derive(Debug)]
+/// A secret X25519 key
+pub struct X25519SecretKey {
+    internal: [u8; 32],
+}
 
-#[derive(Clone, Copy)]
-struct Felem([u64; 4]);
-struct Felem2([u64; 8]);
+#[repr(C)]
+#[derive(Debug)]
+/// An ephemeral X25519 key. Ideally should only be used once, but because WG uses the same ephemral
+/// key twice, it is essentialy identical to a secret key
+pub struct X25519EphemeralKey {
+    internal: X25519SecretKey,
+}
 
-impl FromStr for X25519Key {
-    type Err = String;
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq, Hash)]
+/// A public X25519, derived from a secret key
+pub struct X25519PublicKey {
+    internal: [u8; 32],
+}
 
+#[allow(clippy::new_without_default_derive)]
+impl X25519SecretKey {
+    /// Generate a new secret key using the OS rng
+    pub fn new() -> Self {
+        let rng = SystemRandom::new();
+        let mut private_key = [0u8; 32];
+        rng.fill(&mut private_key[..]).unwrap();
+        X25519SecretKey {
+            internal: private_key,
+        }
+    }
+
+    /// Compute the public key for this secret key
+    pub fn public_key(&self) -> X25519PublicKey {
+        X25519PublicKey {
+            internal: x25519_public_key(&self.internal[..]),
+        }
+    }
+
+    /// Derive a shared key from a secret key of one peer and a pulic key of another
+    pub fn shared_key(&self, peer_public: &X25519PublicKey) -> Result<[u8; 32], WireGuardError> {
+        let shared_key = x25519_shared_key(&peer_public.internal[..], &self.internal[..]);
+
+        constant_time_key_compare(&self.internal[..], &peer_public.internal[..], false)?;
+        constant_time_zero_key_check(&shared_key[..])?;
+
+        Ok(shared_key)
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.internal[..]
+    }
+}
+
+impl FromStr for X25519SecretKey {
+    type Err = &'static str;
+    /// Can parse a secret key from a hex or base64 encoded string
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut key = X25519Key([0u8; 32]);
-        if s.len() != 64 {
-            if let Ok(decoded_key) = decode(s) {
-                if decoded_key.len() != key.0.len() {
-                    return Err("Illegal key size".to_owned());
-                } else {
-                    key.0[..].copy_from_slice(&decoded_key);
-                    return Ok(key);
+        let mut key = X25519SecretKey {
+            internal: [0u8; 32],
+        };
+
+        match s.len() {
+            64 => {
+                // Try to parse as hex
+                for i in 0..32 {
+                    key.internal[i] = u8::from_str_radix(&s[i * 2..=i * 2 + 1], 16)
+                        .map_err(|_| "Illegal character in key")?;
                 }
             }
-            // Try to parse as base 64
-            return Err("Illegal key size".to_owned());
-        }
-
-        for i in 0..32 {
-            key.0[i] = u8::from_str_radix(&s[i * 2..=i * 2 + 1], 16)
-                .map_err(|_| "Illegal character in key".to_owned())?;
+            43 | 44 => {
+                // Try to parse as base64
+                if let Ok(decoded_key) = decode(s) {
+                    if decoded_key.len() == key.internal.len() {
+                        key.internal[..].copy_from_slice(&decoded_key);
+                    } else {
+                        return Err("Illegal character in key");
+                    }
+                }
+            }
+            _ => return Err("Illegal key size"),
         }
 
         Ok(key)
     }
 }
 
-/// Will panic if the slice.len() != 32
-impl<'a> From<&'a [u8]> for X25519Key {
-    fn from(slice: &[u8]) -> Self {
-        let mut key = [0u8; 32];
-        key[..].copy_from_slice(slice);
-        X25519Key(key)
+impl Drop for X25519SecretKey {
+    fn drop(&mut self) {
+        // Force zero out of the memory on Drop
+        unsafe { std::ptr::write_volatile(&mut self.internal, [0u8; 32]) }
     }
 }
 
-impl From<[u8; 32]> for X25519Key {
-    fn from(arr: [u8; 32]) -> Self {
-        X25519Key(arr)
-    }
-}
-
-impl X25519Key {
-    pub fn public_key(&self) -> X25519Key {
-        X25519Key(x25519_public_key(&self.0))
+impl X25519PublicKey {
+    pub fn is_equal_constant_time(&self, other: &X25519PublicKey) -> Result<(), WireGuardError> {
+        constant_time_key_compare(&self.internal[..], &other.internal[..], true)
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-
-    pub fn inner(self) -> [u8; 32] {
-        self.0
+        &self.internal[..]
     }
 }
+
+/// Will panic if the slice.len() != 32
+impl<'a> From<&'a [u8]> for X25519PublicKey {
+    fn from(slice: &[u8]) -> Self {
+        let mut internal = [0u8; 32];
+        internal[..].copy_from_slice(slice);
+        X25519PublicKey { internal }
+    }
+}
+
+impl Drop for X25519PublicKey {
+    fn drop(&mut self) {
+        // Force zero out of the memory on Drop
+        unsafe { std::ptr::write_volatile(&mut self.internal, [0u8; 32]) }
+    }
+}
+
+#[allow(clippy::new_without_default)]
+impl X25519EphemeralKey {
+    pub fn new() -> Self {
+        X25519EphemeralKey {
+            internal: X25519SecretKey::new(),
+        }
+    }
+
+    pub fn public_key(&self) -> X25519PublicKey {
+        self.internal.public_key()
+    }
+
+    pub fn shared_key(&self, peer_public: &X25519PublicKey) -> Result<[u8; 32], WireGuardError> {
+        self.internal.shared_key(peer_public)
+    }
+}
+
+impl FromStr for X25519PublicKey {
+    type Err = &'static str;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(X25519PublicKey {
+            internal: X25519SecretKey::from_str(s)?.internal,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+// Internal structs for fast arithmetic
+struct Felem([u64; 4]);
+struct Felem2([u64; 8]);
 
 #[cfg_attr(feature = "cargo-clippy", allow(clippy::suspicious_arithmetic_impl))]
 impl Add for Felem {
     type Output = Felem;
     #[inline(always)]
+    // Addition modulo 2^255 - 19
     fn add(self, other: Felem) -> Felem {
         let x0 = u128::from(self.0[0]);
         let x1 = u128::from(self.0[1]);
@@ -112,6 +203,7 @@ impl Add for Felem {
 impl Sub for Felem {
     type Output = Felem;
     #[inline(always)]
+    // Subtraction modulo 2^255 - 19
     fn sub(self, other: Felem) -> Felem {
         static POLY_X4: [u128; 4] = [
             0x1_ffff_ffff_ffff_ffb4,
@@ -164,6 +256,7 @@ impl Sub for Felem {
 impl Mul for Felem {
     type Output = Felem;
     #[inline(always)]
+    // Multiplication modulo 2^255 - 19
     fn mul(self, other: Felem) -> Felem {
         let x0 = u128::from(self.0[0]);
         let x1 = u128::from(self.0[1]);
@@ -282,6 +375,7 @@ impl Mul for Felem {
 
 impl Felem {
     #[inline(always)]
+    // Repeatedly square modulo 2^255 - 19
     fn sqr(self, mut rep: u32) -> Felem {
         let mut ret = self;
         while rep > 0 {
@@ -293,6 +387,7 @@ impl Felem {
 }
 
 #[inline(always)]
+// Square modulo 2^255 - 19
 fn sqr_256(x: Felem) -> Felem2 {
     let x0 = u128::from(x.0[0]);
     let x1 = u128::from(x.0[1]);
@@ -439,6 +534,7 @@ fn mod_final_25519(x: Felem) -> Felem {
     Felem([acc0 as u64, acc1 as u64, acc2 as u64, acc3 as u64])
 }
 
+// Modular inverse
 fn mod_inv_25519(x: Felem) -> Felem {
     let m1 = x;
     let m10 = x.sqr(1);
@@ -458,6 +554,7 @@ fn mod_inv_25519(x: Felem) -> Felem {
 }
 
 #[inline(always)]
+// Swap two values a and b in constant time iff swap == 1
 fn constant_time_swap(a: Felem, b: Felem, swap: u64) -> (Felem, Felem) {
     let mask = 0_u64.wrapping_sub(swap);
 
@@ -483,14 +580,7 @@ fn constant_time_swap(a: Felem, b: Felem, swap: u64) -> (Felem, Felem) {
     (Felem(a_out), Felem(b_out))
 }
 
-pub fn x25519_gen_secret_key() -> [u8; 32] {
-    let rng = SystemRandom::new();
-    let mut private_key = [0u8; 32];
-    rng.fill(&mut private_key[..]).unwrap();
-    private_key
-}
-
-pub fn x25519_public_key(secret_key: &[u8]) -> [u8; 32] {
+fn x25519_public_key(secret_key: &[u8]) -> [u8; 32] {
     let u = [
         9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0,
@@ -499,7 +589,7 @@ pub fn x25519_public_key(secret_key: &[u8]) -> [u8; 32] {
     x25519_shared_key(&u, secret_key)
 }
 
-pub fn x25519_shared_key(peer_key: &[u8], secret_key: &[u8]) -> [u8; 32] {
+fn x25519_shared_key(peer_key: &[u8], secret_key: &[u8]) -> [u8; 32] {
     if peer_key.len() != 32 || secret_key.len() != 32 {
         panic!("Illegal values for x25519");
     }
@@ -572,4 +662,43 @@ pub fn x25519_shared_key(peer_key: &[u8], secret_key: &[u8]) -> [u8; 32] {
     shared_key[24..32].copy_from_slice(&key.0[3].to_le_bytes());
 
     shared_key
+}
+
+// Compare two 32 byte keys for equality.
+// eq = true indicates we compare for equality (Err if not equal)
+// eq = false indicates we compare for inequality (Err if equal)
+fn constant_time_key_compare(key1: &[u8], key2: &[u8], eq: bool) -> Result<(), WireGuardError> {
+    if key1.len() != 32 || key2.len() != 32 {
+        return Err(WireGuardError::WrongKey);
+    }
+
+    let mut r = 0u8;
+    for i in 0..32 {
+        r |= key1[i] ^ key2[i];
+    }
+
+    if (r == 0) ^ eq {
+        Err(WireGuardError::WrongKey)
+    } else {
+        Ok(())
+    }
+}
+
+// Check if the slice is 32 byte long and is all zeroes
+fn constant_time_zero_key_check(key: &[u8]) -> Result<(), WireGuardError> {
+    if key.len() != 32 {
+        return Err(WireGuardError::WrongKey);
+    }
+
+    let mut r = 0u8;
+
+    for b in key {
+        r |= b;
+    }
+
+    if r == 0 {
+        Err(WireGuardError::WrongKey)
+    } else {
+        Ok(())
+    }
 }

@@ -11,35 +11,20 @@ mod tests {
 
     #[bench]
     fn bench_x25519_public_key(b: &mut Bencher) {
-        let x = [
-            9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0,
-        ];
-
-        let scalar = [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-            25, 26, 27, 28, 29, 30, 31, 32,
-        ];
+        let secret_key = X25519SecretKey::new();
 
         b.iter(|| {
-            black_box(x25519_shared_key(&x, &scalar));
+            black_box(secret_key.public_key());
         });
     }
 
     #[bench]
     fn bench_x25519_shared_key(b: &mut Bencher) {
-        let x = [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-            25, 26, 27, 28, 29, 30, 31, 32,
-        ];
-
-        let scalar = [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-            25, 26, 27, 28, 29, 30, 31, 32,
-        ];
+        let secret_key = X25519SecretKey::new();
+        let public_key = X25519SecretKey::new().public_key();
 
         b.iter(|| {
-            black_box(x25519_shared_key(&x, &scalar));
+            black_box(secret_key.shared_key(&public_key));
         });
     }
 

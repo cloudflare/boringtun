@@ -4,7 +4,7 @@ mod session;
 mod tests;
 mod timers;
 
-use crypto::x25519::X25519Key;
+use crypto::x25519::*;
 use noise::errors::WireGuardError;
 use noise::handshake::Handshake;
 use noise::timers::{TimerName, Timers};
@@ -60,19 +60,21 @@ pub struct Tunn {
 impl Tunn {
     /// Create a new tunnel using own private key and the peer public key
     pub fn new(
-        static_private: &X25519Key,
-        peer_static_public: &X25519Key,
+        static_private: Arc<X25519SecretKey>,
+        peer_static_public: Arc<X25519PublicKey>,
         preshared_key: Option<[u8; 32]>,
         index: u32,
     ) -> Result<Box<Tunn>, &'static str> {
         let tunn = Tunn {
-            handshake: spin::Mutex::new(Handshake::new(
-                static_private.as_bytes(),
-                peer_static_public.as_bytes(),
-                index << 8,
-                preshared_key,
-            )),
-
+            handshake: spin::Mutex::new(
+                Handshake::new(
+                    static_private,
+                    peer_static_public,
+                    index << 8,
+                    preshared_key,
+                )
+                .map_err(|_| "Invalid parameters")?,
+            ),
             sessions: Default::default(),
             current: Default::default(),
 
@@ -93,11 +95,15 @@ impl Tunn {
     }
 
     /// Update the private key and clear existing sessions
-    pub fn set_static_private(&self, static_private: &[u8]) {
-        self.handshake.lock().set_static_private(static_private);
+    pub fn set_static_private(
+        &self,
+        static_private: Arc<X25519SecretKey>,
+    ) -> Result<(), WireGuardError> {
+        self.handshake.lock().set_static_private(static_private)?;
         for s in &self.sessions {
             *s.write() = None;
         }
+        Ok(())
     }
 
     /// Receives an IP packet from the tunnel interface and encapsulates it.

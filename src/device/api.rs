@@ -1,4 +1,6 @@
-use super::{AllowedIP, Device, Error, SocketAddr, UNIXSocket, X25519Key};
+use super::{
+    make_array, AllowedIP, Device, Error, SocketAddr, UNIXSocket, X25519PublicKey, X25519SecretKey,
+};
 use dev_lock::LockReadGuard;
 use device::Action;
 use hex::encode as encode_hex;
@@ -133,7 +135,7 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> i32 
             let (key, val) = (parsed_cmd[0], parsed_cmd[1]);
 
             match key {
-                "private_key" => match val.parse::<X25519Key>() {
+                "private_key" => match val.parse::<X25519SecretKey>() {
                     Ok(key) => device.set_key(key),
                     Err(_) => return EINVAL,
                 },
@@ -150,7 +152,7 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> i32 
                     Ok(false) => {}
                     Err(_) => return EINVAL,
                 },
-                "public_key" => match val.parse::<X25519Key>() {
+                "public_key" => match val.parse::<X25519PublicKey>() {
                     Ok(key) => return api_set_peer(reader, &mut device, key),
                     Err(_) => return EINVAL,
                 },
@@ -162,7 +164,7 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> i32 
     0
 }
 
-fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519Key) -> i32 {
+fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519PublicKey) -> i32 {
     let mut cmd = String::new();
 
     let mut remove = false;
@@ -200,8 +202,8 @@ fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519Ke
                     Ok(false) => remove = false,
                     Err(_) => return EINVAL,
                 },
-                "preshared_key" => match val.parse::<X25519Key>() {
-                    Ok(key) => preshared_key = Some(key.inner()),
+                "preshared_key" => match val.parse::<X25519PublicKey>() {
+                    Ok(key) => preshared_key = Some(make_array(key.as_bytes())),
                     Err(_) => return EINVAL,
                 },
                 "endpoint" => match val.parse::<SocketAddr>() {
@@ -231,7 +233,7 @@ fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519Ke
                         keepalive,
                         preshared_key,
                     );
-                    match val.parse::<X25519Key>() {
+                    match val.parse::<X25519PublicKey>() {
                         Ok(key) => return api_set_peer(reader, d, key),
                         Err(_) => return EINVAL,
                     }

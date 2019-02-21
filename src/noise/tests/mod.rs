@@ -171,7 +171,13 @@ mod tests {
         let static_private = static_private.parse().unwrap();
         let peer_static_public = peer_static_public.parse().unwrap();
 
-        let mut peer = Tunn::new(&static_private, &peer_static_public, None, 100).unwrap();
+        let mut peer = Tunn::new(
+            Arc::new(static_private),
+            Arc::new(peer_static_public),
+            None,
+            100,
+        )
+        .unwrap();
         peer.set_logger(logger, Verbosity::Debug);
 
         let peer: Arc<Box<Tunn>> = Arc::from(peer);
@@ -296,9 +302,9 @@ mod tests {
     }
 
     fn key_pair() -> (String, String) {
-        let secret_key = x25519_gen_secret_key();
-        let public_key = x25519_public_key(&secret_key);
-        (encode(&secret_key), encode(&public_key))
+        let secret_key = X25519SecretKey::new();
+        let public_key = secret_key.public_key();
+        (encode(secret_key.as_bytes()), encode(public_key.as_bytes()))
     }
 
     fn wireguard_test_pair() -> (UdpSocket, UdpSocket, Arc<AtomicBool>) {
@@ -497,7 +503,7 @@ Endpoint = localhost:{}",
         test_socket.connect("192.168.2.2:30000").unwrap();
 
         thread::spawn(move || {
-            for i in 0..10000 {
+            for i in 0..30000 {
                 test_socket
                     .send(format!("This is a test message {}", i).as_bytes())
                     .unwrap();
@@ -507,7 +513,7 @@ Endpoint = localhost:{}",
 
         let mut src = [0u8; MAX_PACKET];
 
-        for i in 0..10000 {
+        for i in 0..30000 {
             let m = c_iface.recv(&mut src).unwrap();
             assert_eq!(
                 &src[28..m], // Strip ip and udp headers

@@ -14,7 +14,7 @@ pub mod tun;
 #[cfg_attr(unix, path = "udp_unix.rs")]
 pub mod udp;
 
-use crypto::x25519::X25519Key;
+use crypto::x25519::*;
 use noise::handshake::parse_handshake_anon;
 use std::collections::HashMap;
 use std::convert::From;
@@ -73,7 +73,7 @@ pub struct DeviceHandle {
 
 #[derive(Default)]
 pub struct Device {
-    key_pair: Option<(X25519Key, X25519Key)>,
+    key_pair: Option<(Arc<X25519SecretKey>, Arc<X25519PublicKey>)>,
     factory: EventFactory<Handler>,
     queue: EventPoll<Handler>,
 
@@ -87,7 +87,7 @@ pub struct Device {
     yield_notice: Option<EventRef<Handler>>,
     exit_notice: Option<EventRef<Handler>>,
 
-    peers: HashMap<X25519Key, Arc<Peer>>,
+    peers: HashMap<Arc<X25519PublicKey>, Arc<Peer>>,
     peers_by_ip: AllowedIps<Arc<Peer>>,
     peers_by_idx: HashMap<u32, Arc<Peer>>,
     next_index: u32,
@@ -130,7 +130,7 @@ impl Device {
         next_index
     }
 
-    fn remove_peer(&mut self, pub_key: &X25519Key) {
+    fn remove_peer(&mut self, pub_key: &X25519PublicKey) {
         if let Some(peer) = self.peers.remove(pub_key) {
             // Found a peer to remove, now perge all references to is:
             peer.shutdown_endpoint(); // close open udp socket and free the closure
@@ -142,7 +142,7 @@ impl Device {
 
     fn update_peer(
         &mut self,
-        pub_key: X25519Key,
+        pub_key: X25519PublicKey,
         remove: bool,
         _replace_ips: bool,
         endpoint: Option<SocketAddr>,
@@ -150,6 +150,8 @@ impl Device {
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
     ) {
+        let pub_key = Arc::new(pub_key);
+
         if remove {
             // Completely remove a peer
             return self.remove_peer(&pub_key);
@@ -166,7 +168,14 @@ impl Device {
             .key_pair
             .as_ref()
             .expect("Private key must be set first");
-        let mut tunn = Tunn::new(&device_key_pair.0, &pub_key, preshared_key, next_index).unwrap();
+
+        let mut tunn = Tunn::new(
+            Arc::clone(&device_key_pair.0),
+            Arc::clone(&pub_key),
+            preshared_key,
+            next_index,
+        )
+        .unwrap();
 
         {
             let pub_key = pub_key.as_bytes();
@@ -233,7 +242,6 @@ impl Device {
 
     fn open_listen_socket(&mut self, mut port: u16) -> Result<(), Error> {
         //Binds the network facing interfaces
-
         // First close any existing open socket, and remove them from the event loop
         self.udp4.take().and_then(|s| unsafe {
             self.factory.clear_event_by_fd(s.as_raw_fd());
@@ -279,14 +287,26 @@ impl Device {
         Ok(())
     }
 
-    fn set_key(&mut self, private_key: X25519Key) {
+    fn set_key(&mut self, private_key: X25519SecretKey) {
+        let mut bad_peers = vec![];
+
+        let private_key = Arc::new(private_key);
         if let Some(..) = &self.key_pair {
             for peer in self.peers.values() {
-                peer.set_static_private(private_key.as_bytes());
+                if let Err(_) = peer.set_static_private(Arc::clone(&private_key)) {
+                    bad_peers.push(peer);
+                    // In case we encounter an error, we will remove that peer
+                    // An error will be a result of bad public key/secret key combination
+                }
             }
         }
         let public_key = private_key.public_key();
-        self.key_pair = Some((private_key, public_key));
+        self.key_pair = Some((private_key, Arc::new(public_key)));
+
+        // Remove all the bad peers
+        for _ in bad_peers {
+            unimplemented!();
+        }
     }
 
     fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
@@ -428,15 +448,11 @@ impl Device {
                     let peer = match (packet[0], packet.len()) {
                         HANDSHAKE_INIT => {
                             // Handshake, this is the most common scenario
-                            if let Ok(hh) = parse_handshake_anon(
-                                private_key.as_bytes(),
-                                public_key.as_bytes(),
-                                packet,
-                            )
+                            if let Ok(hh) = parse_handshake_anon(&private_key, &public_key, packet)
                             // TODO: avoid doing half a handshake and then a full handshake
                             {
                                 // Extract the peer key from handshake message, and search for the peer
-                                peers_by_key.get(&X25519Key::from(hh.peer_static_public))
+                                peers_by_key.get(&X25519PublicKey::from(&hh.peer_static_public[..]))
                             } else {
                                 continue;
                             }

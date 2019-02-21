@@ -159,6 +159,7 @@ impl Blake2s {
         Blake2s::new(key, 32, true)
     }
 
+    #[allow(clippy::many_single_char_names)]
     fn hash_block(&mut self, last: bool) {
         let m: [u32; 16] = [
             u32::from_le_bytes(make_array(&self.buf[0..])),

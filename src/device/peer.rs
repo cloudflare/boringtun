@@ -1,5 +1,6 @@
 use device::udp::UDPSocket;
 use device::*;
+use noise::errors::WireGuardError;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -184,7 +185,10 @@ impl Peer {
         self.preshared_key.as_ref()
     }
 
-    pub fn set_static_private(&self, static_private: &[u8]) {
+    pub fn set_static_private(
+        &self,
+        static_private: Arc<X25519SecretKey>,
+    ) -> Result<(), WireGuardError> {
         self.tunnel.set_static_private(static_private)
     }
 

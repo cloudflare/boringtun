@@ -1,3 +1,4 @@
+/// This module implements benchmarking code for use with the FFI bindings
 use crypto::blake2s::*;
 use crypto::chacha20poly1305::*;
 use crypto::x25519::*;
@@ -74,11 +75,11 @@ fn bench_x25519_shared_key(name: bool, _: usize) -> String {
         return "X25519 Shared Key: ".to_string();
     }
 
-    let secret_key = [0x0f; 32];
-    let public_key = [0xf0; 32];
+    let secret_key = X25519SecretKey::new();
+    let public_key = X25519SecretKey::new().public_key();
 
     let result = run_bench(&mut move || {
-        let _ = x25519_shared_key(&secret_key, &public_key);
+        let _ = secret_key.shared_key(&public_key);
         1
     });
 
@@ -90,10 +91,10 @@ fn bench_x25519_public_key(name: bool, _: usize) -> String {
         return "X25519 Public Key: ".to_string();
     }
 
-    let secret_key = [0x0f; 32];
+    let secret_key = X25519SecretKey::new();
 
     let result = run_bench(&mut move || {
-        let _ = x25519_public_key(&secret_key);
+        let _ = secret_key.public_key();
         1
     });
 

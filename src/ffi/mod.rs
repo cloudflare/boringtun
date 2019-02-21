@@ -1,7 +1,6 @@
 /// C bindings for the WireGuard library
 pub mod benchmark;
 use self::benchmark::do_benchmark;
-use super::crypto::x25519::x25519_public_key as pub_key;
 use super::crypto::x25519::*;
 use super::noise::*;
 use base64::{decode, encode};
@@ -11,6 +10,7 @@ use std::mem;
 use std::os::raw::c_char;
 use std::ptr;
 use std::slice;
+use std::sync::Arc;
 
 #[allow(non_camel_case_types)]
 #[repr(u32)]
@@ -82,18 +82,14 @@ pub struct x25519_key {
 
 /// Generates a new x25519 secret key.
 #[no_mangle]
-pub extern "C" fn x25519_secret_key() -> x25519_key {
-    x25519_key {
-        key: x25519_gen_secret_key(),
-    }
+pub extern "C" fn x25519_secret_key() -> X25519SecretKey {
+    X25519SecretKey::new()
 }
 
 /// Computes a public x25519 key from a secret key.
 #[no_mangle]
-pub extern "C" fn x25519_public_key(private_key: x25519_key) -> x25519_key {
-    x25519_key {
-        key: pub_key(&private_key.key),
-    }
+pub extern "C" fn x25519_public_key(private_key: X25519SecretKey) -> X25519PublicKey {
+    private_key.public_key()
 }
 
 /// Returns the base64 encoding of a key as a UTF8 C-string.
@@ -177,7 +173,7 @@ pub unsafe extern "C" fn new_tunnel(
         Ok(key) => key,
     };
 
-    let mut tunnel = match Tunn::new(&private_key, &public_key, None, 0) {
+    let mut tunnel = match Tunn::new(Arc::new(private_key), Arc::new(public_key), None, 0) {
         Ok(t) => t,
         Err(_) => return ptr::null_mut(),
     };
