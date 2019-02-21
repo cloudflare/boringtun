@@ -1,26 +1,27 @@
-use super::{
-    make_array, AllowedIP, Device, Error, SocketAddr, UNIXSocket, X25519PublicKey, X25519SecretKey,
-};
+use super::{make_array, AllowedIP, Device, Error, SocketAddr, X25519PublicKey, X25519SecretKey};
 use dev_lock::LockReadGuard;
 use device::Action;
 use hex::encode as encode_hex;
 use libc::*;
-use std::fs::{create_dir, File};
+use std::fs::{create_dir, remove_file};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::AsRawFd;
+use std::os::unix::net::{UnixListener, UnixStream};
 
 impl Device {
     pub fn register_api_handler(&self) -> Result<(), Error> {
-        create_dir("/var/run/wireguard/").is_ok();
         let path = format!("/var/run/wireguard/{}.sock", self.iface.name()?);
 
-        let api_sock = UNIXSocket::new()?.bind(&path)?.listen()?;
+        create_dir("/var/run/wireguard/").is_ok(); // Create a directory if not existant
+        remove_file(&path).is_ok(); // Attempt to remove the socket if already exists
+
+        let api_listener = UnixListener::bind(&path).map_err(|e| Error::ApiSocket(e))?;
 
         let api_sock_ev = self.factory.new_event(
-            api_sock.as_raw_fd(),
+            api_listener.as_raw_fd(),
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 // This is the closure that listens on the api unix socket
-                let api_conn = match api_sock.accept() {
+                let (api_conn, _) = match api_listener.accept() {
                     Ok(conn) => conn,
                     _ => return Action::Continue,
                 };
@@ -68,7 +69,7 @@ impl Device {
 }
 
 #[allow(unused_must_use)]
-fn api_get(writer: &mut BufWriter<&File>, d: &Device) -> i32 {
+fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
         writer.write(format!("private_key={}\n", encode_hex(k.0.as_bytes())).as_ref());
@@ -108,7 +109,7 @@ fn api_get(writer: &mut BufWriter<&File>, d: &Device) -> i32 {
     0
 }
 
-fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> i32 {
+fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -> i32 {
     // We need to get a write lock on the device first
     let want_write = d.mark_want_write();
     if want_write.is_none() {
@@ -164,7 +165,11 @@ fn api_set(reader: &mut BufReader<&File>, d: &mut LockReadGuard<Device>) -> i32 
     0
 }
 
-fn api_set_peer(reader: &mut BufReader<&File>, d: &mut Device, pub_key: X25519PublicKey) -> i32 {
+fn api_set_peer(
+    reader: &mut BufReader<&UnixStream>,
+    d: &mut Device,
+    pub_key: X25519PublicKey,
+) -> i32 {
     let mut cmd = String::new();
 
     let mut remove = false;

@@ -6,8 +6,6 @@ pub mod peer;
 #[cfg_attr(any(target_os = "macos", target_os = "ios"), path = "kqueue.rs")]
 #[cfg_attr(target_os = "linux", path = "epoll.rs")]
 pub mod poll;
-#[cfg_attr(unix, path = "sock_unix.rs")]
-pub mod sock;
 #[cfg_attr(any(target_os = "macos", target_os = "ios"), path = "tun_darwin.rs")]
 #[cfg_attr(target_os = "linux", path = "tun_linux.rs")]
 pub mod tun;
@@ -28,7 +26,6 @@ use noise::errors::*;
 use noise::*;
 use peer::*;
 use poll::*;
-use sock::*;
 use tun::*;
 use udp::*;
 
@@ -39,9 +36,7 @@ const MAX_ITR: usize = 100; // Number of packets to handle per handler call
 pub enum Error {
     Socket(String),
     Bind(String),
-    Listen(String),
     FCntl(String),
-    Accept(String),
     EventQueue(String),
     IOCtl(String),
     Connect(String),
@@ -55,6 +50,7 @@ pub enum Error {
     Timer(String),
     IfaceRead(String),
     DropPrivileges(String),
+    ApiSocket(std::io::Error),
 }
 
 // What the event loop should do after a handler returns
