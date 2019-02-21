@@ -615,15 +615,17 @@ impl Handshake {
         let key = HASH!(LABEL_COOKIE, self.params.peer_static_public.as_bytes()); // TODO: precompute
         let nonce = &src[NONCE_OFF..NONCE_OFF + NONCE_SZ];
         let encrypted_cookie = &src[ENC_COOKIE_OFF..ENC_COOKIE_OFF + ENC_COOKIE_SZ];
-        let mut cookie = [0u8; 16];
 
-        let n = ChaCha20Poly1305::new_aead(&key).xopen(
-            &nonce,
-            &mac1[0..16],
-            &encrypted_cookie,
-            &mut cookie,
-        )?;
-        assert_eq!(n, 16);
+        let mut cookie = [0u8; 16];
+        {
+            let tmp = ChaCha20Poly1305::new_aead(&key).xopen(
+                &nonce,
+                &mac1[0..16],
+                &encrypted_cookie,
+                &mut cookie,
+            )?;
+            assert_eq!(tmp.len(), 16);
+        }
         self.cookie = Some(cookie);
         Ok(())
     }

@@ -40,12 +40,12 @@ mod tests {
             assert_eq!(n, out.len());
             assert_eq!(ct[..n], out[..]);
 
-            let n = ChaCha20Poly1305::new_aead(&key)
+            let dec = ChaCha20Poly1305::new_aead(&key)
                 .open(&nonce, &aad, &ct, &mut dec)
                 .unwrap();
 
-            assert_eq!(n, pt.len());
-            assert_eq!(dec[..n], pt[..]);
+            assert_eq!(dec.len(), pt.len());
+            assert_eq!(dec[..], pt[..]);
         }
     }
 
@@ -77,12 +77,12 @@ mod tests {
             assert_eq!(n, out.len());
             assert_eq!(ct[..n], out[..]);
 
-            let n = ChaCha20Poly1305::new_aead(&key)
+            let dec = ChaCha20Poly1305::new_aead(&key)
                 .xopen(&nonce, &aad, &ct, &mut dec)
                 .unwrap();
 
-            assert_eq!(n, pt.len());
-            assert_eq!(dec[..n], pt[..]);
+            assert_eq!(dec.len(), pt.len());
+            assert_eq!(dec[..], pt[..]);
         }
     }
 
@@ -103,12 +103,12 @@ mod tests {
             let n = ChaCha20Poly1305::new_aead(&key).seal(&nonce, &aad, &pt, &mut ct);
             assert_eq!(n, ct.len());
 
-            let n = ChaCha20Poly1305::new_aead(&key)
+            let dec = ChaCha20Poly1305::new_aead(&key)
                 .open(&nonce, &aad, &ct, &mut dec)
                 .unwrap();
 
-            assert_eq!(n, pt.len());
-            assert_eq!(dec[..n], pt[..]);
+            assert_eq!(dec.len(), pt.len());
+            assert_eq!(dec[..], pt[..]);
         }
     }
 

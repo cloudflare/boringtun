@@ -162,13 +162,13 @@ impl ChaCha20Poly1305 {
     }
 
     #[allow(dead_code)]
-    fn open_slow(
+    fn open_slow<'a>(
         &self,
         mut state: [u32; 16],
         aad: &[u8],
         mut ct: &[u8],
-        pt: &mut [u8],
-    ) -> (usize, bool) {
+        pt: &'a mut [u8],
+    ) -> Result<&'a mut [u8], WireGuardError> {
         let blk = chacha20_block(state, false);
         state[12] += 1;
 
@@ -254,7 +254,14 @@ impl ChaCha20Poly1305 {
         let ref_acc1 = u64::from_le_bytes(make_array(&ct[8..]));
 
         let ok = ((ref_acc0 ^ acc0) | (ref_acc1 ^ acc1)) == 0;
-        (enced, ok)
+        if ok {
+            Ok(&mut pt[..enced])
+        } else {
+            for p in pt {
+                *p = 0;
+            }
+            Err(WireGuardError::InvalidAeadTag)
+        }
     }
 
     fn aead_init_wg(&self, nonce_ctr: u64) -> [u32; 16] {
@@ -356,26 +363,17 @@ impl ChaCha20Poly1305 {
         self.seal_slow(state, aad, plaintext, ciphertext)
     }
 
-    pub fn open_wg(
+    pub fn open_wg<'a>(
         &self,
         nonce_ctr: u64,
         aad: &[u8],
         ciphertext: &[u8],
-        plaintext: &mut [u8],
-    ) -> Result<usize, WireGuardError> {
+        plaintext: &'a mut [u8],
+    ) -> Result<&'a mut [u8], WireGuardError> {
         assert!(plaintext.len() + 16 >= ciphertext.len());
         let state = self.aead_init_wg(nonce_ctr);
 
-        let (n, ok) = self.open_slow(state, aad, ciphertext, plaintext);
-        if ok {
-            return Ok(n);
-        }
-
-        for p in plaintext {
-            *p = 0;
-        }
-
-        Err(WireGuardError::InvalidAeadTag)
+        self.open_slow(state, aad, ciphertext, plaintext)
     }
 
     pub fn seal(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8], ciphertext: &mut [u8]) -> usize {
@@ -385,26 +383,17 @@ impl ChaCha20Poly1305 {
         self.seal_slow(state, aad, plaintext, ciphertext)
     }
 
-    pub fn open(
+    pub fn open<'a>(
         &self,
         nonce: &[u8],
         aad: &[u8],
         ciphertext: &[u8],
-        plaintext: &mut [u8],
-    ) -> Result<usize, WireGuardError> {
+        plaintext: &'a mut [u8],
+    ) -> Result<&'a mut [u8], WireGuardError> {
         assert!(plaintext.len() + 16 >= ciphertext.len());
         let state = self.aead_init(nonce);
 
-        let (n, ok) = self.open_slow(state, aad, ciphertext, plaintext);
-        if ok {
-            return Ok(n);
-        }
-
-        for p in plaintext {
-            *p = 0;
-        }
-
-        Err(WireGuardError::InvalidAeadTag)
+        self.open_slow(state, aad, ciphertext, plaintext)
     }
 
     pub fn xseal(
@@ -419,26 +408,17 @@ impl ChaCha20Poly1305 {
         self.seal_slow(state, aad, plaintext, ciphertext)
     }
 
-    pub fn xopen(
+    pub fn xopen<'a>(
         &self,
         nonce: &[u8],
         aad: &[u8],
         ciphertext: &[u8],
-        plaintext: &mut [u8],
-    ) -> Result<usize, WireGuardError> {
+        plaintext: &'a mut [u8],
+    ) -> Result<&'a mut [u8], WireGuardError> {
         assert!(plaintext.len() + 16 >= ciphertext.len());
         let state = self.xaead_init(nonce);
 
-        let (n, ok) = self.open_slow(state, aad, ciphertext, plaintext);
-        if ok {
-            return Ok(n);
-        }
-
-        for p in plaintext {
-            *p = 0;
-        }
-
-        Err(WireGuardError::InvalidAeadTag)
+        self.open_slow(state, aad, ciphertext, plaintext)
     }
 }
 
