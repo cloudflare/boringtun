@@ -135,9 +135,9 @@ macro_rules! build_node {
                         let shared_bits = (cur_key ^ key).leading_zeros() as usize;
                         if shared_bits >= *cur_bits {
                             if (key >> (BM1 - *cur_bits)) & 1 == 0 {
-                                $find(left, key << (*cur_bits + 1))
+                                $find(left, key.checked_shl((*cur_bits + 1) as _).unwrap_or(0))
                             } else {
-                                $find(right, key << (*cur_bits + 1))
+                                $find(right, key.checked_shl((*cur_bits + 1) as _).unwrap_or(0))
                             }
                         } else {
                             return None;

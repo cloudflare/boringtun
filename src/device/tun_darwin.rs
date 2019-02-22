@@ -96,7 +96,9 @@ impl TunSocket {
         } < 0
         {
             unsafe { close(fd) };
-            return Err(Error::Connect(errno_str()));
+            let mut err_string = errno_str();
+            err_string.push_str("(maybe not root?)");
+            return Err(Error::Connect(err_string));
         }
 
         Ok(TunSocket { fd })

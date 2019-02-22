@@ -18,42 +18,10 @@ use device::*;
 use std::env;
 use std::env::var;
 use std::fs::File;
-use std::sync::Arc;
-use std::thread;
 
 fn print_usage(bin: &str) {
     println!("usage:");
     println!("{} [-f/--foreground] INTERFACE-NAME", bin);
-}
-
-fn start_device(name: &str) {
-    match Device::new(name) {
-        Ok(new_device) => {
-            let dev = Arc::new(DeviceHandle::new(new_device));
-            let mut threads = vec![];
-
-            let nthreads = match var("WG_THREADS") {
-                Ok(val) => usize::from_str_radix(&val, 10).unwrap(),
-                Err(_) => 4,
-            };
-
-            for _ in 0..nthreads {
-                threads.push({
-                    let dev = Arc::clone(&dev);
-                    thread::spawn(move || dev.event_loop())
-                });
-            }
-
-            drop_privileges().unwrap();
-
-            for t in threads {
-                t.join().unwrap();
-            }
-        }
-        Err(e) => {
-            eprintln!("{:?}", e);
-        }
-    }
 }
 
 fn main() {
@@ -80,10 +48,10 @@ fn main() {
         let stderr = File::create("/tmp/wireguard_cf.err").unwrap();
 
         let daemonize = Daemonize::new()
-            .working_directory("/tmp") // for default behaviour.
-            .stdout(stdout) // Redirect stdout.
-            .stderr(stderr) // Redirect stderr.
-            .privileged_action(|| "Executed before drop privileges");
+            .working_directory("/tmp")
+            .stdout(stdout) // Redirect stdout
+            .stderr(stderr) // Redirect stderr
+            .privileged_action(|| {});
 
         match daemonize.start() {
             Ok(_) => println!("Success, daemonized"),
@@ -91,5 +59,14 @@ fn main() {
         }
     }
 
-    start_device(&tun_name);
+    let n_threads = match var("WG_THREADS") {
+        Ok(val) => usize::from_str_radix(&val, 10).unwrap(),
+        Err(_) => 4,
+    };
+
+    let mut device_handle = DeviceHandle::new(&tun_name, n_threads).unwrap();
+
+    drop_privileges().unwrap();
+
+    device_handle.wait();
 }

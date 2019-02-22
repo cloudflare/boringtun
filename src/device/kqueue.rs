@@ -315,6 +315,12 @@ impl<H> Default for EventPoll<H> {
     }
 }
 
+impl<H> Drop for EventPoll<H> {
+    fn drop(&mut self) {
+        unsafe { close(self.epoll) };
+    }
+}
+
 impl<H> EventPoll<H> {
     pub fn wait<'a>(&self) -> Result<EventGuard<'a, H>, Error> {
         let mut event = kevent {

@@ -1,8 +1,3 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
-
 trigger:
 - server
 
@@ -26,7 +21,8 @@ jobs:
   steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
-    displayName: 'Install cargo'
+      brew install wireguard-go wireguard-tools
+    displayName: 'Install build and test deps'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       cargo build --lib
@@ -36,12 +32,9 @@ jobs:
       RUST_BACKTRACE=full cargo test --lib
     displayName: 'Library tests'
   - script: |
-      brew install wireguard-go wireguard-tools
-    displayName: 'Install WireGuard'
-  - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       RUST_BACKTRACE=full cargo test --lib -- --ignored --test-threads=1
-    displayName: 'WireGuard interop tests'
+    displayName: 'Library interop tests'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       rustup target add aarch64-apple-ios
@@ -51,10 +44,6 @@ jobs:
       export PATH=$PATH:$HOME/.cargo/bin
       cargo build --bin wireguard-cf
     displayName: 'Build binary'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      cargo test --bin wireguard-cf
-    displayName: 'Test binary'
 
 - job: Linux_x86_64
   pool:
@@ -62,6 +51,9 @@ jobs:
   steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
+      sudo add-apt-repository ppa:wireguard/wireguard
+      sudo apt-get update
+      sudo apt-get install wireguard -y
     displayName: 'Install cargo'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
@@ -72,19 +64,14 @@ jobs:
       RUST_BACKTRACE=full cargo test --lib
     displayName: 'Library tests'
   - script: |
-      sudo add-apt-repository ppa:wireguard/wireguard
-      sudo apt-get update
-      sudo apt-get install wireguard -y
-    displayName: 'Install WireGuard'
-  - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       RUST_BACKTRACE=full cargo test --lib -- --ignored --test-threads=1
-    displayName: 'WireGuard interop tests'
+    displayName: 'Library interop tests'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       cargo build --bin wireguard-cf
     displayName: 'Build binary'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
-      cargo test --bin wireguard-cf
-    displayName: 'Test binary'
+      RUST_BACKTRACE=full cargo test --bin wireguard-cf
+    displayName: 'Binary tests'

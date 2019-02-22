@@ -2,6 +2,7 @@ pub mod allowed_ips;
 pub mod api;
 pub mod dev_lock;
 pub mod drop_privileges;
+mod integration_tests;
 pub mod peer;
 #[cfg_attr(any(target_os = "macos", target_os = "ios"), path = "kqueue.rs")]
 #[cfg_attr(target_os = "linux", path = "epoll.rs")]
@@ -19,6 +20,8 @@ use std::convert::From;
 use std::net::{IpAddr, SocketAddr};
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
+use std::thread;
+use std::thread::JoinHandle;
 
 use allowed_ips::*;
 use dev_lock::*;
@@ -64,10 +67,10 @@ enum Action {
 type Handler = Box<dyn Fn(&mut LockReadGuard<Device>) -> Action + Send + Sync>;
 
 pub struct DeviceHandle {
-    device: Lock<Device>,
+    device: Arc<Lock<Device>>, // The interface this handle owns
+    threads: Vec<JoinHandle<()>>,
 }
 
-#[derive(Default)]
 pub struct Device {
     key_pair: Option<(Arc<X25519SecretKey>, Arc<X25519PublicKey>)>,
     factory: EventFactory<Handler>,
@@ -90,17 +93,37 @@ pub struct Device {
 }
 
 impl DeviceHandle {
-    pub fn new(mut device: Device) -> DeviceHandle {
-        device.open_listen_socket(0).unwrap();
-        DeviceHandle {
-            device: Lock::new(device),
+    pub fn new(name: &str, n_threads: usize) -> Result<DeviceHandle, Error> {
+        let mut wg_interface = Device::new(name)?;
+        wg_interface.open_listen_socket(0)?; // Start listening on a random port
+
+        let interface_lock = Arc::new(Lock::new(wg_interface));
+
+        let mut threads = vec![];
+
+        for _ in 0..n_threads {
+            threads.push({
+                let dev = Arc::clone(&interface_lock);
+                thread::spawn(move || DeviceHandle::event_loop(&dev))
+            });
+        }
+
+        Ok(DeviceHandle {
+            device: interface_lock,
+            threads,
+        })
+    }
+
+    pub fn wait(&mut self) {
+        while let Some(thread) = self.threads.pop() {
+            thread.join().unwrap();
         }
     }
 
-    pub fn event_loop(&self) {
+    fn event_loop(device: &Lock<Device>) {
         loop {
             // The event loop keeps a read lock on the device, because we assume write access is rarely needed
-            let mut device_lock = self.device.read();
+            let mut device_lock = device.read();
             loop {
                 match device_lock.queue.wait() {
                     Ok(handler) => {
@@ -115,6 +138,12 @@ impl DeviceHandle {
                 }
             }
         }
+    }
+}
+
+impl Drop for DeviceHandle {
+    fn drop(&mut self) {
+        self.device.read().trigger_exit()
     }
 }
 
@@ -215,7 +244,17 @@ impl Device {
             factory: ef,
             queue: epoll,
             iface,
-            ..Default::default()
+            exit_notice: Default::default(),
+            yield_notice: Default::default(),
+            fwmark: Default::default(),
+            key_pair: Default::default(),
+            listen_port: Default::default(),
+            next_index: Default::default(),
+            peers: Default::default(),
+            peers_by_idx: Default::default(),
+            peers_by_ip: Default::default(),
+            udp4: Default::default(),
+            udp6: Default::default(),
         };
 
         device.register_api_handler()?;
