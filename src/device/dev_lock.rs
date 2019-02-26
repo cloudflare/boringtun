@@ -58,7 +58,7 @@ impl<T: ?Sized> Lock<T> {
             }
 
             // We have a writer waiting or in progress
-            self.lock.fetch_sub(1, Ordering::Relaxed);
+            self.lock.fetch_sub(1, Ordering::SeqCst);
 
             // We actively yield the thread until the write lock is done
             while self.lock.load(Ordering::Relaxed) > MSB_MASK {
