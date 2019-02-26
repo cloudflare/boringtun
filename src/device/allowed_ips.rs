@@ -505,23 +505,6 @@ mod tests {
         );
         assert_eq!(map.find(IpAddr::from([553, 0, 0, 1, 0, 0, 0, 1])), None);
         assert_eq!(map.find(IpAddr::from([45, 25, 15, 1])), Some(&'6'));
-
-        /*
-
-        map.remove(&|s: &String| s == "peer5");
-        assert_eq!(map.find(IpAddr::from([60, 25, 15, 1])), None);
-
-        {
-            let mut map_iter = map.iter();
-            assert_eq!(map_iter.next().unwrap().0, "peer6");
-            assert_eq!(map_iter.next().unwrap().0, "peer2");
-            assert_eq!(map_iter.next().unwrap().0, "peer1");
-            assert_eq!(map_iter.next().unwrap().0, "peer3");
-            assert_eq!(map_iter.next().unwrap().0, "peer4");
-            assert_eq!(map_iter.next().unwrap().0, "peer7");
-            assert_eq!(map_iter.next(), None);
-        }
-        */
     }
 
     #[test]
