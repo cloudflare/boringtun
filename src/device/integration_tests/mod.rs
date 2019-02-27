@@ -7,7 +7,8 @@ mod tests {
     use device::*;
     use hex::encode;
     use ring::rand::*;
-    use std::io::{Read, Write};
+    use std::io::prelude::*;
+    use std::io::{BufReader, Read, Write};
     use std::net::*;
     use std::os::unix::net::UnixStream;
     use std::process::Command;
@@ -176,15 +177,58 @@ mod tests {
         fn get_request(&self) -> String {
             let http_addr = SocketAddr::new(self.allowed_ips[0].ip, 80);
             let mut tcp_conn = std::net::TcpStream::connect(http_addr).unwrap();
+
             write!(tcp_conn, "GET / HTTP/1.1\nHost: localhost\nAccept: */*\n\n").unwrap();
-            let mut buf = [0u8; 256];
-            let mut response = String::new();
+
             tcp_conn
-                .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                .set_read_timeout(Some(std::time::Duration::from_secs(60)))
                 .ok();
 
-            while let Ok(n) = tcp_conn.read(&mut buf[..]) {
-                response.push_str(&String::from_utf8_lossy(&buf[..n]));
+            let mut reader = BufReader::new(tcp_conn);
+            let mut line = String::new();
+            let mut response = String::new();
+            let mut len = 0usize;
+
+            // Read response code
+            if let Ok(_) = reader.read_line(&mut line) {
+                if !line.starts_with("HTTP/1.1 200") {
+                    return response;
+                }
+            }
+            line.clear();
+
+            // Read headers
+            while let Ok(_) = reader.read_line(&mut line) {
+                if line.trim() == "" {
+                    break;
+                }
+
+                {
+                    let parsed_line: Vec<&str> = line.split(':').collect();
+                    if parsed_line.len() < 2 {
+                        return response;
+                    }
+
+                    let (key, val) = (parsed_line[0], parsed_line[1]);
+                    if key.to_lowercase() == "content-length" {
+                        len = match val.trim().parse() {
+                            Err(_) => return response,
+                            Ok(len) => len,
+                        };
+                    }
+                }
+                line.clear();
+            }
+
+            // Read body
+            let mut buf = [0u8; 256];
+            while len > 0 {
+                let to_read = len.min(buf.len());
+                if let Err(_) = reader.read_exact(&mut buf[..to_read]) {
+                    return response;
+                }
+                response.push_str(&String::from_utf8_lossy(&buf[..to_read]));
+                len -= to_read;
             }
 
             response
@@ -485,7 +529,7 @@ mod tests {
 
         let response = peer.get_request();
 
-        assert!(response.ends_with(&encode(peer.key.public_key().as_bytes())));
+        assert_eq!(response, encode(peer.key.public_key().as_bytes()));
     }
 
     #[test]
@@ -519,12 +563,13 @@ mod tests {
 
         let response = peer.get_request();
 
-        assert!(response.ends_with(&encode(peer.key.public_key().as_bytes())));
+        assert_eq!(response, encode(peer.key.public_key().as_bytes()));
     }
 
     /// Test if wireguard can handle connection with an ipv6 endpoint
+    #[test]
+    #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
     fn test_wg_start_ipv6_endpoint() {
-        // Can't make docker work with ipv6 on macOS ATM
         let port = next_port();
         let private_key = X25519SecretKey::new();
         let public_key = private_key.public_key();
@@ -556,7 +601,7 @@ mod tests {
 
         let response = peer.get_request();
 
-        assert!(response.ends_with(&encode(peer.key.public_key().as_bytes())));
+        assert_eq!(response, encode(peer.key.public_key().as_bytes()));
     }
 
     /// Test many concurrent connections
@@ -573,7 +618,7 @@ mod tests {
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(&private_key), "errno=0\n\n");
 
-        for _ in 0..40 {
+        for _ in 0..30 {
             // Create a new peer whose endpoint is on this machine
             let mut peer = Peer::new(
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),
@@ -595,10 +640,11 @@ mod tests {
         let mut threads = vec![];
 
         for p in wg.peers {
+            let pub_key = p.key.public_key();
             threads.push(thread::spawn(move || {
-                for _ in 0..40 {
+                for _ in 0..200 {
                     let response = p.get_request();
-                    assert!(response.ends_with(&encode(p.key.public_key().as_bytes())));
+                    assert_eq!(response, encode(pub_key.as_bytes()));
                 }
             }));
         }
@@ -622,7 +668,7 @@ mod tests {
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(&private_key), "errno=0\n\n");
 
-        for _ in 0..40 {
+        for _ in 0..30 {
             // Create a new peer whose endpoint is on this machine
             let mut peer = Peer::new(
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),
@@ -644,10 +690,11 @@ mod tests {
         let mut threads = vec![];
 
         for p in wg.peers {
+            let pub_key = p.key.public_key();
             threads.push(thread::spawn(move || {
-                for _ in 0..40 {
+                for _ in 0..200 {
                     let response = p.get_request();
-                    assert!(response.ends_with(&encode(p.key.public_key().as_bytes())));
+                    assert_eq!(response, encode(pub_key.as_bytes()));
                 }
             }));
         }

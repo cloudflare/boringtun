@@ -17,7 +17,7 @@ impl Device {
         remove_file(&path).is_ok(); // Attempt to remove the socket if already exists
         let api_listener = UnixListener::bind(&path).map_err(|e| Error::ApiSocket(e))?; // Bind a new socket to the path
 
-        let api_sock_ev = self.factory.new_event(
+        self.queue.new_event(
             api_listener.as_raw_fd(),
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 // This is the closure that listens on the api unix socket
@@ -42,9 +42,7 @@ impl Device {
                 }
                 Action::Continue // Inidicates the worker thread should continue as normal
             }),
-            false,
-        );
-        self.factory.register_event(&self.queue, &api_sock_ev)?;
+        )?;
 
         // This is not a very nice hack to detect if the control socket was removed
         // and exiting nicely as a result. We check every 3 seconds in a loop if the
@@ -53,7 +51,7 @@ impl Device {
         // deletion, and kqueue EVFILT_VNODE can be used for the same purpose, but that
         // will require introducing new events, for no measureable benefit.
         // TODO: Could this be an issue if we restart the service too quickly?
-        let timer_ev = self.factory.new_periodic_event(
+        self.queue.new_periodic_event(
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 let path = std::path::Path::new(&path);
                 if path.exists() {
@@ -65,7 +63,8 @@ impl Device {
             }),
             std::time::Duration::from_millis(3000),
         )?;
-        self.factory.register_event(&self.queue, &timer_ev)
+
+        Ok(())
     }
 }
 

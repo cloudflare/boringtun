@@ -1,191 +1,106 @@
 use super::{errno_str, Error};
 use libc::*;
 use spin::Mutex;
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::os::unix::io::RawFd;
 use std::ptr::null_mut;
 use std::time::Duration;
 
-/// Each file descriptor can be registered as an event with an event queue
-pub struct EventFactory<H: Sized> {
-    events: Mutex<Vec<Option<*mut Event<H>>>>,
+/// A return type for the EventPoll::wait() function
+pub enum WaitResult<'a, H> {
+    /// Event triggered normally
+    Ok(EventGuard<'a, H>),
+    /// Event triggered due to End of File conditions
+    EoF(EventGuard<'a, H>),
+    /// There was an error
+    Error(String),
 }
 
-unsafe impl<H> Send for EventFactory<H> {}
-unsafe impl<H> Sync for EventFactory<H> {}
-
-pub struct EventPoll<H> {
-    epoll: RawFd,
-    phantom_marker: PhantomData<H>,
+/// Implements a registry of pollable events
+pub struct EventPoll<H: Sized> {
+    events: Mutex<Vec<Option<Box<Event<H>>>>>,
+    epoll: RawFd, // The OS epoll
 }
 
-#[derive(Clone, Copy)]
-pub struct EventRef<H> {
-    trigger: RawFd,
-    phantom_marker: PhantomData<H>,
-}
-
+/// A type that hold a reference to a triggered Event
+/// While an EventGuard exists for a given Event, it will not be triggered by any other thread
+/// Once the EventGuard goes out of scope, the underlying Event will be reenabled
 pub struct EventGuard<'a, H> {
     epoll: RawFd,
     event: &'a Event<H>,
+    poll: &'a EventPoll<H>,
+}
+
+/// A reference to a single event in an EventPoll
+pub struct EventRef {
+    trigger: RawFd,
 }
 
 struct Event<H> {
-    event: epoll_event, // The epoll event desctiption
+    event: epoll_event, // The epoll event description
     fd: RawFd,          // The associated fd
-    queues: Vec<RawFd>, // The fds of all the queues it is registered with
     handler: H,         // The associated data
-    once: bool,         // Remove after the first trigger
     notifier: bool,     // Is a notification event
     timer: bool,        // This is a pereodic event
 }
 
-impl<H> Drop for Event<H> {
+impl<H> Drop for EventPoll<H> {
     fn drop(&mut self) {
-        // When the event is dropped we first remove it from every event queue in order to prevent future triggers
-        for queue in self.queues.iter() {
-            unsafe { epoll_ctl(*queue, EPOLL_CTL_DEL, self.fd, null_mut()) };
-        }
+        unsafe { close(self.epoll) };
     }
 }
 
-impl<H> Default for EventFactory<H> {
-    fn default() -> Self {
-        EventFactory {
-            events: Mutex::new(vec![]),
-        }
-    }
-}
-
-impl<H> Drop for EventFactory<H> {
-    fn drop(&mut self) {
-        let events = self.events.lock();
-        for e in events.iter() {
-            if let Some(event) = *e {
-                unsafe { Box::from_raw(event) }; // Drop all the events
-            }
-        }
-    }
-}
-
-impl<H> EventFactory<H>
-where
-    H: Sync + Send,
-{
-    pub fn new_notifier(&self, handler: H) -> Result<EventRef<H>, Error> {
-        // The notifier on Linux uses the eventfd for notifications.
-        // The way it works is when a non zero value is written into the eventfd it will trigger
-        // the EPOLLIN event. Since we use it as a not ONESHOT it will keep triggering until
-        // canceled.
-        // When we want to stop the event, we read once from the file descriptor.something
-        let efd = match unsafe { eventfd(0, EFD_NONBLOCK) } {
+impl<H: Sync + Send> EventPoll<H> {
+    /// Create a new event registry
+    pub fn new() -> Result<EventPoll<H>, Error> {
+        let epoll = match unsafe { epoll_create(1) } {
             -1 => return Err(Error::EventQueue(errno_str())),
-            efd  => efd,
+            epoll => epoll,
         };
 
-        // TODO: avoid code duplication with new_event
-        let ev = Event {
-            event: epoll_event {
-                events: (EPOLLIN) as _,
-                u64: 0,
-            },
-            fd: efd,
-            queues: vec![],
-            handler,
-            once: false,
-            notifier: true,
-            timer: false,
-        };
-
-        // Get raw pointer to the event
-        let raw_ev = Box::into_raw(Box::new(ev));
-        // The event will point to itself
-        unsafe { raw_ev.as_mut().unwrap().event.u64 = raw_ev as _ };
-        // Now add the pointer to the event vector, this is a place from which we can delete the event
-        self.insert_at(efd as _, raw_ev);
-        Ok(EventRef {
-            trigger: efd,
-            phantom_marker: PhantomData,
+        Ok(EventPoll {
+            events: Mutex::new(vec![]),
+            epoll,
         })
     }
-}
 
-impl<H> EventFactory<H>
-where
-    H: Send,
-{
-    /// Create a new event factory
-    pub fn new() -> EventFactory<H> {
-        EventFactory {
-            events: Mutex::new(vec![]),
-        }
-    }
-
-    fn insert_at(&self, index: usize, data: *mut Event<H>) {
-        let mut events = self.events.lock();
-        // Resize if needed
-        let new_len = if events.len() < (index + 1) as usize {
-            index + 1
-        } else {
-            events.len()
-        };
-        events.resize(new_len, None);
-
-        assert_eq!(
-            events[index], None,
-            "Did not properly dispose of previous event"
-        );
-
-        events[index] = Some(data);
-    }
-
-    // This function is only safe to call when the event loop is not running and the file is about to close
-    pub unsafe fn clear_event_by_fd(&self, index: RawFd) {
-        let mut events = self.events.lock();
-        assert!(index >= 0);
-        events[index as usize].take().and_then(|ev| {
-            let ev = Box::from_raw(ev);
-            for queue in ev.queues.iter() {
-                epoll_ctl(*queue, EPOLL_CTL_DEL, index, null_mut());
-            }
-            Some(())
-        });
-    }
-
-    /// Register a new event with the factory, if the trigger is closed the event becomes stale
-    /// once indicates the event should be dropped immidiately after first occurance
-    pub fn new_event(&self, trigger: RawFd, handler: H, once: bool) -> EventRef<H> {
-        // First create an event descriptor
+    /// Add and enable a new event with the factory.
+    /// The event is triggered when a Read operation on the provided trigger becomes available
+    /// If the trigger fd is closed, the event won't be triggered anymore, but it's data won't be
+    /// automatically released.
+    /// The safe way to delete an event, is using the cancel method of an EventGuard.
+    /// If the same trigger is used with multiple events in the same EventPoll, the last added
+    /// event overrides all previous events. In case the same trigger is used with multiple polls,
+    /// each event will be triggered independently.
+    /// The event will keep triggering until a Read operation is no longer possible on the trigger.
+    /// When triggered, one of the threads waiting on the poll will recieve the handler via an
+    /// appropriate EventGuard. It is guranteed that only a single thread can have a reference to
+    /// the handler at any given time.
+    pub fn new_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
+        // Create an event descriptor
+        let flags = EPOLLIN | EPOLLONESHOT;
         let ev = Event {
             event: epoll_event {
-                events: (EPOLLIN | EPOLLONESHOT) as _,
+                events: flags as _,
                 u64: 0,
             },
             fd: trigger,
-            queues: vec![],
             handler,
-            once,
             notifier: false,
             timer: false,
         };
-        // Get raw pointer to the event
-        let raw_ev = Box::into_raw(Box::new(ev));
-        // The event will point to itself
-        unsafe { raw_ev.as_mut().unwrap().event.u64 = raw_ev as _ };
-        // Now add the pointer to the event vector, this is a place from which we can delete the event
-        self.insert_at(trigger as _, raw_ev);
-        EventRef {
-            trigger,
-            phantom_marker: PhantomData,
-        }
+
+        self.register_event(ev)
     }
 
-    pub fn new_periodic_event(&self, handler: H, period: Duration) -> Result<EventRef<H>, Error> {
+    /// Add and enable a new timed event with the factory.
+    /// The even will be triggered for the first time after period time, and hencefore triggered
+    /// every period time. Period is counted from the moment the appropriate EventGuard is released.
+    pub fn new_periodic_event(&self, handler: H, period: Duration) -> Result<EventRef, Error> {
         // The periodic event on Linux uses the timerfd
         let tfd = match unsafe { timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK) } {
             -1 => return Err(Error::Timer(errno_str())),
-            efd  => efd,
+            efd => efd,
         };
 
         let ts = timespec {
@@ -209,67 +124,122 @@ where
                 u64: 0,
             },
             fd: tfd,
-            queues: vec![],
             handler,
-            once: false,
             notifier: false,
             timer: true,
         };
 
-        // Get raw pointer to the event
-        let raw_ev = Box::into_raw(Box::new(ev));
-        // The event will point to itself
-        unsafe { raw_ev.as_mut().unwrap().event.u64 = raw_ev as _ };
-        // Now add the pointer to the event vector, this is a place from which we can delete the event
-        self.insert_at(tfd as _, raw_ev);
-
-        Ok(EventRef {
-            trigger: tfd,
-            phantom_marker: PhantomData,
-        })
+        self.register_event(ev)
     }
-
-    /// A new waitable poll
-    pub fn new_poll(&self) -> Result<EventPoll<H>, Error> {
-        let epoll = match unsafe { epoll_create(1) } {
+    
+    /// Add and enable a new notification event with the factory.
+    /// The event can only be triggered manually, using the trigger_notification method.
+    /// The event will remain in a triggered state until the stop_notification method is
+    /// called. Both methods should only be called with the producing EventPoll.
+    pub fn new_notifier(&self, handler: H) -> Result<EventRef, Error> {
+        // The notifier on Linux uses the eventfd for notifications.
+        // The way it works is when a non zero value is written into the eventfd it will trigger
+        // the EPOLLIN event. Since we don't enable ONESHOT it will keep triggering until
+        // canceled.
+        // When we want to stop the event, we read something once from the file descriptor.
+        let efd = match unsafe { eventfd(0, EFD_NONBLOCK) } {
             -1 => return Err(Error::EventQueue(errno_str())),
-            epoll  => epoll,
+            efd => efd,
         };
 
-        Ok(EventPoll {
-            epoll,
-            phantom_marker: PhantomData,
-        })
+        let ev = Event {
+            event: epoll_event {
+                events: (EPOLLIN) as _,
+                u64: 0,
+            },
+            fd: efd,
+            handler,
+            notifier: true,
+            timer: false,
+        };
+
+        self.register_event(ev)
     }
 
-    /// Register a given event with a given poll
-    pub fn register_event(&self, epoll: &EventPoll<H>, event: &EventRef<H>) -> Result<(), Error> {
-        // get the event descriptor via pointer
+    /// Wait until one of the registered events becomes triggered. Once an event
+    /// is triggered, a single caller thread gets the handler for that event.
+    /// In case a notifier is triggered, all waiting threads will recieve the same
+    /// handler.
+    pub fn wait<'a>(&'a self) -> WaitResult<'a, H> {
+        let mut event = epoll_event { events: 0, u64: 0 };
+        if unsafe { epoll_wait(self.epoll, &mut event, 1, -1) } == -1 {
+            return WaitResult::Error(errno_str());
+        }
+
+        let event_data = unsafe { (event.u64 as *mut Event<H>).as_ref().unwrap() };
+
+        let guard = EventGuard {
+            epoll: self.epoll,
+            event: &event_data,
+            poll: self,
+        };
+
+        if event.events & EPOLLHUP as u32 != 0 {
+            // End of file flag
+            WaitResult::EoF(guard)
+        } else {
+            WaitResult::Ok(guard)
+        }
+    }
+
+    // Register an event with this poll.
+    fn register_event(&self, ev: Event<H>) -> Result<EventRef, Error> {
+        // To register an event we
+        // * Create a reference to self in the inner event
+        // * Store the Event in the events vector
+        // * Dispose of a previous Event under same fd if any
+        // * Add the Event to epoll
+        let trigger = ev.fd;
+        let mut ev = Box::new(ev);
+        // The inner event points back to the wrapper
+        ev.event.u64 = ev.as_mut() as *mut Event<H> as _;
+        let mut event_desc = ev.event;
+        // Now add the pointer to the events vector, this is a place from which we can drop the event
+        self.insert_at(trigger as _, ev);
+        // Add the event to epoll
+        if unsafe { epoll_ctl(self.epoll, EPOLL_CTL_ADD, trigger, &mut event_desc) } == -1 {
+            return Err(Error::EventQueue(errno_str()));
+        }
+
+        Ok(EventRef { trigger })
+    }
+
+    // Insert an event into the events vector
+    fn insert_at(&self, index: usize, data: Box<Event<H>>) {
         let mut events = self.events.lock();
-        let ev_ptr = events[event.trigger as usize].expect("Expected existing event");
-        let ev_data = unsafe { ev_ptr.as_mut().unwrap() };
-        ev_data.queues.push(epoll.epoll);
-
-        if ev_data.once {
-            // A once event will be dropped when its EventGuard is dropped
-            events[event.trigger as usize] = None;
+        while events.len() <= index {
+            // Resize the vector to be able to fit the new index
+            // We trust the OS to allocate file descriptors in a sane order
+            events.push(None); // resize doesn't work because Clone is not satisfied
         }
 
-        match unsafe { epoll_ctl(epoll.epoll, EPOLL_CTL_ADD, ev_data.fd, &mut ev_data.event) } {
-            0 => Ok(()),
-            -1 => Err(Error::EventQueue(errno_str())),
-            _ => panic!("Unexpected return value from epoll_ctl"),
+        if events[index].take().is_some() {
+            // Properly remove the previous event first
+            unsafe {
+                epoll_ctl(self.epoll, EPOLL_CTL_DEL, index as _, null_mut());
+            };
         }
+
+        events[index] = Some(data);
     }
 
-    pub fn trigger_notification(&self, notification_event: &EventRef<H>) {
+    /// Trigger a notification
+    pub fn trigger_notification(&self, notification_event: &EventRef) {
         let events = self.events.lock();
-        let ev_ptr = events[notification_event.trigger as usize].expect("Expected existing event");
-        let ev_data = unsafe { ev_ptr.as_mut().unwrap() };
-        if !ev_data.notifier {
+
+        let event_ref = &(*events)[notification_event.trigger as usize];
+        let event_data = event_ref.as_ref().expect("Expected an event");
+
+        if !event_data.notifier {
             panic!("Can only trigger a notification event");
         }
 
+        // Write some data to the eventfd to trigger an EPOLLIN event
         unsafe {
             write(
                 notification_event.trigger,
@@ -279,11 +249,14 @@ where
         };
     }
 
-    pub fn stop_notification(&self, notification_event: &EventRef<H>) {
+    /// Stop a notification
+    pub fn stop_notification(&self, notification_event: &EventRef) {
         let events = self.events.lock();
-        let ev_ptr = events[notification_event.trigger as usize].expect("Expected existing event");
-        let ev_data = unsafe { ev_ptr.as_mut().unwrap() };
-        if !ev_data.notifier {
+
+        let event_ref = &(*events)[notification_event.trigger as usize];
+        let event_data = event_ref.as_ref().expect("Expected an event");
+
+        if !event_data.notifier {
             panic!("Can only trigger a notification event");
         }
 
@@ -291,62 +264,30 @@ where
         unsafe {
             read(
                 notification_event.trigger,
-                &mut buf[0] as *mut u8 as _,
+                buf.as_mut_ptr() as _,
                 buf.len() as _,
             )
         };
     }
 }
 
-impl<H> Default for EventPoll<H> {
-    fn default() -> Self {
-        EventPoll {
-            epoll: -1,
-            phantom_marker: PhantomData,
-        }
-    }
-}
-
-impl<H> Drop for EventPoll<H> {
-    fn drop(&mut self) {
-        unsafe { close(self.epoll) };
-    }
-}
-
 impl<H> EventPoll<H> {
-    pub fn wait<'a>(&self) -> Result<EventGuard<'a, H>, Error> {
-        let mut event = epoll_event { events: 0, u64: 0 };
-        match unsafe { epoll_wait(self.epoll, &mut event, 1, -1) } {
-            1 => {}
-            -1 => return Err(Error::EventQueue(errno_str())),
-            _ => panic!("Unexpected return value from epoll_wait"),
+    /// Disable and remove the event and assosiated handler, using the fd that was used
+    /// to register it.
+    /// This function is only safe to call when the event loop is not running, otherwise the
+    /// memory of the handler may get freed while in use.
+    pub unsafe fn clear_event_by_fd(&self, index: RawFd) {
+        let mut events = self.events.lock();
+        assert!(index >= 0);
+        if let Some(_) = events[index as usize].take() {
+            epoll_ctl(self.epoll, EPOLL_CTL_DEL, index, null_mut());
         }
-
-        let event_data = unsafe { (event.u64 as *mut Event<H>).as_ref().unwrap() };
-
-        if event.events & EPOLLHUP as u32 != 0 {
-            // On EOF we remove the event from the queue (for example socket shutdown)
-            // TODO: let the caller control this case
-            for queue in event_data.queues.iter() {
-                unsafe {
-                    epoll_ctl(*queue, EPOLL_CTL_DEL, event_data.fd, null_mut());
-                }
-            }
-            // Drop
-            unsafe { Box::from_raw(event.u64 as *mut Event<H>) };
-            return Err(Error::EventQueue("Event dropped (EOF)".to_owned()));
-        }
-
-        Ok(EventGuard {
-            epoll: self.epoll,
-            event: &event_data,
-        })
     }
+
 }
 
 impl<'a, H> Deref for EventGuard<'a, H> {
     type Target = H;
-
     fn deref(&self) -> &H {
         &self.event.handler
     }
@@ -355,32 +296,26 @@ impl<'a, H> Deref for EventGuard<'a, H> {
 impl<'a, H> Drop for EventGuard<'a, H> {
     fn drop(&mut self) {
         if self.event.timer {
-            // Must read from the timer before we enable it
+            // Must read from the timer to reset it before we enable it
             let mut buf = [0u8; 8];
-            unsafe { read(self.event.fd, &mut buf[0] as *mut u8 as _, buf.len() as _) };
+            unsafe { read(self.event.fd, buf.as_mut_ptr() as _, buf.len() as _) };
         }
 
-        if self.event.once {
-            // Remove a once event from epoll
-            unsafe {
-                epoll_ctl(
-                    self.epoll,
-                    EPOLL_CTL_DEL,
-                    self.event.fd,
-                    &mut self.event.event.clone(),
-                );
-            }
-            // Drop the event
-            unsafe { Box::from_raw(self.event.event.u64 as *mut Event<H>) };
-        } else {
-            unsafe {
-                epoll_ctl(
-                    self.epoll,
-                    EPOLL_CTL_MOD,
-                    self.event.fd,
-                    &mut self.event.event.clone(),
-                );
-            }
+        unsafe {
+            epoll_ctl(
+                self.epoll,
+                EPOLL_CTL_MOD,
+                self.event.fd,
+                &mut self.event.event.clone(),
+            );
         }
+    }
+}
+
+impl<'a, H> EventGuard<'a, H> {
+    /// Cancel and remove the event referenced by this guard
+    pub fn cancel(self) {
+        unsafe { self.poll.clear_event_by_fd(self.event.fd) };
+        std::mem::forget(self); // Don't call the regular drop that would enable the event
     }
 }

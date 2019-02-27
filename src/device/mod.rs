@@ -73,8 +73,7 @@ pub struct DeviceHandle {
 
 pub struct Device {
     key_pair: Option<(Arc<X25519SecretKey>, Arc<X25519PublicKey>)>,
-    factory: EventFactory<Handler>,
-    queue: EventPoll<Handler>,
+    queue: Arc<EventPoll<Handler>>,
 
     listen_port: u16,
     fwmark: Option<u32>,
@@ -83,8 +82,8 @@ pub struct Device {
     udp4: Option<Arc<UDPSocket>>,
     udp6: Option<Arc<UDPSocket>>,
 
-    yield_notice: Option<EventRef<Handler>>,
-    exit_notice: Option<EventRef<Handler>>,
+    yield_notice: Option<EventRef>,
+    exit_notice: Option<EventRef>,
 
     peers: HashMap<Arc<X25519PublicKey>, Arc<Peer>>,
     peers_by_ip: AllowedIps<Arc<Peer>>,
@@ -124,9 +123,11 @@ impl DeviceHandle {
         loop {
             // The event loop keeps a read lock on the device, because we assume write access is rarely needed
             let mut device_lock = device.read();
+            let queue = Arc::clone(&device_lock.queue);
+
             loop {
-                match device_lock.queue.wait() {
-                    Ok(handler) => {
+                match queue.wait() {
+                    WaitResult::Ok(handler) => {
                         let action = (*handler)(&mut device_lock);
                         match action {
                             Action::Continue => {}
@@ -134,7 +135,10 @@ impl DeviceHandle {
                             Action::Exit => return,
                         }
                     }
-                    Err(e) => eprintln!("Poll error {:?}", e),
+                    WaitResult::EoF(handler) => {
+                        handler.cancel();
+                    }
+                    WaitResult::Error(e) => eprintln!("Poll error {:}", e),
                 }
             }
         }
@@ -233,16 +237,13 @@ impl Device {
     }
 
     pub fn new(name: &str) -> Result<Device, Error> {
-        // The event factory is Arc so we can easily share it with closures
-        let ef = EventFactory::<Handler>::new();
-        let epoll = ef.new_poll()?;
+        let poll = EventPoll::<Handler>::new()?;
 
         // Create a tunnel device
         let iface = Arc::new(TunSocket::new(name)?.set_non_blocking()?);
 
         let mut device = Device {
-            factory: ef,
-            queue: epoll,
+            queue: Arc::new(poll),
             iface,
             exit_notice: Default::default(),
             yield_notice: Default::default(),
@@ -279,12 +280,12 @@ impl Device {
         //Binds the network facing interfaces
         // First close any existing open socket, and remove them from the event loop
         self.udp4.take().and_then(|s| unsafe {
-            self.factory.clear_event_by_fd(s.as_raw_fd());
+            self.queue.clear_event_by_fd(s.as_raw_fd());
             Some(())
         });
 
         self.udp6.take().and_then(|s| unsafe {
-            self.factory.clear_event_by_fd(s.as_raw_fd());
+            self.queue.clear_event_by_fd(s.as_raw_fd());
             Some(())
         });
 
@@ -374,23 +375,21 @@ impl Device {
 
     fn register_notifiers(&mut self) -> Result<(), Error> {
         let yield_ev = self
-            .factory
+            .queue
             // The notification event handler simply returns Action::Yield
             .new_notifier(Box::new(|_: &mut LockReadGuard<Device>| Action::Yield))?;
-        self.factory.register_event(&self.queue, &yield_ev)?;
         self.yield_notice = Some(yield_ev);
 
         let exit_ev = self
-            .factory
+            .queue
             // The notification event handler simply returns Action::Yield
             .new_notifier(Box::new(|_: &mut LockReadGuard<Device>| Action::Exit))?;
-        self.factory.register_event(&self.queue, &exit_ev)?;
         self.exit_notice = Some(exit_ev);
         Ok(())
     }
 
     fn register_timer(&self) -> Result<(), Error> {
-        let timer_ev = self.factory.new_periodic_event(
+        self.queue.new_periodic_event(
             Box::new(|d: &mut LockReadGuard<Device>| {
                 // The timed event will check timer expiration of the peers
                 // TODO: split into several timers
@@ -434,27 +433,26 @@ impl Device {
             }),
             std::time::Duration::from_millis(250),
         )?;
-
-        self.factory.register_event(&self.queue, &timer_ev)
+        Ok(())
     }
 
     pub fn trigger_yield(&self) {
-        self.factory
+        self.queue
             .trigger_notification(self.yield_notice.as_ref().unwrap())
     }
 
     pub fn trigger_exit(&self) {
-        self.factory
+        self.queue
             .trigger_notification(self.exit_notice.as_ref().unwrap())
     }
 
     pub fn cancel_yield(&self) {
-        self.factory
+        self.queue
             .stop_notification(self.yield_notice.as_ref().unwrap())
     }
 
     fn register_udp_handler(&self, udp: Arc<UDPSocket>) -> Result<(), Error> {
-        let udp_ev = self.factory.new_event(
+        self.queue.new_event(
             udp.as_raw_fd(),
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 // Handler that handles anonymous packets over UDP
@@ -547,14 +545,12 @@ impl Device {
                 }
                 Action::Continue
             }),
-            false,
-        );
-
-        self.factory.register_event(&self.queue, &udp_ev)
+        )?;
+        Ok(())
     }
 
     fn register_conn_handler(&self, peer: Arc<Peer>, udp: Arc<UDPSocket>) -> Result<(), Error> {
-        let conn_ev = self.factory.new_event(
+        self.queue.new_event(
             udp.as_raw_fd(),
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 // The conn_handler handles packet received from a connected UDP socket, associated
@@ -601,14 +597,12 @@ impl Device {
                 }
                 Action::Continue
             }),
-            false,
-        );
-
-        self.factory.register_event(&self.queue, &conn_ev)
+        )?;
+        Ok(())
     }
 
     fn register_iface_handler(&self, iface: Arc<TunSocket>) -> Result<(), Error> {
-        let iface_ev = self.factory.new_event(
+        self.queue.new_event(
             self.iface.as_raw_fd(),
             Box::new(move |d: &mut LockReadGuard<Device>| {
                 // The iface_handler handles packets received from the wireguard virtual network
@@ -663,9 +657,7 @@ impl Device {
                 }
                 Action::Continue
             }),
-            false,
-        );
-
-        self.factory.register_event(&self.queue, &iface_ev)
+        )?;
+        Ok(())
     }
 }
