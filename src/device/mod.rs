@@ -71,6 +71,20 @@ pub struct DeviceHandle {
     threads: Vec<JoinHandle<()>>,
 }
 
+pub struct DeviceConfig {
+    pub n_threads: usize,
+    pub use_connected_socket: bool,
+}
+
+impl Default for DeviceConfig {
+    fn default() -> Self {
+        DeviceConfig {
+            n_threads: 4,
+            use_connected_socket: true,
+        }
+    }
+}
+
 pub struct Device {
     key_pair: Option<(Arc<X25519SecretKey>, Arc<X25519PublicKey>)>,
     queue: Arc<EventPoll<Handler>>,
@@ -89,11 +103,14 @@ pub struct Device {
     peers_by_ip: AllowedIps<Arc<Peer>>,
     peers_by_idx: HashMap<u32, Arc<Peer>>,
     next_index: u32,
+
+    config: DeviceConfig,
 }
 
 impl DeviceHandle {
-    pub fn new(name: &str, n_threads: usize) -> Result<DeviceHandle, Error> {
-        let mut wg_interface = Device::new(name)?;
+    pub fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
+        let n_threads = config.n_threads;
+        let mut wg_interface = Device::new(name, config)?;
         wg_interface.open_listen_socket(0)?; // Start listening on a random port
 
         let interface_lock = Arc::new(Lock::new(wg_interface));
@@ -236,7 +253,7 @@ impl Device {
         }
     }
 
-    pub fn new(name: &str) -> Result<Device, Error> {
+    pub fn new(name: &str, config: DeviceConfig) -> Result<Device, Error> {
         let poll = EventPoll::<Handler>::new()?;
 
         // Create a tunnel device
@@ -256,6 +273,7 @@ impl Device {
             peers_by_ip: Default::default(),
             udp4: Default::default(),
             udp6: Default::default(),
+            config,
         };
 
         device.register_api_handler()?;
@@ -459,6 +477,8 @@ impl Device {
                 const HANDSHAKE_INIT: (u8, usize) = (1, 148);
                 const HANDSHAKE_RESPONSE: (u8, usize) = (2, 92);
                 const COOKIE_REPLY: (u8, usize) = (3, 64);
+                const DATA: u8 = 4;
+                const DATA_OVERHEAD_SZ: usize = 32;
 
                 let mut src: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
                 let mut dst: [u8; MAX_UDP_SIZE] = unsafe { std::mem::uninitialized() };
@@ -495,12 +515,12 @@ impl Device {
                             peers_by_idx.get(&peer_idx)
                         }
                         COOKIE_REPLY => {
-                            let peer_idx = u32::from_le_bytes(make_array(&packet[4..])) & !0xff;
+                            let peer_idx = u32::from_le_bytes(make_array(&packet[4..])) >> 8;
                             peers_by_idx.get(&peer_idx)
                         }
-                        (4, 32...std::usize::MAX) => {
+                        (DATA, DATA_OVERHEAD_SZ...std::usize::MAX) => {
                             // A data packet, with at least a header
-                            let peer_idx = u32::from_le_bytes(make_array(&packet[4..])) & !0xff;
+                            let peer_idx = u32::from_le_bytes(make_array(&packet[4..])) >> 8;
                             peers_by_idx.get(&peer_idx)
                         }
                         _ => continue,
@@ -534,8 +554,10 @@ impl Device {
                     };
                     // This packet was OK, that means we want to create a connected socket for this peer
                     peer.set_endpoint(addr);
-                    if let Ok(sock) = peer.connect_endpoint(d.listen_port, d.fwmark) {
-                        d.register_conn_handler(Arc::clone(peer), sock).unwrap();
+                    if d.config.use_connected_socket {
+                        if let Ok(sock) = peer.connect_endpoint(d.listen_port, d.fwmark) {
+                            d.register_conn_handler(Arc::clone(peer), sock).unwrap();
+                        }
                     }
 
                     iter -= 1;

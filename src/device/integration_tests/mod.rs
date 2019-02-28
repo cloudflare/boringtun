@@ -238,9 +238,21 @@ mod tests {
     impl WGHandle {
         /// Create a new interface for the tunnel with the given address
         fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
+            WGHandle::init_with_config(
+                addr_v4,
+                addr_v6,
+                DeviceConfig {
+                    n_threads: 2,
+                    use_connected_socket: true,
+                },
+            )
+        }
+
+        /// Create a new interface for the tunnel with the given address
+        fn init_with_config(addr_v4: IpAddr, addr_v6: IpAddr, config: DeviceConfig) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let _device = DeviceHandle::new(&name, 2).unwrap();
+            let _device = DeviceHandle::new(&name, config).unwrap();
             WGHandle {
                 _device,
                 name,
@@ -495,6 +507,48 @@ mod tests {
                 allowed_ips[1].cidr
             )
         );
+    }
+
+    /// Test if wireguard can handle simple ipv4 connections, don't use a connected socket
+    #[test]
+    fn test_wg_start_ipv4_non_connected() {
+        let port = next_port();
+        let private_key = X25519SecretKey::new();
+        let public_key = private_key.public_key();
+        let addr_v4 = next_ip();
+        let addr_v6 = next_ip_v6();
+
+        let mut wg = WGHandle::init_with_config(
+            addr_v4,
+            addr_v6,
+            DeviceConfig {
+                n_threads: 2,
+                use_connected_socket: false,
+            },
+        );
+
+        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(&private_key), "errno=0\n\n");
+
+        // Create a new peer whose endpoint is on this machine
+        let mut peer = Peer::new(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),
+            vec![AllowedIp {
+                ip: next_ip(),
+                cidr: 32,
+            }],
+        );
+
+        peer.start_in_container(&public_key, &addr_v4, port);
+
+        let peer = Arc::new(peer);
+
+        wg.add_peer(Arc::clone(&peer));
+        wg.start();
+
+        let response = peer.get_request();
+
+        assert_eq!(response, encode(peer.key.public_key().as_bytes()));
     }
 
     /// Test if wireguard can handle simple ipv4 connections

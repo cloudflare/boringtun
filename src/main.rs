@@ -64,7 +64,12 @@ fn main() {
         Err(_) => 4,
     };
 
-    let mut device_handle = DeviceHandle::new(&tun_name, n_threads).unwrap();
+    let config = DeviceConfig {
+        n_threads,
+        use_connected_socket: true,
+    };
+
+    let mut device_handle = DeviceHandle::new(&tun_name, config).unwrap();
 
     drop_privileges().unwrap();
 
