@@ -15,6 +15,7 @@ pub mod noise;
 use daemonize::Daemonize;
 use device::drop_privileges::*;
 use device::*;
+use noise::Verbosity;
 use std::env;
 use std::env::var;
 use std::fs::File;
@@ -43,14 +44,40 @@ fn main() {
         _ => return print_usage(&args[0]),
     };
 
+    let n_threads = match var("WG_THREADS") {
+        Ok(val) => usize::from_str_radix(&val, 10).expect("WG_THREADS expected an integer"),
+        Err(_) => 4,
+    };
+
+    let log_level = match var("WG_LOG_LEVEL") {
+        Ok(val) => match val.as_ref() {
+            "silent" => Verbosity::None,
+            "info" => Verbosity::Info,
+            "debug" => Verbosity::Debug,
+            _ => panic!("WG_LOG_LEVEL expected 'silent', 'info', or 'debug'"),
+        },
+        Err(_) => Verbosity::None,
+    };
+
     if background {
-        let stdout = File::create("/tmp/wireguard_cf.out").unwrap();
-        let stderr = File::create("/tmp/wireguard_cf.err").unwrap();
+        let log = match var("WG_LOG") {
+            Ok(path) => path,
+            Err(_) => "/tmp/wireguard_cf.out".to_owned(),
+        };
+
+        let err_log = match var("WG_ERR_LOG") {
+            Ok(path) => path,
+            Err(_) => "/tmp/wireguard_cf.err".to_owned(),
+        };
+
+        let stdout = File::create(&log).expect(&format!("Could not create log file {}", log));
+        let stderr =
+            File::create(&err_log).expect(&format!("Could not create error log file {}", err_log));
 
         let daemonize = Daemonize::new()
             .working_directory("/tmp")
-            .stdout(stdout) // Redirect stdout
-            .stderr(stderr) // Redirect stderr
+            .stdout(stdout)
+            .stderr(stderr)
             .privileged_action(|| {});
 
         match daemonize.start() {
@@ -59,13 +86,9 @@ fn main() {
         }
     }
 
-    let n_threads = match var("WG_THREADS") {
-        Ok(val) => usize::from_str_radix(&val, 10).unwrap(),
-        Err(_) => 4,
-    };
-
     let config = DeviceConfig {
         n_threads,
+        log_level,
         use_connected_socket: true,
     };
 

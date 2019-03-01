@@ -243,6 +243,7 @@ mod tests {
                 addr_v6,
                 DeviceConfig {
                     n_threads: 2,
+                    log_level: Verbosity::None,
                     use_connected_socket: true,
                 },
             )
@@ -523,6 +524,7 @@ mod tests {
             addr_v6,
             DeviceConfig {
                 n_threads: 2,
+                log_level: Verbosity::None,
                 use_connected_socket: false,
             },
         );

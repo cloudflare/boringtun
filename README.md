@@ -12,7 +12,7 @@ This crate contains two binaries:
 - Library only: `cargo build --lib --release --target $(TARGET_TRIPLE)`
 - Executable: `cargo build --release`
 
-By default the executable is placed in the `./target/release` folder. You can copy it to `/usr/local/bin` or modify `PATH` accordingly.
+By default the executable is placed in the `./target/release` folder. You can copy it to `/usr/local/bin`, modify your `PATH` variable, or install it using `cargo install --bin wireguard-cf --path .`.
 
 In addition the repository contains benchmarks for the cryptographic primitives used by the library. You can run them using: `cargo run --release --example benchmarks`.
 
@@ -29,6 +29,14 @@ You can then configure it using [wg](https://git.zx2c4.com/WireGuard/about/src/t
 Alternatively you can use [wg-quick](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg-quick.8) by setting the enviroment variable `WG_QUICK_USERSPACE_IMPLEMENTATION` to `wireguard-cf`. For example:
 
 `sudo WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-cf wg-quick up CONF-FILE`
+
+Other recognized enviroment settings:
+
+* `WG_THREADS` - number of worker threads to use (defaults to `4`)
+* `WG_LOG_LEVEL` - `silent`, `info` or `debug` (defaults to `silent`)
+* `WG_LOG` - location of the log file (defaults to `/tmp/wireguard_cf.out`)
+* `WG_ERR_LOG` - location of the error log file (defaults to `/tmp/wireguard_cf.err`)
+
 
 ## Supported platforms
 

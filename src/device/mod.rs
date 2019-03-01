@@ -73,6 +73,7 @@ pub struct DeviceHandle {
 
 pub struct DeviceConfig {
     pub n_threads: usize,
+    pub log_level: Verbosity,
     pub use_connected_socket: bool,
 }
 
@@ -80,6 +81,7 @@ impl Default for DeviceConfig {
     fn default() -> Self {
         DeviceConfig {
             n_threads: 4,
+            log_level: Verbosity::None,
             use_connected_socket: true,
         }
     }
@@ -231,7 +233,7 @@ impl Device {
             );
             tunn.set_logger(
                 Box::new(move |e: &str| println!("{:?} {} {}", chrono::Utc::now(), peer_name, e)),
-                Verbosity::Debug,
+                self.config.log_level,
             );
         }
 

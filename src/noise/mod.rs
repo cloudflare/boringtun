@@ -35,7 +35,7 @@ pub enum TunnResult<'a> {
     WriteToTunnelV6(&'a mut [u8], Ipv6Addr),
 }
 
-#[derive(Eq, PartialEq, PartialOrd, Debug)]
+#[derive(Eq, PartialEq, PartialOrd, Debug, Clone, Copy)]
 pub enum Verbosity {
     None,
     Info,
