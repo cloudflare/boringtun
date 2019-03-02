@@ -107,6 +107,8 @@ pub struct Device {
     next_index: u32,
 
     config: DeviceConfig,
+
+    cleanup_paths: Vec<String>,
 }
 
 impl DeviceHandle {
@@ -138,6 +140,13 @@ impl DeviceHandle {
         }
     }
 
+    pub fn clean(&mut self) {
+        for path in &self.device.read().cleanup_paths {
+            // attempt to remove any file we created in the work dir
+            std::fs::remove_file(&path).ok();
+        }
+    }
+
     fn event_loop(device: &Lock<Device>) {
         loop {
             // The event loop keeps a read lock on the device, because we assume write access is rarely needed
@@ -151,7 +160,10 @@ impl DeviceHandle {
                         match action {
                             Action::Continue => {}
                             Action::Yield => break,
-                            Action::Exit => return,
+                            Action::Exit => {
+                                device_lock.trigger_exit();
+                                return;
+                            }
                         }
                     }
                     WaitResult::EoF(handler) => {
@@ -166,7 +178,8 @@ impl DeviceHandle {
 
 impl Drop for DeviceHandle {
     fn drop(&mut self) {
-        self.device.read().trigger_exit()
+        self.device.read().trigger_exit();
+        self.clean();
     }
 }
 
@@ -264,6 +277,7 @@ impl Device {
         let mut device = Device {
             queue: Arc::new(poll),
             iface,
+            config,
             exit_notice: Default::default(),
             yield_notice: Default::default(),
             fwmark: Default::default(),
@@ -275,7 +289,7 @@ impl Device {
             peers_by_ip: Default::default(),
             udp4: Default::default(),
             udp6: Default::default(),
-            config,
+            cleanup_paths: Default::default(),
         };
 
         device.register_api_handler()?;
@@ -288,7 +302,8 @@ impl Device {
             // Only for macOS write the actual socket name into WG_TUN_NAME_FILE
             if let Ok(name_file) = std::env::var("WG_TUN_NAME_FILE") {
                 if name == "utun" {
-                    std::fs::write(name_file, device.iface.name().unwrap().as_bytes()).unwrap();
+                    std::fs::write(&name_file, device.iface.name().unwrap().as_bytes()).unwrap();
+                    device.cleanup_paths.push(name_file);
                 }
             }
         }

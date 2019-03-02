@@ -20,6 +20,7 @@ pub enum WaitResult<'a, H> {
 pub struct EventPoll<H: Sized> {
     events: Mutex<Vec<Option<Box<Event<H>>>>>, // Events with a file descriptor
     custom: Mutex<Vec<Option<Box<Event<H>>>>>, // Other events (i.e. timers & notifiers)
+    signals: Mutex<Vec<Option<Box<Event<H>>>>>, // Signal handlers
     kqueue: RawFd,                             // The OS kqueue
 }
 
@@ -37,12 +38,19 @@ pub struct EventRef {
     trigger: RawFd,
 }
 
+#[derive(PartialEq)]
+enum EventKind {
+    FD,
+    Notifier,
+    Signal,
+    Timer,
+}
+
 // A single event
 struct Event<H> {
-    event: kevent,     // The kqueue event desctiption
-    handler: H,        // The associated data
-    is_fd: bool,       // This is an fd based event
-    is_notifier: bool, // Is a notification event
+    event: kevent, // The kqueue event desctiption
+    handler: H,    // The associated data
+    kind: EventKind,
 }
 
 impl<H> Drop for EventPoll<H> {
@@ -65,6 +73,7 @@ impl<H: Send + Sync> EventPoll<H> {
         Ok(EventPoll {
             events: Mutex::new(vec![]),
             custom: Mutex::new(vec![]),
+            signals: Mutex::new(vec![]),
             kqueue,
         })
     }
@@ -95,8 +104,7 @@ impl<H: Send + Sync> EventPoll<H> {
                 udata: null_mut(),
             },
             handler,
-            is_fd: true,
-            is_notifier: false,
+            kind: EventKind::FD,
         };
 
         self.register_event(ev)
@@ -119,8 +127,7 @@ impl<H: Send + Sync> EventPoll<H> {
                 udata: null_mut(),
             },
             handler,
-            is_fd: false,
-            is_notifier: false,
+            kind: EventKind::Timer,
         };
 
         self.register_event(ev)
@@ -138,8 +145,25 @@ impl<H: Send + Sync> EventPoll<H> {
                 udata: null_mut(),
             },
             handler,
-            is_fd: false,
-            is_notifier: true,
+            kind: EventKind::Notifier,
+        };
+
+        self.register_event(ev)
+    }
+
+    /// Add and enable a new signal handler
+    pub fn new_signal_event(&self, signal: c_int, handler: H) -> Result<EventRef, Error> {
+        let ev = Event {
+            event: kevent {
+                ident: signal as _,
+                filter: EVFILT_SIGNAL,
+                flags: EV_ENABLE | EV_DISPATCH,
+                fflags: 0,
+                data: 0,
+                udata: null_mut(),
+            },
+            handler,
+            kind: EventKind::Signal,
         };
 
         self.register_event(ev)
@@ -180,17 +204,15 @@ impl<H: Send + Sync> EventPoll<H> {
 
     // Register an event with this poll.
     fn register_event(&self, ev: Event<H>) -> Result<EventRef, Error> {
-        let mut events = if ev.is_fd {
-            self.events.lock() // fd events go into events vector
-        } else {
-            self.custom.lock() // other events go into the custom vector
+        let mut events = match ev.kind {
+            EventKind::FD => self.events.lock(),
+            EventKind::Timer | EventKind::Notifier => self.custom.lock(),
+            EventKind::Signal => self.signals.lock(),
         };
 
-        let (trigger, index) = if ev.is_fd {
-            (ev.event.ident as RawFd, ev.event.ident as usize)
-        } else {
-            // Custom events get negative identifiers, hopefully we will never have more than 2^31 events of each type
-            (-(events.len() as RawFd) - 1, events.len())
+        let (trigger, index) = match ev.kind {
+            EventKind::FD | EventKind::Signal => (ev.event.ident as RawFd, ev.event.ident as usize),
+            EventKind::Timer | EventKind::Notifier => (-(events.len() as RawFd) - 1, events.len()), // Custom events get negative identifiers, hopefully we will never have more than 2^31 events of each type
         };
 
         // Expand events vector if needed
@@ -218,6 +240,11 @@ impl<H: Send + Sync> EventPoll<H> {
             unsafe { kevent(self.kqueue, &event.event, 1, null_mut(), 0, null()) };
         }
 
+        if ev.kind == EventKind::Signal {
+            // Mask the signal if succesfully added to kqueue
+            unsafe { signal(trigger, SIG_IGN) };
+        }
+
         events[index] = Some(ev);
 
         Ok(EventRef { trigger })
@@ -230,7 +257,7 @@ impl<H: Send + Sync> EventPoll<H> {
         let event_ref = &(*events)[ev_index as usize];
         let event_data = event_ref.as_ref().expect("Expected an event");
 
-        if !event_data.is_notifier {
+        if event_data.kind != EventKind::Notifier {
             panic!("Can only trigger a notification event");
         }
 
@@ -247,7 +274,7 @@ impl<H: Send + Sync> EventPoll<H> {
         let event_ref = &(*events)[ev_index as usize];
         let event_data = event_ref.as_ref().expect("Expected an event");
 
-        if !event_data.is_notifier {
+        if event_data.kind != EventKind::Notifier {
             panic!("Can only stop a notification event");
         }
 

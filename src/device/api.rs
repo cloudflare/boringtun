@@ -1,21 +1,46 @@
 use super::{make_array, AllowedIP, Device, Error, SocketAddr, X25519PublicKey, X25519SecretKey};
 use dev_lock::LockReadGuard;
+use device::drop_privileges::*;
 use device::Action;
 use hex::encode as encode_hex;
-use libc::{EADDRINUSE, EINVAL, EIO, EPROTO};
+use libc::*;
 use std::fs::{create_dir, remove_file};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 
+const SOCK_DIR: &'static str = "/var/run/wireguard/";
+
+fn create_sock_dir() {
+    create_dir(SOCK_DIR).is_ok(); // Create the directory if not existant
+
+    if let Ok((saved_uid, saved_gid)) = get_saved_ids() {
+        unsafe {
+            let c_path = std::ffi::CString::new(SOCK_DIR).unwrap();
+            // The directory is under the root user, but we want to be able to
+            // delete the files there when we exit, so we need to change the owner
+            chown(
+                c_path.as_bytes_with_nul().as_ptr() as _,
+                saved_uid,
+                saved_gid,
+            );
+        }
+    }
+}
+
 impl Device {
     /// Register the api handler for this Device. The api handler recieves stream connections on a Unix socket
     /// with a known path: /var/run/wireguard/{tun_name}.sock.
-    pub fn register_api_handler(&self) -> Result<(), Error> {
-        let path = format!("/var/run/wireguard/{}.sock", self.iface.name()?);
-        create_dir("/var/run/wireguard/").is_ok(); // Create the directory if not existant
+    pub fn register_api_handler(&mut self) -> Result<(), Error> {
+        let path = format!("{}/{}.sock", SOCK_DIR, self.iface.name()?);
+
+        create_sock_dir();
+
         remove_file(&path).is_ok(); // Attempt to remove the socket if already exists
+
         let api_listener = UnixListener::bind(&path).map_err(|e| Error::ApiSocket(e))?; // Bind a new socket to the path
+
+        self.cleanup_paths.push(path.clone());
 
         self.queue.new_event(
             api_listener.as_raw_fd(),
@@ -44,6 +69,11 @@ impl Device {
             }),
         )?;
 
+        self.register_api_sock_deleted_handler(path)?;
+        self.register_api_signal_handlers()
+    }
+
+    fn register_api_sock_deleted_handler(&self, path: String) -> Result<(), Error> {
         // This is not a very nice hack to detect if the control socket was removed
         // and exiting nicely as a result. We check every 3 seconds in a loop if the
         // file was deleted by stating it.
@@ -62,6 +92,20 @@ impl Device {
                 }
             }),
             std::time::Duration::from_millis(3000),
+        )?;
+
+        Ok(())
+    }
+
+    fn register_api_signal_handlers(&self) -> Result<(), Error> {
+        self.queue.new_signal_event(
+            SIGINT,
+            Box::new(move |_: &mut LockReadGuard<Device>| Action::Exit),
+        )?;
+
+        self.queue.new_signal_event(
+            SIGTERM,
+            Box::new(move |_: &mut LockReadGuard<Device>| Action::Exit),
         )?;
 
         Ok(())

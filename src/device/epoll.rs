@@ -41,7 +41,7 @@ struct Event<H> {
     fd: RawFd,          // The associated fd
     handler: H,         // The associated data
     notifier: bool,     // Is a notification event
-    timer: bool,        // This is a pereodic event
+    needs_read: bool,   // This event needs to be read to be cleared
 }
 
 impl<H> Drop for EventPoll<H> {
@@ -87,7 +87,7 @@ impl<H: Sync + Send> EventPoll<H> {
             fd: trigger,
             handler,
             notifier: false,
-            timer: false,
+            needs_read: false,
         };
 
         self.register_event(ev)
@@ -126,12 +126,12 @@ impl<H: Sync + Send> EventPoll<H> {
             fd: tfd,
             handler,
             notifier: false,
-            timer: true,
+            needs_read: true,
         };
 
         self.register_event(ev)
     }
-    
+
     /// Add and enable a new notification event with the factory.
     /// The event can only be triggered manually, using the trigger_notification method.
     /// The event will remain in a triggered state until the stop_notification method is
@@ -155,7 +155,34 @@ impl<H: Sync + Send> EventPoll<H> {
             fd: efd,
             handler,
             notifier: true,
-            timer: false,
+            needs_read: false,
+        };
+
+        self.register_event(ev)
+    }
+
+    /// Add and enable a new signal handler
+    pub fn new_signal_event(&self, signal: c_int, handler: H) -> Result<EventRef, Error> {
+        let sfd = match unsafe {
+            let mut sigset = std::mem::zeroed();
+            sigemptyset(&mut sigset);
+            sigaddset(&mut sigset, signal);
+            sigprocmask(SIG_BLOCK, &mut sigset, null_mut());
+            signalfd(-1, &sigset, SFD_NONBLOCK)
+        } {
+            -1 => return Err(Error::EventQueue(errno_str())),
+            sfd => sfd,
+        };
+
+        let ev = Event {
+            event: epoll_event {
+                events: (EPOLLIN | EPOLLONESHOT) as _,
+                u64: 0,
+            },
+            fd: sfd,
+            handler,
+            notifier: false,
+            needs_read: false,
         };
 
         self.register_event(ev)
@@ -283,7 +310,6 @@ impl<H> EventPoll<H> {
             epoll_ctl(self.epoll, EPOLL_CTL_DEL, index, null_mut());
         }
     }
-
 }
 
 impl<'a, H> Deref for EventGuard<'a, H> {
@@ -295,10 +321,10 @@ impl<'a, H> Deref for EventGuard<'a, H> {
 
 impl<'a, H> Drop for EventGuard<'a, H> {
     fn drop(&mut self) {
-        if self.event.timer {
-            // Must read from the timer to reset it before we enable it
-            let mut buf = [0u8; 8];
-            unsafe { read(self.event.fd, buf.as_mut_ptr() as _, buf.len() as _) };
+        if self.event.needs_read {
+            // Must read from the event to reset it before we enable it
+            let mut buf: [u8; 256] = unsafe { std::mem::uninitialized() };
+            while unsafe { read(self.event.fd, buf.as_mut_ptr() as _, buf.len() as _) } != -1 {}
         }
 
         unsafe {
