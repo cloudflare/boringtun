@@ -13,7 +13,7 @@ spin = { version = "0.5", default-features=false }
 [target.'cfg(not(target_os="windows"))'.dependencies]
 chrono = "0.4"
 libc = "0.2"
-daemonize = "0.3"
+daemonize = {git = "https://github.com/vkrasnov/daemonize", rev = "fedb687a8d99b300b8461e650a598ded54a334a0"}
 
 [target.'cfg(target_os="android")'.dependencies]
 jni = "0.10.2"

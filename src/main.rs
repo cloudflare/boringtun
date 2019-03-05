@@ -19,6 +19,7 @@ use noise::Verbosity;
 use std::env;
 use std::env::var;
 use std::fs::File;
+use std::os::unix::net::UnixDatagram;
 
 fn print_usage(bin: &str) {
     println!("usage:");
@@ -59,6 +60,9 @@ fn main() {
         Err(_) => Verbosity::None,
     };
 
+    // Create a socketpair to communicate between forked processes
+    let (sock1, sock2) = UnixDatagram::pair().unwrap();
+
     if background {
         let log = match var("WG_LOG") {
             Ok(path) => path,
@@ -78,7 +82,10 @@ fn main() {
             .working_directory("/tmp")
             .stdout(stdout)
             .stderr(stderr)
-            .privileged_action(|| {});
+            .exit_action(move || {
+                let mut b = [0u8; 1];
+                sock2.recv(&mut b).ok();
+            });
 
         match daemonize.start() {
             Ok(_) => println!("Success, daemonized"),
@@ -92,9 +99,14 @@ fn main() {
         use_connected_socket: true,
     };
 
-    let mut device_handle = DeviceHandle::new(&tun_name, config).unwrap();
+    let device_handle = DeviceHandle::new(&tun_name, config);
 
     drop_privileges().unwrap();
 
-    device_handle.wait();
+    // Signal to parent process that it can now exit
+    sock1.set_nonblocking(true).ok();
+    sock1.send(&[1]).ok();
+    drop(sock1);
+
+    device_handle.unwrap().wait();
 }
