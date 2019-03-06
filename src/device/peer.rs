@@ -13,9 +13,8 @@ pub struct Endpoint {
 }
 
 pub struct Peer {
-    tunnel: Box<Tunn>,      // The associated tunnel struct
-    index: u32,             // The index the tunnel uses
-    keepalive: Option<u16>, // Optional keepalive
+    tunnel: Box<Tunn>, // The associated tunnel struct
+    index: u32,        // The index the tunnel uses
     rx_bytes: AtomicUsize,
     tx_bytes: AtomicUsize,
     endpoint: spin::RwLock<Endpoint>,
@@ -53,13 +52,11 @@ impl Peer {
         index: u32,
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
-        keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
     ) -> Peer {
         let mut peer = Peer {
             tunnel,
             index,
-            keepalive,
             rx_bytes: AtomicUsize::new(0),
             tx_bytes: AtomicUsize::new(0),
             endpoint: spin::RwLock::new(Endpoint {
@@ -179,6 +176,10 @@ impl Peer {
 
     pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
         self.tunnel.time_since_last_handshake()
+    }
+
+    pub fn persistent_keepalive(&self) -> Option<u16> {
+        self.tunnel.persistent_keepalive()
     }
 
     pub fn preshared_key(&self) -> Option<&[u8; 32]> {

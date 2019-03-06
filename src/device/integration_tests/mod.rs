@@ -178,7 +178,11 @@ mod tests {
             let http_addr = SocketAddr::new(self.allowed_ips[0].ip, 80);
             let mut tcp_conn = std::net::TcpStream::connect(http_addr).unwrap();
 
-            write!(tcp_conn, "GET / HTTP/1.1\nHost: localhost\nAccept: */*\n\n").unwrap();
+            write!(
+                tcp_conn,
+                "GET / HTTP/1.1\nHost: localhost\nAccept: */*\nConnection: close\n\n"
+            )
+            .unwrap();
 
             tcp_conn
                 .set_read_timeout(Some(std::time::Duration::from_secs(60)))

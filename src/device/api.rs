@@ -130,6 +130,10 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
             write!(writer, "preshared_key={}\n", encode_hex(key));
         }
 
+        if let Some(keepalive) = p.persistent_keepalive() {
+            write!(writer, "persistent_keepalive_interval={}\n", keepalive);
+        }
+
         if let Some(fwmark) = d.fwmark {
             write!(writer, "fwmark={}\n", fwmark);
         }

@@ -319,7 +319,7 @@ impl Handshake {
         }
     }
 
-    pub fn expired(&mut self) {
+    pub fn set_expired(&mut self) {
         self.state = HandshakeState::Expired;
     }
 
@@ -576,11 +576,7 @@ impl Handshake {
         Ok(Session::new(local_index, peer_index, temp3, temp2))
     }
 
-    pub fn receive_cookie_reply<'a>(
-        &mut self,
-        src: &[u8],
-        dst: &'a mut [u8],
-    ) -> Result<&'a mut [u8], WireGuardError> {
+    pub fn receive_cookie_reply<'a>(&mut self, src: &[u8]) -> Result<(), WireGuardError> {
         const MSG_TYPE_OFF: usize = 0;
         const MSG_TYPE_SZ: usize = 4;
         const RCV_IDX_OFF: usize = MSG_TYPE_OFF + MSG_TYPE_SZ;
@@ -629,7 +625,7 @@ impl Handshake {
         )?;
         assert_eq!(n, 16);
         self.cookie = Some(cookie);
-        self.format_handshake_initiation(dst)
+        Ok(())
     }
 
     pub fn receive_handshake_initialization<'a>(

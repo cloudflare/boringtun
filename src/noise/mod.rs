@@ -63,6 +63,7 @@ impl Tunn {
         static_private: Arc<X25519SecretKey>,
         peer_static_public: Arc<X25519PublicKey>,
         preshared_key: Option<[u8; 32]>,
+        persistent_keepalive: Option<u16>,
         index: u32,
     ) -> Result<Box<Tunn>, &'static str> {
         let tunn = Tunn {
@@ -79,7 +80,7 @@ impl Tunn {
             current: Default::default(),
 
             packet_queue: spin::Mutex::new(VecDeque::new()),
-            timers: Timers::new(),
+            timers: Timers::new(persistent_keepalive),
 
             logger: None,
             verbosity: Verbosity::None,
@@ -112,11 +113,14 @@ impl Tunn {
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
     pub fn tunnel_to_network<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
-        let current = self.current.load(Ordering::Acquire);
+        let current = self.current.load(Ordering::SeqCst);
         if let Some(ref session) = *self.sessions[current % N_SESSIONS].read() {
             // Send the packet using an established session
             let packet = session.format_packet_data(src, dst);
-            self.timer_tick(TimerName::TimeLastPacketSent);
+            if src.len() > 0 {
+                self.timer_tick(TimerName::TimeLastPacketSent);
+            }
+            self.timer_tick(TimerName::TimeLastDataPacketSent);
             TunnResult::WriteToNetwork(packet)
         } else {
             // If there is no session, queue the packet for future retry
@@ -145,7 +149,7 @@ impl Tunn {
                         self.log(Verbosity::Debug, "Sending handshake_reponse");
                         let index = session.local_index();
                         *self.sessions[index % N_SESSIONS].write() = Some(session);
-                        self.timer_tick_session_established(false);
+                        self.timer_tick_session_established(false); // New session established, we are not the initiator
                         self.timer_tick(TimerName::TimeLastPacketReceived);
                         self.timer_tick(TimerName::TimeLastPacketSent);
                         TunnResult::WriteToNetwork(packet)
@@ -162,8 +166,8 @@ impl Tunn {
                         let index = session.local_index();
                         *self.sessions[index % N_SESSIONS].write() = Some(session);
                         // Make session the current session
-                        self.current.store(index, Ordering::Release);
-                        self.timer_tick_session_established(true);
+                        self.current.store(index, Ordering::SeqCst);
+                        self.timer_tick_session_established(true); // New session established, we are the initiator
                         self.timer_tick(TimerName::TimeLastPacketReceived);
                         TunnResult::WriteToNetwork(keepalive_packet) // Send a keepalive as a response
                     }
@@ -173,13 +177,11 @@ impl Tunn {
             3 => {
                 self.log(Verbosity::Debug, "Received cookie_reply");
                 let mut handshake = self.handshake.lock();
-                match handshake.receive_cookie_reply(src, dst) {
-                    Ok(packet) => {
+                match handshake.receive_cookie_reply(src) {
+                    Ok(_) => {
                         self.log(Verbosity::Debug, "Sending handhsake_initiation with cookie");
                         self.timer_tick(TimerName::TimeCookieReceived);
-                        self.timer_tick(TimerName::TimeLastPacketReceived);
-                        self.timer_tick(TimerName::TimeLastPacketSent);
-                        TunnResult::WriteToNetwork(packet)
+                        TunnResult::Done
                     }
                     Err(e) => TunnResult::Err(e),
                 }
@@ -211,6 +213,10 @@ impl Tunn {
         let mut handshake = self.handshake.lock();
         if handshake.is_in_progress() && !resend {
             return TunnResult::Done;
+        }
+
+        if handshake.is_expired() {
+            self.timers.clear();
         }
 
         let starting_new_handshake = !handshake.is_in_progress();
@@ -246,7 +252,10 @@ impl Tunn {
             match session.receive_packet_data(src, dst) {
                 Ok(packet) => {
                     self.current.store(idx, Ordering::Relaxed); // The exact session we use is not important as long as it is valid
-                    self.timer_tick(TimerName::TimeLastPacketReceived);
+                    if packet.len() > 0 {
+                        self.timer_tick(TimerName::TimeLastPacketReceived);
+                    }
+                    self.timer_tick(TimerName::TimeLastDataPacketReceived);
                     self.check_decapsulated_packet(packet)
                 }
                 Err(e) => TunnResult::Err(e),

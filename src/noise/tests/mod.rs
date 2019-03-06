@@ -175,6 +175,7 @@ mod tests {
             Arc::new(static_private),
             Arc::new(peer_static_public),
             None,
+            None,
             100,
         )
         .unwrap();

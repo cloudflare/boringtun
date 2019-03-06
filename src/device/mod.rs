@@ -234,6 +234,7 @@ impl Device {
             Arc::clone(&device_key_pair.0),
             Arc::clone(&pub_key),
             preshared_key,
+            keepalive,
             next_index,
         )
         .unwrap();
@@ -250,14 +251,7 @@ impl Device {
             );
         }
 
-        let peer = Peer::new(
-            tunn,
-            next_index,
-            endpoint,
-            &allowed_ips,
-            keepalive,
-            preshared_key,
-        );
+        let peer = Peer::new(tunn, next_index, endpoint, &allowed_ips, preshared_key);
 
         let peer = Arc::new(peer);
         self.peers.insert(pub_key, Arc::clone(&peer));
@@ -452,7 +446,8 @@ impl Device {
                     match peer.update_timers(&mut tmp_buff[..]) {
                         TunnResult::Done => {}
                         TunnResult::Err(WireGuardError::ConnectionExpired) => {
-                            // TODO: close peer socket, remove from timers?
+                            peer.shutdown_endpoint(); // close open udp socket
+                                                      // TODO: remove peer from timers?
                         }
                         TunnResult::Err(e) => eprintln!("Timer error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {
@@ -556,7 +551,17 @@ impl Device {
                             continue;
                         }
                         TunnResult::WriteToNetwork(packet) => {
-                            peer.add_tx_bytes(udp.sendto(packet, addr))
+                            peer.add_tx_bytes(udp.sendto(packet, addr));
+                            {
+                                // Flush pending queue
+                                let mut tmp: [u8; MAX_UDP_SIZE] =
+                                    unsafe { std::mem::uninitialized() };
+                                while let TunnResult::WriteToNetwork(packet) =
+                                    peer.decapsulate(&[], &mut tmp[..])
+                                {
+                                    peer.add_tx_bytes(udp.write(packet));
+                                }
+                            }
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if peer.is_allowed_ip(IpAddr::from(addr)) {
