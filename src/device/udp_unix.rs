@@ -51,12 +51,15 @@ impl UDPSocket {
         }
     }
 
-    /// Set the SO_REUSEPORT option, so multiple sockets can bind on the same port
-    pub fn set_reuse_port(self) -> Result<UDPSocket, Error> {
+    /// Set the SO_REUSEPORT/SO_REUSEADDR option, so multiple sockets can bind on the same port
+    pub fn set_reuse(self) -> Result<UDPSocket, Error> {
         match unsafe {
             setsockopt(
                 self.fd,
                 SOL_SOCKET,
+                #[cfg(target_os = "linux")]
+                SO_REUSEADDR, // On Linux SO_REUSEPORT won't prefer a connected IPv6 socket
+                #[cfg(not(target_os = "linux"))]
                 SO_REUSEPORT,
                 &1u32 as *const u32 as *const c_void,
                 std::mem::size_of::<u32>() as u32,

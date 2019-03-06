@@ -332,7 +332,7 @@ impl Device {
         let udp_sock4 = Arc::new(
             UDPSocket::new()?
                 .set_non_blocking()?
-                .set_reuse_port()?
+                .set_reuse()?
                 .bind(port)?,
         );
 
@@ -344,7 +344,7 @@ impl Device {
         let udp_sock6 = Arc::new(
             UDPSocket::new6()?
                 .set_non_blocking()?
-                .set_reuse_port()?
+                .set_reuse()?
                 .bind(port)?,
         );
 
