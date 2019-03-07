@@ -371,7 +371,7 @@ impl Tunn {
     pub fn log(&self, lvl: Verbosity, entry: &str) {
         if let Some(ref logger) = self.logger {
             if self.verbosity >= lvl {
-                logger.lock()(entry)
+                logger.lock()(&format!("[{:?}] {}", lvl, entry));
             }
         }
     }

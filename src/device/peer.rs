@@ -92,6 +92,7 @@ impl Peer {
 
     pub fn shutdown_endpoint(&self) {
         if let Some(conn) = self.endpoint.write().conn.take() {
+            self.log(Verbosity::Info, "Disconnecting from endpoint");
             conn.shutdown();
         }
     }
@@ -141,7 +142,7 @@ impl Peer {
         }
 
         self.log(
-            Verbosity::Debug,
+            Verbosity::Info,
             &format!("Connected endpoint :{}->{}", port, endpoint.addr.unwrap()),
         );
 

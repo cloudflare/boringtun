@@ -181,10 +181,7 @@ impl Tunn {
             // All ephemeral private keys and symmetric session keys are zeroed out after
             // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
             if now - session_established >= REJECT_AFTER_TIME * 3 {
-                self.log(
-                    Verbosity::Debug,
-                    "CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)",
-                );
+                self.log(Verbosity::Info, "CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
                 handshake.set_expired();
                 self.clear_all();
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
@@ -197,7 +194,7 @@ impl Tunn {
                     // the retries give up and cease, and clear all existing packets queued
                     // up to be sent. If a packet is explicitly queued up to be sent, then
                     // this timer is reset.
-                    self.log(Verbosity::Debug, "CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
+                    self.log(Verbosity::Info, "CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                     handshake.set_expired();
                     self.clear_all();
                     return TunnResult::Err(WireGuardError::ConnectionExpired);

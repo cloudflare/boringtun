@@ -198,6 +198,8 @@ impl Device {
             self.peers_by_idx.remove(&peer.index()); // peers_by_idx
             self.peers_by_ip
                 .remove(&|p: &Arc<Peer>| Arc::ptr_eq(&peer, p)); // peers_by_ip
+
+            peer.log(Verbosity::Info, "Peer removed");
         }
     }
 
@@ -239,11 +241,12 @@ impl Device {
         )
         .unwrap();
 
-        {
-            let pub_key = pub_key.as_bytes();
+        if self.config.log_level > Verbosity::None {
+            let pub_key = base64::encode(pub_key.as_bytes());
             let peer_name = format!(
-                "peer({:02x}{:02x}…{:02x}{:02x})",
-                pub_key[0], pub_key[1], pub_key[30], pub_key[31]
+                "peer({}…{})",
+                &pub_key[0..4],
+                &pub_key[pub_key.len() - 4..]
             );
             tunn.set_logger(
                 Box::new(move |e: &str| println!("{:?} {} {}", chrono::Utc::now(), peer_name, e)),
@@ -260,6 +263,8 @@ impl Device {
         for AllowedIP { addr, cidr } in allowed_ips {
             self.peers_by_ip.insert(addr, cidr as _, Arc::clone(&peer));
         }
+
+        peer.log(Verbosity::Info, "Peer added");
     }
 
     pub fn new(name: &str, config: DeviceConfig) -> Result<Device, Error> {
