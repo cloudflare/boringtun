@@ -4,6 +4,7 @@ extern crate hex;
 #[cfg(target_os = "android")]
 extern crate jni;
 extern crate libc;
+#[cfg(not(target_arch = "arm"))]
 extern crate ring;
 extern crate spin;
 extern crate untrusted;

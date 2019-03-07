@@ -3,11 +3,40 @@ mod tests;
 use base64::decode;
 use noise::errors::WireGuardError;
 use noise::make_array;
+#[cfg(not(target_arch = "arm"))]
 use ring::rand::*;
 use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
 use std::str::FromStr;
+
+#[cfg(target_arch = "arm")]
+#[allow(non_snake_case)]
+mod SystemRandom {
+    use std::io::Read;
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+
+    static mut URAND: Option<std::fs::File> = None;
+
+    // Workaround for ring not building nicely for arm7
+    pub struct Urandom {}
+
+    pub fn new() -> Urandom {
+        INIT.call_once(|| unsafe {
+            URAND = Some(std::fs::File::open("/dev/urandom").unwrap());
+        });
+
+        Urandom {}
+    }
+
+    impl Urandom {
+        pub fn fill(&self, dest: &mut [u8]) -> Result<(), ()> {
+            let mut local_urand = unsafe { URAND.as_ref().unwrap().try_clone().map_err(|_| ())? };
+            local_urand.read_exact(dest).map(|_| ()).map_err(|_| (()))
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Debug)]

@@ -2,7 +2,9 @@
 use crypto::blake2s::*;
 use crypto::chacha20poly1305::*;
 use crypto::x25519::*;
+#[cfg(not(target_arch = "arm"))]
 use ring::aead::*;
+#[cfg(not(target_arch = "arm"))]
 use ring::{agreement, rand};
 
 use std::time::Instant;
@@ -116,6 +118,7 @@ fn bench_blake2s(name: bool, n: usize) -> String {
     format!("{} MiB/s", format_float(result / (1024. * 1024.)))
 }
 
+#[cfg(not(target_arch = "arm"))]
 fn bench_chacha20poly1305_ring(name: bool, n: usize) -> String {
     if name {
         return format!("(Ring) AEAD Seal {}B: ", n);
@@ -152,6 +155,7 @@ fn bench_chacha20poly1305(name: bool, n: usize) -> String {
     format!("{} MiB/s", format_float(result / (1024. * 1024.)))
 }
 
+#[cfg(not(target_arch = "arm"))]
 fn bench_x25519_shared_key_ring(name: bool, _: usize) -> String {
     if name {
         return "(Ring) X25519 Shared Key: ".to_string();
@@ -185,6 +189,7 @@ fn bench_x25519_shared_key_ring(name: bool, _: usize) -> String {
     format!("{} ops/sec", format_float(result))
 }
 
+#[cfg(not(target_arch = "arm"))]
 fn bench_x25519_public_key_ring(name: bool, _: usize) -> String {
     if name {
         return "(Ring) X25519 Public Key: ".to_string();
@@ -207,7 +212,9 @@ pub fn do_benchmark(name: bool, idx: usize) -> Option<String> {
     let benchmarks: Vec<(BenchFnc, usize)> = vec![
         (bench_x25519_public_key, 0),
         (bench_x25519_shared_key, 0),
+        #[cfg(not(target_arch = "arm"))]
         (bench_x25519_public_key_ring, 0),
+        #[cfg(not(target_arch = "arm"))]
         (bench_x25519_shared_key_ring, 0),
         (bench_blake2s, 128),
         (bench_blake2s, 1024),
@@ -215,9 +222,13 @@ pub fn do_benchmark(name: bool, idx: usize) -> Option<String> {
         (bench_chacha20poly1305, 192),
         (bench_chacha20poly1305, 1400),
         (bench_chacha20poly1305, 8192),
+        #[cfg(not(target_arch = "arm"))]
         (bench_chacha20poly1305_ring, 128),
+        #[cfg(not(target_arch = "arm"))]
         (bench_chacha20poly1305_ring, 192),
+        #[cfg(not(target_arch = "arm"))]
         (bench_chacha20poly1305_ring, 1400),
+        #[cfg(not(target_arch = "arm"))]
         (bench_chacha20poly1305_ring, 8192),
     ];
 
