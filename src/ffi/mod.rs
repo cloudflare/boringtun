@@ -5,12 +5,16 @@ use super::crypto::x25519::*;
 use super::noise::*;
 use base64::{decode, encode};
 use hex::encode as encode_hex;
+use libc::{raise, SIGSEGV};
 use std::ffi::{CStr, CString};
 use std::mem;
 use std::os::raw::c_char;
+use std::panic;
 use std::ptr;
 use std::slice;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
+
+static PANIC_HOOK: Once = Once::new();
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -187,6 +191,13 @@ pub unsafe extern "C" fn new_tunnel(
             Verbosity::from(log_level),
         );
     }
+
+    PANIC_HOOK.call_once(|| {
+        // FFI won't properly unwind on panic, but it will if we cause a segmentation fault
+        panic::set_hook(Box::new(move |_| {
+            raise(SIGSEGV);
+        }));
+    });
 
     Box::into_raw(tunnel)
 }
