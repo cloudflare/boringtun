@@ -7,6 +7,9 @@ use jni::strings::JNIStr;
 use jni::sys::{jbyteArray, jint, jlong, jstring};
 use jni::JNIEnv;
 
+use crypto::x25519::X25519SecretKey;
+use std::str::FromStr;
+
 use ffi::new_tunnel;
 use ffi::wireguard_read;
 use ffi::wireguard_tick;
@@ -16,8 +19,8 @@ use ffi::x25519_key_to_base64;
 use ffi::x25519_key_to_hex;
 use ffi::x25519_public_key;
 use ffi::x25519_secret_key;
+use ffi::wireguard_result;
 
-use noise::wireguard_result;
 use noise::Tunn;
 
 pub extern "C" fn log_print(_log_string: *const c_char) {
@@ -29,9 +32,9 @@ pub extern "C" fn log_print(_log_string: *const c_char) {
 
 /// Generates new x25519 secret key and converts into java byte array.
 #[no_mangle]
-#[link_name = "Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1secret_1key"]
+#[export_name = "Java_com_cloudflare_app_wireguard_WireGuardJNI_00024Companion_x25519_1secret_1key"]
 pub extern "C" fn generate_secret_key(env: JNIEnv, _class: JClass) -> jbyteArray {
-    match env.byte_array_from_slice(&x25519_secret_key().key) {
+    match env.byte_array_from_slice(&x25519_secret_key().as_bytes()) {
         Ok(v) => v,
         Err(_) => ptr::null_mut(),
     }
@@ -39,8 +42,8 @@ pub extern "C" fn generate_secret_key(env: JNIEnv, _class: JClass) -> jbyteArray
 
 /// Computes public x25519 key from secret key and converts into java byte array.
 #[no_mangle]
-#[link_name = "Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1public_1key"]
-pub unsafe extern "C" fn generate_public_key(
+#[export_name = "Java_com_cloudflare_app_wireguard_WireGuardJNI_00024Companion_x25519_1public_1key"]
+pub unsafe extern "C" fn generate_public_key1(
     env: JNIEnv,
     _class: JClass,
     arg_secret_key: jbyteArray,
@@ -54,11 +57,10 @@ pub unsafe extern "C" fn generate_public_key(
         return ptr::null_mut();
     }
 
-    let x25519_secret_key = x25519_key {
-        key: std::mem::transmute::<[i8; 32], [u8; 32]>(secret_key),
-    };
+    let secret_key: X25519SecretKey =
+        X25519SecretKey::from_str(&hex::encode(std::mem::transmute::<[i8; 32], [u8; 32]>(secret_key))).unwrap();
 
-    match env.byte_array_from_slice(&x25519_public_key(x25519_secret_key).key) {
+    match env.byte_array_from_slice(&x25519_public_key(secret_key).as_bytes()) {
         Ok(v) => v,
         Err(_) => ptr::null_mut(),
     }
@@ -66,7 +68,7 @@ pub unsafe extern "C" fn generate_public_key(
 
 /// Converts x25519 key to hex string.
 #[no_mangle]
-#[link_name = "Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1key_1to_1hex"]
+#[export_name = "Java_com_cloudflare_app_wireguard_WireGuardJNI_00024Companion_x25519_1key_1to_1hex"]
 pub unsafe extern "C" fn convert_x25519_key_to_hex(
     env: JNIEnv,
     _class: JClass,
@@ -92,7 +94,7 @@ pub unsafe extern "C" fn convert_x25519_key_to_hex(
 
 /// Converts x25519 key to base64 string.
 #[no_mangle]
-#[link_name = "Java_com_cloudflare_app_wireguard_WireGuardActivity_x25519_1key_1to_1base64"]
+#[export_name = "Java_com_cloudflare_app_wireguard_WireGuardJNI_00024Companion_x25519_1key_1to_1base64"]
 pub unsafe extern "C" fn convert_x25519_key_to_base64(
     env: JNIEnv,
     _class: JClass,
@@ -119,7 +121,7 @@ pub unsafe extern "C" fn convert_x25519_key_to_base64(
 
 /// Creates new tunnel
 #[no_mangle]
-#[link_name = "Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_new_1tunnel"]
+#[export_name = "Java_com_cloudflare_app_wireguard_WireGuardJNI_00024Companion_new_1tunnel"]
 pub unsafe extern "C" fn create_new_tunnel(
     env: JNIEnv,
     _class: JClass,
@@ -147,7 +149,7 @@ pub unsafe extern "C" fn create_new_tunnel(
 
 /// Encrypts raw IP packets into WG formatted packets.
 #[no_mangle]
-#[link_name = "Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1write"]
+#[export_name = "Java_com_cloudflare_app_wireguard_WireGuardJNI_00024Companion_wireguard_1write"]
 pub unsafe extern "C" fn encrypt_raw_packet(
     env: JNIEnv,
     _class: JClass,
@@ -182,7 +184,7 @@ pub unsafe extern "C" fn encrypt_raw_packet(
 
 /// Decrypts WG formatted packets into raw IP packets.
 #[no_mangle]
-#[link_name = "Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1read"]
+#[export_name = "Java_com_cloudflare_app_wireguard_WireGuardJNI_00024Companion_wireguard_1read"]
 pub unsafe extern "C" fn decrypt_to_raw_packet(
     env: JNIEnv,
     _class: JClass,
@@ -218,7 +220,7 @@ pub unsafe extern "C" fn decrypt_to_raw_packet(
 
 /// Periodic function that writes WG formatted packets into destination buffer
 #[no_mangle]
-#[link_name = "Java_com_cloudflare_app_vpnservice_wireguard_WireGuardTransport_wireguard_1tick"]
+#[export_name = "Java_com_cloudflare_app_wireguard_WireGuardJNI_00024Companion_wireguard_1tick"]
 pub unsafe extern "C" fn run_periodic_task(
     env: JNIEnv,
     _class: JClass,

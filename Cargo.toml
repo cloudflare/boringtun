@@ -19,7 +19,7 @@ daemonize = {git = "https://github.com/vkrasnov/daemonize", rev = "fedb687a8d99b
 jni = "0.10.2"
 
 [lib]
-crate-type = ["lib", "staticlib"]
+crate-type = ["lib", "staticlib", "dylib"]
 
 [[bin]]
 name = "wireguard-cf"
