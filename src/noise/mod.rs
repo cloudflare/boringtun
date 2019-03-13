@@ -142,11 +142,11 @@ impl Tunn {
 
         match src[0] {
             1 => {
-                self.log(Verbosity::Debug, "Received handhsake_initiation");
+                self.log(Verbosity::Debug, "Received handshake_initiation");
                 let mut handshake = self.handshake.lock();
                 match handshake.receive_handshake_initialization(src, dst) {
                     Ok((packet, session)) => {
-                        self.log(Verbosity::Debug, "Sending handshake_reponse");
+                        self.log(Verbosity::Debug, "Sending handshake_response");
                         let index = session.local_index();
                         *self.sessions[index % N_SESSIONS].write() = Some(session);
                         self.timer_tick_session_established(false); // New session established, we are not the initiator
