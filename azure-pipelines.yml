@@ -7,7 +7,7 @@ jobs:
   steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
-      sudo add-apt-repository ppa:wireguard/wireguard
+      sudo echo "deb http://deb.debian.org/debian/ unstable main" > /etc/apt/sources.list.d/unstable.list
       sudo apt-get update
       sudo apt-get install wireguard -y
     displayName: 'Install cargo'
