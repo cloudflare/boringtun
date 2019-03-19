@@ -2,52 +2,8 @@ trigger:
 - server
 
 jobs:
-- job: Windows
-  pool:
-    vmImage: 'vs2017-win2016'
-  steps:
-  - script: curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
-    displayName: 'Install cargo'
-  - script: |
-      PATH=%PATH%;%USERPROFILE%\.cargo\bin
-      cargo build --lib
-  - script: |
-      PATH=%PATH%;%USERPROFILE%\.cargo\bin
-      cargo test --lib
-
-- job: macOS
-  pool:
-    vmImage: 'macOS-10.13'
-  steps:
-  - script: |
-      curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
-      brew install wireguard-go wireguard-tools
-    displayName: 'Install build and test deps'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      cargo build --lib
-    displayName: 'Build library'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --lib
-    displayName: 'Library tests'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --lib -- --ignored --test-threads=1
-    displayName: 'Library interop tests'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      rustup target add aarch64-apple-ios
-      cargo build --lib --target aarch64-apple-ios
-    displayName: 'Build library for iOS'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      cargo build --bin wireguard-cf
-    displayName: 'Build binary'
-
-- job: Linux_x86_64
-  pool:
-    vmImage: 'ubuntu-16.04'
+- job: Linux_ARMv7
+  pool: Default
   steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
