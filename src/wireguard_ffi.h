@@ -32,6 +32,14 @@ struct wireguard_result
     size_t size;
 };
 
+struct stats
+{
+    int64_t time_since_last_handshake;
+    size_t tx_bytes;
+    size_t rx_bytes;
+    uint8_t reserved[64];
+};
+
 struct x25519_key
 {
     uint8_t key[32];
@@ -71,6 +79,8 @@ struct wireguard_result wireguard_read(struct wireguard_tunnel *tunnel,
                                        uint32_t src_size,
                                        uint8_t *dst,
                                        uint32_t dst_size);
+
+struct stats wireguard_stats(struct wireguard_tunnel *tunnel);
 
 struct wireguard_result wireguard_tick(struct wireguard_tunnel *tunnel,
                                        uint8_t *dst,

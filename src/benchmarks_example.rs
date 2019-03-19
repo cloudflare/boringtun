@@ -1,6 +1,7 @@
 #![allow(warnings)]
 extern crate base64;
 extern crate hex;
+extern crate libc;
 extern crate ring;
 extern crate spin;
 

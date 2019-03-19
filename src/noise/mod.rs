@@ -52,6 +52,8 @@ pub struct Tunn {
     current: AtomicUsize, // Index of most recently used session
     packet_queue: spin::Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
     timers: timers::Timers, // Keeps tabs on the expiring timers
+    tx_bytes: AtomicUsize,
+    rx_bytes: AtomicUsize,
 
     logger: Option<spin::Mutex<LogFunction>>,
     verbosity: Verbosity,
@@ -78,6 +80,8 @@ impl Tunn {
             ),
             sessions: Default::default(),
             current: Default::default(),
+            tx_bytes: Default::default(),
+            rx_bytes: Default::default(),
 
             packet_queue: spin::Mutex::new(VecDeque::new()),
             timers: Timers::new(persistent_keepalive),
@@ -118,9 +122,11 @@ impl Tunn {
             // Send the packet using an established session
             let packet = session.format_packet_data(src, dst);
             if src.len() > 0 {
+                // Only tick timer if not keepalive
                 self.timer_tick(TimerName::TimeLastPacketSent);
             }
             self.timer_tick(TimerName::TimeLastDataPacketSent);
+            self.tx_bytes.fetch_add(src.len(), Ordering::Relaxed);
             TunnResult::WriteToNetwork(packet)
         } else {
             // If there is no session, queue the packet for future retry
@@ -341,6 +347,8 @@ impl Tunn {
             return TunnResult::Err(WireGuardError::InvalidPacket);
         }
 
+        self.rx_bytes.fetch_add(packet_len, Ordering::Relaxed);
+
         match src_ip_address {
             IpAddr::V4(addr) => TunnResult::WriteToTunnelV4(&mut packet[..packet_len], addr),
             IpAddr::V6(addr) => TunnResult::WriteToTunnelV6(&mut packet[..packet_len], addr),
@@ -374,6 +382,22 @@ impl Tunn {
                 logger.lock()(&format!("[{:?}] {}", lvl, entry));
             }
         }
+    }
+
+    /// Return stats from the tunnel:
+    /// * Time since last handshake in seconds
+    /// * Data bytes sent
+    /// * Data bytes received
+    pub fn stats(&self) -> (Option<u64>, usize, usize) {
+        let time = if let Some(time) = self.time_since_last_handshake() {
+            Some(time.as_secs())
+        } else {
+            None
+        };
+        let tx_bytes = self.tx_bytes.load(Ordering::Relaxed);
+        let rx_bytes = self.rx_bytes.load(Ordering::Relaxed);
+
+        (time, tx_bytes, rx_bytes)
     }
 }
 

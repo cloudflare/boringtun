@@ -41,6 +41,14 @@ pub struct wireguard_result {
     pub size: usize,
 }
 
+#[repr(C)]
+pub struct stats {
+    pub time_since_last_handshake: i64,
+    pub tx_bytes: usize,
+    pub rx_bytes: usize,
+    reserved: [u8; 64], // Make sure to add new fields in this space, keeping total size constant
+}
+
 impl<'a> From<TunnResult<'a>> for wireguard_result {
     fn from(res: TunnResult<'a>) -> wireguard_result {
         match res {
@@ -256,13 +264,29 @@ pub unsafe extern "C" fn wireguard_tick(
     wireguard_result::from(tunnel.update_timers(dst))
 }
 
+/// Returns stats from the tunnel:
+/// Time of last handshake in seconds (or -1 if no handshake occured)
+/// Number of data bytes encapsulated
+/// Number of data bytes decapsulated
+#[no_mangle]
+pub unsafe extern "C" fn wireguard_stats(tunnel: *mut Tunn) -> stats {
+    let tunnel = tunnel.as_ref().unwrap();
+    let (time, tx_bytes, rx_bytes) = tunnel.stats();
+    stats {
+        time_since_last_handshake: time.map(|t| t as i64).unwrap_or(-1),
+        tx_bytes,
+        rx_bytes,
+        reserved: [0u8; 64],
+    }
+}
+
 /// Performs an iternal benchmark, and returns its result as a C-string.
 #[no_mangle]
 pub extern "C" fn benchmark(name: i32, idx: u32) -> *const c_char {
     if let Some(s) = do_benchmark(name != 0, idx as usize) {
         let s = CString::new(s).unwrap();
         let v = s.as_ptr();
-        mem::forget(s); // This is a memory leak, but we assume it is rearly used anyway
+        mem::forget(s); // This is a memory leak, but we assume it is rarely used anyway
         v
     } else {
         ptr::null()
