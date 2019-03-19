@@ -3,7 +3,7 @@ trigger:
 
 jobs:
 - job: Linux_ARMv7
-  pool: warp-arm
+  pool: Default
   steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
