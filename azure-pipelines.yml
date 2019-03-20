@@ -1,9 +1,11 @@
-trigger:
-- server
-
 jobs:
-- job: Linux_aarch64
-  pool: Default
+- job: Ubuntu
+  matrix:
+    aarch64:
+      ARCH: 'ARM64'
+  pool: 
+    name: Default
+    demands: Agent.OSArchitecture -equals $(ARCH)
   steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
