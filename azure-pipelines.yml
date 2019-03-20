@@ -3,7 +3,7 @@ jobs:
   strategy:
     matrix:
       aarch64:
-        ARCH: 'ARM64'
+        ARCH: ARM64
   pool: 
     name: default
     demands: agent.osarchitecture -equals $(ARCH)
