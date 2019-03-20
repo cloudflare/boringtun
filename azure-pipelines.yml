@@ -3,7 +3,9 @@ jobs:
   strategy:
     matrix:
       aarch64:
-        ARCH: ARM64
+        NAME: aarch64
+      armv7:
+        NAME: armv7
   pool: 
     name: default
     demands: agent.name -equals aarch64
@@ -17,17 +19,17 @@ jobs:
     displayName: 'Build library'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --lib
+      cargo test --lib -- --test-threads=1
     displayName: 'Library tests'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --lib -- --ignored --test-threads=1
+      cargo test --lib -- --ignored --test-threads=1
     displayName: 'Library interop tests'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       cargo build --bin wireguard-cf
-    displayName: 'Build binary'
+    displayName: 'Build executable'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --bin wireguard-cf
-    displayName: 'Binary tests'
+      RUST_BACKTRACE=full cargo test --bin wireguard-cf -- --test-threads=1
+    displayName: 'Executable tests'
