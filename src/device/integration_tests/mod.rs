@@ -678,7 +678,7 @@ mod tests {
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(&private_key), "errno=0\n\n");
 
-        for _ in 0..20 {
+        for _ in 0..5{
             // Create a new peer whose endpoint is on this machine
             let mut peer = Peer::new(
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),
@@ -702,7 +702,7 @@ mod tests {
         for p in wg.peers {
             let pub_key = p.key.public_key();
             threads.push(thread::spawn(move || {
-                for _ in 0..200 {
+                for _ in 0..100 {
                     let response = p.get_request();
                     assert_eq!(response, encode(pub_key.as_bytes()));
                 }
@@ -728,7 +728,7 @@ mod tests {
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(&private_key), "errno=0\n\n");
 
-        for _ in 0..20 {
+        for _ in 0..5 {
             // Create a new peer whose endpoint is on this machine
             let mut peer = Peer::new(
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),
@@ -752,7 +752,7 @@ mod tests {
         for p in wg.peers {
             let pub_key = p.key.public_key();
             threads.push(thread::spawn(move || {
-                for _ in 0..200 {
+                for _ in 0..100 {
                     let response = p.get_request();
                     assert_eq!(response, encode(pub_key.as_bytes()));
                 }

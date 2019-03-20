@@ -186,10 +186,10 @@ mod tests {
         let (iface_socket_ret, iface_socket) = connected_sock_pair();
 
         network_socket
-            .set_read_timeout(Some(Duration::from_millis(100)))
+            .set_read_timeout(Some(Duration::from_millis(1000)))
             .unwrap();
         iface_socket
-            .set_read_timeout(Some(Duration::from_millis(100)))
+            .set_read_timeout(Some(Duration::from_millis(1000)))
             .unwrap();
 
         // The peer has three threads:
@@ -341,10 +341,10 @@ mod tests {
                 wireguard_test_pair();
 
             client_iface_socket_sender
-                .set_read_timeout(Some(Duration::from_millis(200)))
+                .set_read_timeout(Some(Duration::from_millis(1000)))
                 .unwrap();
             client_iface_socket_sender
-                .set_write_timeout(Some(Duration::from_millis(200)))
+                .set_write_timeout(Some(Duration::from_millis(1000)))
                 .unwrap();
 
             thread::spawn(move || loop {
@@ -405,6 +405,7 @@ mod tests {
 
             // Start wireguard
             Command::new("wg-quick")
+                .env("WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD", "1")
                 .args(&["up", &conf_file_name])
                 .status()
                 .expect("Failed to run wg-quick");

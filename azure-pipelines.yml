@@ -1,77 +1,67 @@
-trigger:
-- server
-
 jobs:
+
 - job: Windows
+  displayName: 'Windows'
   pool:
     vmImage: 'vs2017-win2016'
+  continueOnError: true
   steps:
   - script: curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
     displayName: 'Install cargo'
   - script: |
       PATH=%PATH%;%USERPROFILE%\.cargo\bin
       cargo build --lib
+    displayName: 'Build library'
   - script: |
       PATH=%PATH%;%USERPROFILE%\.cargo\bin
       cargo test --lib
+    displayName: 'Test library'
 
 - job: macOS
+  displayName: 'macOS'
   pool:
     vmImage: 'macOS-10.13'
+  continueOnError: true
   steps:
   - script: |
-      curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
       brew install wireguard-go wireguard-tools
-    displayName: 'Install build and test deps'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      cargo build --lib
-    displayName: 'Build library'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --lib
-    displayName: 'Library tests'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --lib -- --ignored --test-threads=1
-    displayName: 'Library interop tests'
+    displayName: 'Install wireguard-go'
+  - template: ci/azure-build.yml
+    parameters:
+      runBinaryTests: 'false'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       rustup target add aarch64-apple-ios
       cargo build --lib --target aarch64-apple-ios
     displayName: 'Build library for iOS'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      cargo build --bin wireguard-cf
-    displayName: 'Build binary'
 
 - job: Linux_x86_64
+  displayName: 'Linux x86-64'
   pool:
     vmImage: 'ubuntu-16.04'
+  continueOnError: true
   steps:
   - script: |
-      curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
       sudo add-apt-repository ppa:wireguard/wireguard
       sudo apt-get update
       sudo apt-get install wireguard -y
-    displayName: 'Install cargo'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      cargo build --lib
-    displayName: 'Build library'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --lib
-    displayName: 'Library tests'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --lib -- --ignored --test-threads=1
-    displayName: 'Library interop tests'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      cargo build --bin wireguard-cf
-    displayName: 'Build binary'
-  - script: |
-      export PATH=$PATH:$HOME/.cargo/bin
-      RUST_BACKTRACE=full cargo test --bin wireguard-cf
-    displayName: 'Binary tests'
+    displayName: 'Install wireguard'
+  - template: ci/azure-build.yml
+
+- job: Linux_aarch64
+  displayName: 'Linux aarch64'
+  pool:
+    name: default
+    demands: agent.name -equals aarch64
+  continueOnError: true
+  steps:
+  - template: ci/azure-build.yml
+
+- job: Linux_armv7
+  displayName: 'Linux armv7'
+  pool: 
+    name: default
+    demands: agent.name -equals armv7
+  continueOnError: true
+  steps:
+  - template: ci/azure-build.yml

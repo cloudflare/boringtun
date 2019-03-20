@@ -77,7 +77,7 @@ impl TunSocket {
 
         ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
 
-        if unsafe { ioctl(fd, TUNSETIFF, &ifr) } < 0 {
+        if unsafe { ioctl(fd, TUNSETIFF as _, &ifr) } < 0 {
             return Err(Error::IOCtl(errno_str()));
         }
 
