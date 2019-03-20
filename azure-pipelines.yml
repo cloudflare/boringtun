@@ -6,7 +6,7 @@ jobs:
         ARCH: ARM64
   pool: 
     name: default
-    demands: agent.osarchitecture -equals $(ARCH)
+    demands: agent.osarchitecture -equals 'ARM64'
   steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
