@@ -3,10 +3,10 @@ jobs:
   strategy:
     matrix:
       aarch64:
-        NAME: aarch64
+        agent_name: aarch64
   pool: 
     name: default
-    demands: agent.name -equals $(NAME)
+    demands: agent.name -equals $(agent_name)
   steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
