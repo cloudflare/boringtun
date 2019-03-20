@@ -4,11 +4,9 @@ jobs:
     matrix:
       aarch64:
         NAME: aarch64
-      armv7:
-        NAME: armv7
   pool: 
     name: default
-    demands: agent.name -equals aarch64
+    demands: agent.name -equals $(NAME)
   steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
