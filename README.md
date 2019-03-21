@@ -74,6 +74,6 @@ The library exposes a set of C ABI bindings, those are defined in the `wireguard
 
 The library exposes a set of Java Native Interface bindings, those are defined in `src/cfjni/mod.rs`.
 
-##License
+## License
 
 The project is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause).
