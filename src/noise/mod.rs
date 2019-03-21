@@ -214,10 +214,15 @@ impl Tunn {
         TunnResult::Done
     }
 
-    // Formats a new handhsake initiation message and store it in dst.
-    fn format_handshake_initiation<'a>(&self, dst: &'a mut [u8], resend: bool) -> TunnResult<'a> {
+    // Formats a new handhsake initiation message and store it in dst. If force_resend is true will send
+    // a new handshake, even if a handshake is already in progress (for example when a handshake times out)
+    pub fn format_handshake_initiation<'a>(
+        &self,
+        dst: &'a mut [u8],
+        force_resend: bool,
+    ) -> TunnResult<'a> {
         let mut handshake = self.handshake.lock();
-        if handshake.is_in_progress() && !resend {
+        if handshake.is_in_progress() && !force_resend {
             return TunnResult::Done;
         }
 
