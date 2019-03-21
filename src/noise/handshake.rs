@@ -1,3 +1,6 @@
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 use crypto::blake2s::{constant_time_mac_check, Blake2s};
 use crypto::chacha20poly1305::ChaCha20Poly1305;
 use crypto::x25519::*;
@@ -576,7 +579,7 @@ impl Handshake {
         Ok(Session::new(local_index, peer_index, temp3, temp2))
     }
 
-    pub fn receive_cookie_reply<'a>(&mut self, src: &[u8]) -> Result<(), WireGuardError> {
+    pub fn receive_cookie_reply(&mut self, src: &[u8]) -> Result<(), WireGuardError> {
         const MSG_TYPE_OFF: usize = 0;
         const MSG_TYPE_SZ: usize = 4;
         const RCV_IDX_OFF: usize = MSG_TYPE_OFF + MSG_TYPE_SZ;

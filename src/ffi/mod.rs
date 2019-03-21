@@ -1,4 +1,7 @@
-/// C bindings for the WireGuard library
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+/// C bindings for the BoringTun library
 pub mod benchmark;
 use self::benchmark::do_benchmark;
 use super::crypto::x25519::*;
@@ -264,7 +267,7 @@ pub unsafe extern "C" fn wireguard_tick(
     wireguard_result::from(tunnel.update_timers(dst))
 }
 
-/// Force the tunnel to initiate a new handshake, dst buffer must be at least 144 byte long.
+/// Force the tunnel to initiate a new handshake, dst buffer must be at least 148 byte long.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_force_handshake(
     tunnel: *mut Tunn,

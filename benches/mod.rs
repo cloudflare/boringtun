@@ -1,13 +1,16 @@
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 #![feature(test)]
 extern crate test;
-extern crate wireguard_cf;
+extern crate boringtun;
 
 #[cfg(test)]
 mod tests {
     use test::{black_box, Bencher};
-    use wireguard_cf::crypto::blake2s::*;
-    use wireguard_cf::crypto::chacha20poly1305::*;
-    use wireguard_cf::crypto::x25519::*;
+    use boringtun::crypto::blake2s::*;
+    use boringtun::crypto::chacha20poly1305::*;
+    use boringtun::crypto::x25519::*;
 
     #[bench]
     fn bench_x25519_public_key(b: &mut Bencher) {

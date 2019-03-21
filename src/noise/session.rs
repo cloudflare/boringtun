@@ -1,13 +1,30 @@
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+#[cfg(target_arch = "arm")]
+use crypto::chacha20poly1305::*;
 use noise::errors::WireGuardError;
 use noise::make_array;
+#[cfg(not(target_arch = "arm"))]
 use ring::aead::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(not(target_arch = "arm"))]
 pub struct Session {
     receiving_index: u32,
     sending_index: u32,
     receiver: OpeningKey,
     sender: SealingKey,
+    sending_key_counter: AtomicUsize,
+    receiving_key_counter: spin::Mutex<ReceivingKeyCounterValidator>,
+}
+
+#[cfg(target_arch = "arm")]
+pub struct Session {
+    receiving_index: u32,
+    sending_index: u32,
+    receiver: ChaCha20Poly1305,
+    sender: ChaCha20Poly1305,
     sending_key_counter: AtomicUsize,
     receiving_key_counter: spin::Mutex<ReceivingKeyCounterValidator>,
 }
@@ -129,14 +146,25 @@ impl Session {
         receiving_key: [u8; 32],
         sending_key: [u8; 32],
     ) -> Session {
-        Session {
+        #[cfg(not(target_arch = "arm"))]
+        return Session {
             receiving_index: local_index,
             sending_index: peer_index,
             receiver: OpeningKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
             sender: SealingKey::new(&CHACHA20_POLY1305, &sending_key).unwrap(),
             sending_key_counter: AtomicUsize::new(0),
             receiving_key_counter: spin::Mutex::new(Default::default()),
-        }
+        };
+
+        #[cfg(target_arch = "arm")]
+        return Session {
+            receiving_index: local_index,
+            sending_index: peer_index,
+            receiver: ChaCha20Poly1305::new_aead(&receiving_key[..]),
+            sender: ChaCha20Poly1305::new_aead(&sending_key[..]),
+            sending_key_counter: AtomicUsize::new(0),
+            receiving_key_counter: spin::Mutex::new(Default::default()),
+        };
     }
 
     pub fn local_index(&self) -> usize {
@@ -175,20 +203,32 @@ impl Session {
         dst[CTR_OFF..CTR_OFF + CTR_SZ].copy_from_slice(&sending_key_counter.to_le_bytes());
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
 
-        let mut nonce = [0u8; 12];
-        nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
+        #[cfg(not(target_arch = "arm"))]
+        {
+            let mut nonce = [0u8; 12];
+            nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
+            dst[DATA_OFF..DATA_OFF + src.len()].copy_from_slice(src);
+            let n = seal_in_place(
+                &self.sender,
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(&[]),
+                &mut dst[DATA_OFF..DATA_OFF + src.len() + AEAD_SIZE],
+                AEAD_SIZE,
+            )
+            .unwrap();
+            &mut dst[..DATA_OFF + n]
+        }
 
-        dst[DATA_OFF..DATA_OFF + src.len()].copy_from_slice(src);
-        let n = seal_in_place(
-            &self.sender,
-            Nonce::assume_unique_for_key(nonce),
-            Aad::from(&[]),
-            &mut dst[DATA_OFF..DATA_OFF + src.len() + AEAD_SIZE],
-            AEAD_SIZE,
-        )
-        .unwrap();
-
-        &mut dst[..DATA_OFF + n]
+        #[cfg(target_arch = "arm")]
+        {
+            let n = self.sender.seal_wg(
+                sending_key_counter,
+                &[],
+                src,
+                &mut dst[DATA_OFF..DATA_OFF + src.len() + AEAD_SIZE],
+            );
+            &mut dst[..DATA_OFF + n]
+        }
     }
 
     // src - a packet we received from the network
@@ -216,19 +256,32 @@ impl Session {
         // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
         self.receiving_counter_quick_check(receiving_key_counter)?;
 
-        let mut nonce = [0u8; 12];
-        nonce[4..12].copy_from_slice(&receiving_key_counter.to_le_bytes());
-        dst[..src.len() - DATA_OFF].copy_from_slice(&src[DATA_OFF..]);
-        let packet = open_in_place(
-            &self.receiver,
-            Nonce::assume_unique_for_key(nonce),
-            Aad::from(&[]),
-            0,
-            &mut dst[..src.len() - DATA_OFF],
-        )
-        .map_err(|_| WireGuardError::InvalidAeadTag)?;
-        // After decryption is done, check counter again, and mark as recieved
-        self.receiving_counter_mark(receiving_key_counter)?;
-        Ok(packet)
+        #[cfg(not(target_arch = "arm"))]
+        {
+            let mut nonce = [0u8; 12];
+            nonce[4..12].copy_from_slice(&receiving_key_counter.to_le_bytes());
+            dst[..src.len() - DATA_OFF].copy_from_slice(&src[DATA_OFF..]);
+            let packet = open_in_place(
+                &self.receiver,
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(&[]),
+                0,
+                &mut dst[..src.len() - DATA_OFF],
+            )
+            .map_err(|_| WireGuardError::InvalidAeadTag)?;
+            // After decryption is done, check counter again, and mark as recieved
+            self.receiving_counter_mark(receiving_key_counter)?;
+            Ok(packet)
+        }
+
+        #[cfg(target_arch = "arm")]
+        {
+            let packet =
+                self.receiver
+                    .open_wg(receiving_key_counter, &[], &src[DATA_OFF..], dst)?;
+
+            self.receiving_counter_mark(receiving_key_counter)?;
+            Ok(packet)
+        }
     }
 }

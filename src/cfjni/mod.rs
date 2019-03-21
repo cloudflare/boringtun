@@ -1,4 +1,7 @@
-/// JNI bindings for WireGuard library
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+/// JNI bindings for BoringTun library
 use std::os::raw::c_char;
 use std::ptr;
 
@@ -12,6 +15,7 @@ use std::str::FromStr;
 
 use ffi::new_tunnel;
 use ffi::wireguard_read;
+use ffi::wireguard_result;
 use ffi::wireguard_tick;
 use ffi::wireguard_write;
 use ffi::x25519_key;
@@ -19,7 +23,6 @@ use ffi::x25519_key_to_base64;
 use ffi::x25519_key_to_hex;
 use ffi::x25519_public_key;
 use ffi::x25519_secret_key;
-use ffi::wireguard_result;
 
 use noise::Tunn;
 
@@ -57,8 +60,10 @@ pub unsafe extern "C" fn generate_public_key1(
         return ptr::null_mut();
     }
 
-    let secret_key: X25519SecretKey =
-        X25519SecretKey::from_str(&hex::encode(std::mem::transmute::<[i8; 32], [u8; 32]>(secret_key))).unwrap();
+    let secret_key: X25519SecretKey = X25519SecretKey::from_str(&hex::encode(
+        std::mem::transmute::<[i8; 32], [u8; 32]>(secret_key),
+    ))
+    .unwrap();
 
     match env.byte_array_from_slice(&x25519_public_key(secret_key).as_bytes()) {
         Ok(v) => v,

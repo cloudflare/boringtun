@@ -1,3 +1,6 @@
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 use super::{errno_str, Error};
 use libc::*;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
