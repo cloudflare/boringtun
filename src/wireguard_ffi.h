@@ -83,10 +83,14 @@ struct wireguard_result wireguard_read(struct wireguard_tunnel *tunnel,
                                        uint8_t *dst,
                                        uint32_t dst_size);
 
-struct stats wireguard_stats(struct wireguard_tunnel *tunnel);
-
 struct wireguard_result wireguard_tick(struct wireguard_tunnel *tunnel,
                                        uint8_t *dst,
                                        uint32_t dst_size);
+
+struct wireguard_result wireguard_force_handshake(struct wireguard_tunnel *tunnel,
+                                                  uint8_t *dst,
+                                                  uint32_t dst_size);
+
+struct stats wireguard_stats(struct wireguard_tunnel *tunnel);
 
 const uint8_t *benchmark(int32_t name, uint32_t idx);
