@@ -1,3 +1,6 @@
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 /// This module implements benchmarking code for use with the FFI bindings
 use crypto::blake2s::*;
 use crypto::chacha20poly1305::*;

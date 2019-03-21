@@ -1,5 +1,8 @@
-/// This module contains some integration tests for wireguard-cf
-/// Those tests require docker and sudo priviliges to run
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+// This module contains some integration tests for wireguard-cf
+// Those tests require docker and sudo priviliges to run
 #[cfg(test)]
 mod tests {
     use base64::encode as base64encode;
@@ -678,7 +681,7 @@ mod tests {
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(&private_key), "errno=0\n\n");
 
-        for _ in 0..5{
+        for _ in 0..5 {
             // Create a new peer whose endpoint is on this machine
             let mut peer = Peer::new(
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),

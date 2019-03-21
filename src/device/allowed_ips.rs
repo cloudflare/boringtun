@@ -1,3 +1,6 @@
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 use std::cmp::min;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 

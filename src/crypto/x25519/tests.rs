@@ -1,3 +1,6 @@
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 #[cfg(test)]
 mod tests {
     use super::super::{mod_final_25519, mod_inv_25519, x25519_shared_key, Felem};

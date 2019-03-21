@@ -1,4 +1,7 @@
-/// JNI bindings for WireGuard library
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+/// JNI bindings for BoringTun library
 use std::os::raw::c_char;
 use std::ptr;
 

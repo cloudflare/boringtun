@@ -1,4 +1,7 @@
-/// C bindings for the WireGuard library
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+/// C bindings for the BoringTun library
 pub mod benchmark;
 use self::benchmark::do_benchmark;
 use super::crypto::x25519::*;

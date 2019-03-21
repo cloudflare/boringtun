@@ -1,3 +1,6 @@
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 use crypto::blake2s::{constant_time_mac_check, Blake2s};
 use crypto::chacha20poly1305::ChaCha20Poly1305;
 use crypto::x25519::*;

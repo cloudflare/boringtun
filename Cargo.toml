@@ -1,5 +1,5 @@
 [package]
-name = "wireguard_cf"
+name = "boringtun-lib"
 version = "0.2.0"
 authors = ["Vlad Krasnov <vlad@cloudflare.com>"]
 
@@ -24,7 +24,7 @@ jni = "0.10.2"
 crate-type = ["lib", "staticlib", "dylib"]
 
 [[bin]]
-name = "wireguard-cf"
+name = "boringtun"
 path = "src/main.rs"
 
 [[example]]
