@@ -1,5 +1,5 @@
 [package]
-name = "boringtun-lib"
+name = "boringtun"
 version = "0.2.0"
 authors = ["Vlad Krasnov <vlad@cloudflare.com>"]
 

@@ -124,7 +124,7 @@ impl Tunn {
         if let Some(ref session) = *self.sessions[current % N_SESSIONS].read() {
             // Send the packet using an established session
             let packet = session.format_packet_data(src, dst);
-            if src.len() > 0 {
+            if !src.is_empty() {
                 // Only tick timer if not keepalive
                 self.timer_tick(TimerName::TimeLastPacketSent);
             }
@@ -266,7 +266,7 @@ impl Tunn {
             match session.receive_packet_data(src, dst) {
                 Ok(packet) => {
                     self.current.store(idx, Ordering::Relaxed); // The exact session we use is not important as long as it is valid
-                    if packet.len() > 0 {
+                    if !packet.is_empty() {
                         self.timer_tick(TimerName::TimeLastPacketReceived);
                     }
                     self.timer_tick(TimerName::TimeLastDataPacketReceived);

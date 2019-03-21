@@ -6,7 +6,7 @@ BoringTun is an implementation of the [WireGuard<sup>®</sup>](https://www.wireg
 The project consists of two parts:
 
 * The executable `boringtun`, a [userspace WireGuard](https://www.wireguard.com/xplatform/) implementation for Linux and macOS.
-* The library `boringtun-lib` that can be used to implement fast and efficient WireGuard client apps on various platforms, including iOS and Android. It implements the underlying WireGuard protocol, without the network or tunnel stacks, those can be implemented in a platform idiomatic way.
+* The library `boringtun` that can be used to implement fast and efficient WireGuard client apps on various platforms, including iOS and Android. It implements the underlying WireGuard protocol, without the network or tunnel stacks, those can be implemented in a platform idiomatic way.
 
 
 ### Building

@@ -243,32 +243,31 @@ impl Tunn {
                 // If we have sent a packet to a given peer but have not received a
                 // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
                 // we initiate a new handshake.
-                if now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT {
-                    if timers.want_handshake.swap(false, Ordering::Relaxed) {
-                        self.log(Verbosity::Debug, "HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
-                        hanshake_initiation_required = true;
-                    }
+                if now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
+                    && timers.want_handshake.swap(false, Ordering::Relaxed)
+                {
+                    self.log(Verbosity::Debug, "HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
+                    hanshake_initiation_required = true;
                 }
 
                 if !hanshake_initiation_required {
                     // If a packet has been received from a given peer, but we have not sent one back
                     // to the given peer in KEEPALIVE ms, we send an empty packet.
-                    if now - aut_packet_sent >= KEEPALIVE_TIMEOUT {
-                        if timers.want_keepalive.swap(false, Ordering::Relaxed) {
-                            self.log(Verbosity::Debug, "KEEPALIVE(KEEPALIVE_TIMEOUT)");
-                            keepalive_required = true;
-                        }
+                    if now - aut_packet_sent >= KEEPALIVE_TIMEOUT
+                        && timers.want_keepalive.swap(false, Ordering::Relaxed)
+                    {
+                        self.log(Verbosity::Debug, "KEEPALIVE(KEEPALIVE_TIMEOUT)");
+                        keepalive_required = true;
                     }
 
                     // Persistent KEEPALIVE
-                    if persistent_keepalive > 0 {
-                        if now - timers[TimePersistentKeepalive].time()
-                            >= Duration::from_secs(persistent_keepalive as _)
-                        {
-                            self.log(Verbosity::Debug, "KEEPALIVE(PERSISTENT_KEEPALIVE)");
-                            self.timer_tick(TimePersistentKeepalive);
-                            keepalive_required = true;
-                        }
+                    if persistent_keepalive > 0
+                        && (now - timers[TimePersistentKeepalive].time()
+                            >= Duration::from_secs(persistent_keepalive as _))
+                    {
+                        self.log(Verbosity::Debug, "KEEPALIVE(PERSISTENT_KEEPALIVE)");
+                        self.timer_tick(TimePersistentKeepalive);
+                        keepalive_required = true;
                     }
                 }
             }

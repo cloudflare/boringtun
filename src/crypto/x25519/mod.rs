@@ -63,7 +63,7 @@ pub struct X25519PublicKey {
     internal: [u8; 32],
 }
 
-#[allow(clippy::new_without_default_derive)]
+#[allow(clippy::new_without_default)]
 impl X25519SecretKey {
     /// Generate a new secret key using the OS rng
     pub fn new() -> Self {
