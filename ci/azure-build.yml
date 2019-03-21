@@ -20,10 +20,10 @@ steps:
     displayName: 'Library integration tests'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
-      cargo build --bin wireguard-cf
+      cargo build --bin boringtun
     displayName: 'Build executable'
   - ${{ if eq(parameters.runBinaryTests, 'true') }}:
     - script: |
         export PATH=$PATH:$HOME/.cargo/bin
-        cargo test --bin wireguard-cf -- --test-threads=1
+        cargo test --bin boringtun -- --test-threads=1
       displayName: 'Test executable'
