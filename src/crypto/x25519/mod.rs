@@ -15,7 +15,7 @@ use std::str::FromStr;
 
 #[cfg(target_arch = "arm")]
 #[allow(non_snake_case)]
-mod SystemRandom {
+pub mod SystemRandom {
     use std::io::Read;
     use std::sync::Once;
     static INIT: Once = Once::new();

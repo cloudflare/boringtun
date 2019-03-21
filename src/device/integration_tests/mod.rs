@@ -9,6 +9,7 @@ mod tests {
     use crypto::x25519::*;
     use device::*;
     use hex::encode;
+    #[cfg(not(target_arch = "arm"))]
     use ring::rand::*;
     use std::io::prelude::*;
     use std::io::{BufReader, Read, Write};

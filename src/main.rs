@@ -6,6 +6,7 @@ extern crate chrono;
 extern crate daemonize;
 extern crate hex;
 extern crate libc;
+#[cfg(not(target_arch = "arm"))]
 extern crate ring;
 extern crate spin;
 
