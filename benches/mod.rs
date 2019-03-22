@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #![feature(test)]
-extern crate test;
 extern crate boringtun;
+extern crate test;
 
 #[cfg(test)]
 mod tests {
-    use test::{black_box, Bencher};
     use boringtun::crypto::blake2s::*;
     use boringtun::crypto::chacha20poly1305::*;
     use boringtun::crypto::x25519::*;
+    use test::{black_box, Bencher};
 
     #[bench]
     fn bench_x25519_public_key(b: &mut Bencher) {
