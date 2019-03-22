@@ -42,7 +42,7 @@ impl Device {
 
         remove_file(&path).is_ok(); // Attempt to remove the socket if already exists
 
-        let api_listener = UnixListener::bind(&path).map_err(|e| Error::ApiSocket(e))?; // Bind a new socket to the path
+        let api_listener = UnixListener::bind(&path).map_err(Error::ApiSocket)?; // Bind a new socket to the path
 
         self.cleanup_paths.push(path.clone());
 
