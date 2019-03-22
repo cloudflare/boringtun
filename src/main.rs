@@ -28,7 +28,7 @@ use std::os::unix::net::UnixDatagram;
 fn check_tun_name(_v: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(_) = device::tun::parse_utun_name(&_v) {
+        if device::tun::parse_utun_name(&_v).is_ok() {
             Ok(())
         } else {
             Err("Tunnel name must have the format 'utun[0-9]+', use 'utun' for automatic assignment".to_owned())
