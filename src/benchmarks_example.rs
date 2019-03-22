@@ -1,13 +1,5 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
-
-#![allow(warnings)]
-extern crate base64;
-extern crate hex;
-extern crate libc;
-extern crate ring;
-extern crate spin;
-
 mod crypto;
 mod ffi;
 mod noise;
