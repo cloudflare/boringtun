@@ -5,6 +5,8 @@ parameters:
 steps:
   - script: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
+      export PATH=$PATH:$HOME/.cargo/bin
+      rustup component add rustfmt
     displayName: 'Install cargo'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
@@ -27,3 +29,7 @@ steps:
         export PATH=$PATH:$HOME/.cargo/bin
         cargo test --bin boringtun -- --test-threads=1
       displayName: 'Test executable'
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      cargo fmt --all -- --check
+    displayName: 'Cargo fmt'
