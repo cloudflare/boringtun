@@ -67,7 +67,7 @@ impl Device {
                         _ => EIO,
                     };
                     // The protocol requires to return an error code as the response, or zero on success
-                    write!(writer, "errno={}\n\n", status).ok();
+                    writeln!(writer, "errno={}\n", status).ok();
                 }
                 Action::Continue // Inidicates the worker thread should continue as normal
             }),
@@ -121,43 +121,43 @@ impl Device {
 fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
-        write!(writer, "private_key={}\n", encode_hex(k.0.as_bytes()));
+        writeln!(writer, "private_key={}", encode_hex(k.0.as_bytes()));
     }
 
     if d.listen_port != 0 {
-        write!(writer, "listen_port={}\n", d.listen_port);
+        writeln!(writer, "listen_port={}", d.listen_port);
     }
 
     for (k, p) in d.peers.iter() {
-        write!(writer, "public_key={}\n", encode_hex(k.as_bytes()));
+        writeln!(writer, "public_key={}", encode_hex(k.as_bytes()));
 
         if let Some(ref key) = p.preshared_key() {
-            write!(writer, "preshared_key={}\n", encode_hex(key));
+            writeln!(writer, "preshared_key={}", encode_hex(key));
         }
 
         if let Some(keepalive) = p.persistent_keepalive() {
-            write!(writer, "persistent_keepalive_interval={}\n", keepalive);
+            writeln!(writer, "persistent_keepalive_interval={}", keepalive);
         }
 
         if let Some(fwmark) = d.fwmark {
-            write!(writer, "fwmark={}\n", fwmark);
+            writeln!(writer, "fwmark={}", fwmark);
         }
 
         if let Some(ref addr) = p.endpoint().addr {
-            write!(writer, "endpoint={}\n", addr);
+            writeln!(writer, "endpoint={}", addr);
         }
 
         for (_, ip, cidr) in p.allowed_ips() {
-            write!(writer, "allowed_ip={}/{}\n", ip, cidr);
+            writeln!(writer, "allowed_ip={}/{}", ip, cidr);
         }
 
         if let Some(time) = p.time_since_last_handshake() {
-            write!(writer, "last_handshake_time_sec={}\n", time.as_secs());
-            write!(writer, "last_handshake_time_nsec={}\n", time.subsec_nanos());
+            writeln!(writer, "last_handshake_time_sec={}", time.as_secs());
+            writeln!(writer, "last_handshake_time_nsec={}", time.subsec_nanos());
         }
 
-        write!(writer, "rx_bytes={}\n", p.get_rx_bytes());
-        write!(writer, "tx_bytes={}\n", p.get_tx_bytes());
+        writeln!(writer, "rx_bytes={}", p.get_rx_bytes());
+        writeln!(writer, "tx_bytes={}", p.get_tx_bytes());
     }
     0
 }
