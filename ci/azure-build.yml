@@ -27,3 +27,7 @@ steps:
         export PATH=$PATH:$HOME/.cargo/bin
         cargo test --bin boringtun -- --test-threads=1
       displayName: 'Test executable'
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      cargo fmt --all -- --check
+    displayName: 'Cargo fmt'
