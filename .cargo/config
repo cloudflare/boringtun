@@ -1,0 +1,8 @@
+[build]
+rustflags = [
+    "-C", "llvm-args=-slp-recursion-max-depth=1024",
+    "--emit", "asm", # For whatever reason rustc produces faster code when this flag is enabled
+]
+
+[target.'cfg(unix)']
+runner = 'sudo -E'

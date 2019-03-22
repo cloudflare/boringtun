@@ -1,0 +1,29 @@
+
+parameters:
+  runBinaryTests: 'true'
+
+steps:
+  - script: |
+      curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
+    displayName: 'Install cargo'
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      cargo build --lib
+    displayName: 'Build library'
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      cargo test --lib -- --test-threads=1
+    displayName: 'Test library'
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      cargo test --lib -- --ignored --test-threads=1
+    displayName: 'Library integration tests'
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      cargo build --bin boringtun
+    displayName: 'Build executable'
+  - ${{ if eq(parameters.runBinaryTests, 'true') }}:
+    - script: |
+        export PATH=$PATH:$HOME/.cargo/bin
+        cargo test --bin boringtun -- --test-threads=1
+      displayName: 'Test executable'
