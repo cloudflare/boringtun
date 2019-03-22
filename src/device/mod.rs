@@ -7,13 +7,25 @@ pub mod dev_lock;
 pub mod drop_privileges;
 mod integration_tests;
 pub mod peer;
-#[cfg_attr(any(target_os = "macos", target_os = "ios"), path = "kqueue.rs")]
-#[cfg_attr(target_os = "linux", path = "epoll.rs")]
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[path = "kqueue.rs"]
 pub mod poll;
-#[cfg_attr(any(target_os = "macos", target_os = "ios"), path = "tun_darwin.rs")]
-#[cfg_attr(target_os = "linux", path = "tun_linux.rs")]
+
+#[cfg(target_os = "linux")]
+#[path = "epoll.rs"]
+pub mod poll;
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[path = "tun_darwin.rs"]
 pub mod tun;
-#[cfg_attr(unix, path = "udp_unix.rs")]
+
+#[cfg(target_os = "linux")]
+#[path = "tun_linux.rs"]
+pub mod tun;
+
+#[cfg(unix)]
+#[path = "udp_unix.rs"]
 pub mod udp;
 
 use crypto::x25519::*;
