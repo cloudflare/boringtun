@@ -14,6 +14,13 @@ The project consists of two parts:
 
 By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin boringtun --path .`.
 
+## Testing
+
+Testing this project has a few requirements:
+
+- `sudo`: required to create tunnels. When you run `cargo test` you'll be prompted for your password.
+- Docker: you can install it [here](https://www.docker.com/get-started). If you are on Ubuntu/Debian you can run `apt-get install docker.io`.
+
 ### Running
 
 As per the specification, to start a tunnel use:
