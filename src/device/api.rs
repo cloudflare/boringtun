@@ -13,7 +13,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::Ordering;
 
-const SOCK_DIR: &'static str = "/var/run/wireguard/";
+const SOCK_DIR: &str = "/var/run/wireguard/";
 
 fn create_sock_dir() {
     create_dir(SOCK_DIR).is_ok(); // Create the directory if not existant
