@@ -6,8 +6,8 @@
 #[cfg(test)]
 mod tests {
     use base64::encode as base64encode;
-    use crypto::x25519::*;
-    use device::*;
+    use crate::crypto::x25519::*;
+    use crate::device::*;
     use hex::encode;
     #[cfg(not(target_arch = "arm"))]
     use ring::rand::*;

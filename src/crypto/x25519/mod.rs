@@ -4,8 +4,8 @@
 mod tests;
 
 use base64::decode;
-use noise::errors::WireGuardError;
-use noise::make_array;
+use crate::noise::errors::WireGuardError;
+use crate::noise::make_array;
 #[cfg(not(target_arch = "arm"))]
 use ring::rand::*;
 use std::ops::Add;

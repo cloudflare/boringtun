@@ -1,12 +1,12 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crypto::blake2s::{constant_time_mac_check, Blake2s};
-use crypto::chacha20poly1305::ChaCha20Poly1305;
-use crypto::x25519::*;
-use noise::errors::WireGuardError;
-use noise::make_array;
-use noise::session::Session;
+use crate::crypto::blake2s::{constant_time_mac_check, Blake2s};
+use crate::crypto::chacha20poly1305::ChaCha20Poly1305;
+use crate::crypto::x25519::*;
+use crate::noise::errors::WireGuardError;
+use crate::noise::make_array;
+use crate::noise::session::Session;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 

@@ -5,7 +5,7 @@
 mod tests {
     use super::super::*;
     use base64::encode;
-    use crypto::x25519::*;
+    use crate::crypto::x25519::*;
     use std::fs;
     use std::fs::File;
     use std::io::prelude::Write;

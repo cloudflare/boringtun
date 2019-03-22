@@ -1,10 +1,6 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#![feature(test)]
-extern crate boringtun;
-extern crate test;
-
 #[cfg(test)]
 mod tests {
     use boringtun::crypto::blake2s::*;

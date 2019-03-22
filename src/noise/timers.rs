@@ -3,7 +3,7 @@
 
 use self::TimerName::*;
 use super::errors::WireGuardError;
-use noise::{Tunn, TunnResult, Verbosity};
+use crate::noise::{Tunn, TunnResult, Verbosity};
 use std::ops::Index;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};

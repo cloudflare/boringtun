@@ -1,8 +1,8 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use device::errno_str;
-use device::Error;
+use crate::device::errno_str;
+use crate::device::Error;
 use libc::*;
 
 pub fn get_saved_ids() -> Result<(uid_t, gid_t), Error> {
