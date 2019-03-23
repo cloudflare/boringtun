@@ -426,7 +426,7 @@ impl Device {
         let private_key = Arc::new(private_key);
         if let Some(..) = &self.key_pair {
             for peer in self.peers.values() {
-                if let Err(_) = peer.set_static_private(Arc::clone(&private_key)) {
+                if peer.set_static_private(Arc::clone(&private_key)).is_err() {
                     bad_peers.push(peer);
                     // In case we encounter an error, we will remove that peer
                     // An error will be a result of bad public key/secret key combination

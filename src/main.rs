@@ -28,7 +28,7 @@ use std::os::unix::net::UnixDatagram;
 fn check_tun_name(_v: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(_) = device::tun::parse_utun_name(&_v) {
+        if device::tun::parse_utun_name(&_v).is_ok() {
             Ok(())
         } else {
             Err("Tunnel name must have the format 'utun[0-9]+', use 'utun' for automatic assignment".to_owned())
@@ -109,9 +109,10 @@ fn main() {
         let log = matches.value_of("log").unwrap();
         let err_log = matches.value_of("err").unwrap();
 
-        let stdout = File::create(&log).expect(&format!("Could not create log file {}", log));
-        let stderr =
-            File::create(&err_log).expect(&format!("Could not create error log file {}", err_log));
+        let stdout =
+            File::create(&log).unwrap_or_else(|_| panic!("Could not create log file {}", log));
+        let stderr = File::create(&err_log)
+            .unwrap_or_else(|_| panic!("Could not create error log file {}", err_log));
 
         let daemonize = Daemonize::new()
             .working_directory("/tmp")

@@ -176,7 +176,7 @@ impl<H: Send + Sync> EventPoll<H> {
     /// is triggered, a single caller thread gets the handler for that event.
     /// In case a notifier is triggered, all waiting threads will recieve the same
     /// handler.
-    pub fn wait<'a>(&'a self) -> WaitResult<'a, H> {
+    pub fn wait(&'_ self) -> WaitResult<'_, H> {
         let mut event = kevent {
             ident: 0,
             filter: 0,
