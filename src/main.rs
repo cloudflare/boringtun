@@ -11,11 +11,11 @@ mod device;
 pub mod ffi;
 pub mod noise;
 
-use clap::{App, Arg};
-use daemonize::Daemonize;
 use crate::device::drop_privileges::*;
 use crate::device::*;
 use crate::noise::Verbosity;
+use clap::{App, Arg};
+use daemonize::Daemonize;
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
 

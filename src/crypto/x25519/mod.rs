@@ -3,9 +3,9 @@
 
 mod tests;
 
-use base64::decode;
 use crate::noise::errors::WireGuardError;
 use crate::noise::make_array;
+use base64::decode;
 #[cfg(not(target_arch = "arm"))]
 use ring::rand::*;
 use std::ops::Add;

@@ -4,8 +4,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use base64::encode;
     use crate::crypto::x25519::*;
+    use base64::encode;
     use std::fs;
     use std::fs::File;
     use std::io::prelude::Write;
