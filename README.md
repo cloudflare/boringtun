@@ -1,3 +1,5 @@
+![boringtun logo banner](./banner.png)
+
 # boringtun
 
 **boringtun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
@@ -13,6 +15,13 @@ The project consists of two parts:
 - Executable: `cargo build --bin boringtun --release [--target $(TARGET_TRIPLE)]`
 
 By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin boringtun --path .`.
+
+## Testing
+
+Testing this project has a few requirements:
+
+- `sudo`: required to create tunnels. When you run `cargo test` you'll be prompted for your password.
+- Docker: you can install it [here](https://www.docker.com/get-started). If you are on Ubuntu/Debian you can run `apt-get install docker.io`.
 
 ### Running
 
