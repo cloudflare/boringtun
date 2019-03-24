@@ -1,3 +1,5 @@
+![boringtun logo banner](./banner.png)
+
 # boringtun
 
 **boringtun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
