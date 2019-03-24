@@ -1,10 +1,10 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+#[cfg(target_arch = "arm")]
+use crate::crypto::chacha20poly1305::*;
 use crate::noise::errors::WireGuardError;
 use crate::noise::make_array;
-#[cfg(target_arch = "arm")]
-use crypto::chacha20poly1305::*;
 #[cfg(not(target_arch = "arm"))]
 use ring::aead::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
