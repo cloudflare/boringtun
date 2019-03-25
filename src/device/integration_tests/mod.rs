@@ -274,7 +274,7 @@ mod tests {
             }
         }
 
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "freebsd"))]
         /// Starts the tunnel
         fn start(&mut self) {
             // Assign the ipv4 address to the interface

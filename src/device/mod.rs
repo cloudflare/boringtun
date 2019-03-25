@@ -8,7 +8,7 @@ pub mod drop_privileges;
 mod integration_tests;
 pub mod peer;
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
 #[path = "kqueue.rs"]
 pub mod poll;
 
@@ -16,8 +16,8 @@ pub mod poll;
 #[path = "epoll.rs"]
 pub mod poll;
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-#[path = "tun_darwin.rs"]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
+#[path = "tun_bsd.rs"]
 pub mod tun;
 
 #[cfg(target_os = "linux")]
@@ -186,7 +186,7 @@ impl DeviceHandle {
             } else {
                 // For for the rest create a new iface queue
                 let iface_local = Arc::new(
-                    TunSocket::new(&device.read().iface.name().unwrap())
+                    TunSocket::new(&device.read().iface.name())
                         .unwrap()
                         .set_non_blocking()
                         .unwrap(),
@@ -363,7 +363,7 @@ impl Device {
             // Only for macOS write the actual socket name into WG_TUN_NAME_FILE
             if let Ok(name_file) = std::env::var("WG_TUN_NAME_FILE") {
                 if name == "utun" {
-                    std::fs::write(&name_file, device.iface.name().unwrap().as_bytes()).unwrap();
+                    std::fs::write(&name_file, device.iface.name().as_bytes()).unwrap();
                     device.cleanup_paths.push(name_file);
                 }
             }
