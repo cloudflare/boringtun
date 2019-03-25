@@ -2,6 +2,8 @@
 
 # boringtun
 
+[![crates.io](https://meritbadge.herokuapp.com/boringtun)](https://crates.io/crates/boringtun)
+
 **boringtun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
 
 The project consists of two parts:
