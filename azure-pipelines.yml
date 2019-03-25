@@ -1,3 +1,9 @@
+trigger:
+  branches:
+    include:
+      - refs/heads/master
+      - refs/tags/*
+
 jobs:
 
 - job: Windows
@@ -65,3 +71,82 @@ jobs:
   continueOnError: true
   steps:
   - template: ci/azure-build.yml
+
+- job: dist_darwin
+  displayName: "Dist MacOS binary"
+  pool:
+    vmImage: macOS-10.13
+  steps:
+    - template: ci/azure-install-rust.yml
+    - script: cargo build --release
+      env:
+        MACOSX_DEPLOYMENT_TARGET: 10.7
+    - template: ci/azure-create-release-build.yml
+      parameters:
+        name: dist_darwin
+
+- job: dist_linux
+  displayName: "Dist Linux binary"
+  steps:
+    - template: ci/azure-install-rust.yml
+    - script: rustup target add x86_64-unknown-linux-musl
+    - script: |
+        sudo apt update -y
+        sudo apt install musl-tools -y
+      displayName: "Install musl-tools"
+    - script: |
+        set -ex
+        cargo build --target x86_64-unknown-linux-musl --release
+    - template: ci/azure-create-release-build.yml
+      parameters:
+        artifacts: target/x86_64-unknown-linux-musl/release
+        name: dist_linux
+
+- job: deploy
+  dependsOn:
+    - dist_darwin
+    - dist_linux
+  displayName: "Push to GitHub Releases"
+  steps:
+    - task: DownloadPipelineArtifact@0
+      displayName: "Download dist - linux"
+      inputs:
+        artifactName: dist_linux
+        targetPath: tmp/linux
+    - task: DownloadPipelineArtifact@0
+      displayName: "Download dist - darwin"
+      inputs:
+        artifactName: dist_darwin
+        targetPath: tmp/darwin
+    - script: |
+        set -ex
+        mkdir -p gh-release
+        find .
+        tag=`git describe --tags`
+        mk() {
+          target=$1
+          src=$2
+          name=boringtun-$tag-$target
+          mkdir -p tmp/$name
+          cp README.md \
+            LICENSE.md \
+            tmp/$src/boringtun \
+            tmp/$name/
+          chmod +x tmp/$name/boringtun*
+          tar czvf gh-release/$name.tar.gz -C tmp $name
+        }
+        mk x86_64-unknown-linux-musl linux
+        mk x86_64-apple-darwin darwin
+      displayName: "prepare the github releases tarball artifacts"
+    - task: PublishPipelineArtifact@0
+      displayName: "publish gh_release artifact"
+      inputs:
+        artifactName: gh_release
+        targetPath: gh-release
+    - task: GithubRelease@0
+      condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
+      displayName: 'Create GitHub Release'
+      inputs:
+        gitHubConnection: ag_dubs-token
+        repositoryName: cloudflare/boringtun
+        assets: gh-release/*.tar.gz
