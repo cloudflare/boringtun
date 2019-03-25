@@ -16,7 +16,7 @@ The project consists of two parts:
 
 By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin boringtun --path .`.
 
-## Testing
+### Testing
 
 Testing this project has a few requirements:
 
