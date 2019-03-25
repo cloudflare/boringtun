@@ -1,9 +1,6 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#[cfg(not(target_arch = "arm"))]
-extern crate ring;
-
 pub mod crypto;
 mod device;
 pub mod ffi;
@@ -12,7 +9,7 @@ pub mod noise;
 use crate::device::drop_privileges::*;
 use crate::device::*;
 use crate::noise::Verbosity;
-use clap::{App, Arg, value_t};
+use clap::{value_t, App, Arg};
 use daemonize::Daemonize;
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;

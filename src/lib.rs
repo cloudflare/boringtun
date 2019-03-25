@@ -3,9 +3,7 @@
 
 /// Simple implementation of the client side of the WireGuard protocol
 #[cfg(target_os = "android")]
-extern crate jni;
-#[cfg(not(target_arch = "arm"))]
-extern crate ring;
+use jni;
 
 #[cfg(target_os = "android")]
 pub mod cfjni;
