@@ -20,13 +20,6 @@ The project consists of two parts:
 
 By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin boringtun --path .`.
 
-### Testing
-
-Testing this project has a few requirements:
-
-- `sudo`: required to create tunnels. When you run `cargo test` you'll be prompted for your password.
-- Docker: you can install it [here](https://www.docker.com/get-started). If you are on Ubuntu/Debian you can run `apt-get install docker.io`.
-
 ### Running
 
 As per the specification, to start a tunnel use:
@@ -38,6 +31,27 @@ The tunnel can then be configured using [wg](https://git.zx2c4.com/WireGuard/abo
 It is also possible to use with [wg-quick](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg-quick.8) by setting the enviroment variable `WG_QUICK_USERSPACE_IMPLEMENTATION` to `boringtun`. For example:
 
 `sudo WG_QUICK_USERSPACE_IMPLEMENTATION=boringtun wg-quick up CONFIGURATION`
+
+### Testing
+
+Testing this project has a few requirements:
+
+- `sudo`: required to create tunnels. When you run `cargo test` you'll be prompted for your password.
+- Docker: you can install it [here](https://www.docker.com/get-started). If you are on Ubuntu/Debian you can run `apt-get install docker.io`.
+
+### Benchmarking
+
+To benchmark this project you can run this command:
+
+```
+cargo bench
+```
+
+This command depends on the unstable `test` feature of the Rust compiler.As a result, you'll need to use the `nightly` channel of Rust when you run it. You can tell `rustup` to use the nightly channel when running the bench mark command like this:
+
+```
+rustup run nightly cargo bench
+```
 
 ## Supported platforms
 
