@@ -28,8 +28,8 @@ pub mod tun;
 #[path = "udp_unix.rs"]
 pub mod udp;
 
-use crypto::x25519::*;
-use noise::handshake::parse_handshake_anon;
+use crate::crypto::x25519::*;
+use crate::noise::handshake::parse_handshake_anon;
 use std::collections::HashMap;
 use std::convert::From;
 use std::net::{IpAddr, SocketAddr};
@@ -39,14 +39,14 @@ use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
-use allowed_ips::*;
-use dev_lock::*;
-use noise::errors::*;
-use noise::*;
-use peer::*;
-use poll::*;
-use tun::*;
-use udp::*;
+use crate::allowed_ips::*;
+use crate::dev_lock::*;
+use crate::noise::errors::*;
+use crate::noise::*;
+use crate::peer::*;
+use crate::poll::*;
+use crate::tun::*;
+use crate::udp::*;
 
 const MAX_UDP_SIZE: usize = (1 << 16) - 1;
 const MAX_ITR: usize = 100; // Number of packets to handle per handler call

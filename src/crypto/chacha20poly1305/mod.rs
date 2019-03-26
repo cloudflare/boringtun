@@ -5,8 +5,8 @@ mod poly1305;
 mod tests;
 
 use self::poly1305::*;
-use noise::errors::*;
-use noise::make_array;
+use crate::noise::errors::*;
+use crate::noise::make_array;
 use std::ops::AddAssign;
 use std::ops::BitXorAssign;
 use std::ops::ShlAssign;

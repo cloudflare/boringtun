@@ -1,9 +1,9 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use device::udp::UDPSocket;
-use device::*;
-use noise::errors::WireGuardError;
+use crate::device::udp::UDPSocket;
+use crate::device::*;
+use crate::noise::errors::WireGuardError;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::{make_array, AllowedIP, Device, Error, SocketAddr, X25519PublicKey, X25519SecretKey};
-use dev_lock::LockReadGuard;
-use device::drop_privileges::*;
-use device::Action;
+use crate::dev_lock::LockReadGuard;
+use crate::device::drop_privileges::*;
+use crate::device::Action;
 use hex::encode as encode_hex;
 use libc::*;
 use std::fs::{create_dir, remove_file};

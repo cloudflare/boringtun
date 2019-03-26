@@ -1,27 +1,16 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-extern crate base64;
-extern crate chrono;
-#[macro_use]
-extern crate clap;
-extern crate daemonize;
-extern crate hex;
-extern crate libc;
-#[cfg(not(target_arch = "arm"))]
-extern crate ring;
-extern crate spin;
-
 pub mod crypto;
 mod device;
 pub mod ffi;
 pub mod noise;
 
-use clap::{App, Arg};
+use crate::device::drop_privileges::*;
+use crate::device::*;
+use crate::noise::Verbosity;
+use clap::{value_t, App, Arg};
 use daemonize::Daemonize;
-use device::drop_privileges::*;
-use device::*;
-use noise::Verbosity;
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
 

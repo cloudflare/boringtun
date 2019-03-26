@@ -7,10 +7,10 @@ mod session;
 mod tests;
 mod timers;
 
-use crypto::x25519::*;
-use noise::errors::WireGuardError;
-use noise::handshake::Handshake;
-use noise::timers::{TimerName, Timers};
+use crate::crypto::x25519::*;
+use crate::noise::errors::WireGuardError;
+use crate::noise::handshake::Handshake;
+use crate::noise::timers::{TimerName, Timers};
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;

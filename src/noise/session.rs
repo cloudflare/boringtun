@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #[cfg(target_arch = "arm")]
-use crypto::chacha20poly1305::*;
-use noise::errors::WireGuardError;
-use noise::make_array;
+use crate::crypto::chacha20poly1305::*;
+use crate::noise::errors::WireGuardError;
+use crate::noise::make_array;
 #[cfg(not(target_arch = "arm"))]
 use ring::aead::*;
 use std::sync::atomic::{AtomicUsize, Ordering};

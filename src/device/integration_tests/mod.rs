@@ -5,9 +5,9 @@
 // Those tests require docker and sudo priviliges to run
 #[cfg(test)]
 mod tests {
+    use crate::crypto::x25519::*;
+    use crate::device::*;
     use base64::encode as base64encode;
-    use crypto::x25519::*;
-    use device::*;
     use hex::encode;
     #[cfg(not(target_arch = "arm"))]
     use ring::rand::*;

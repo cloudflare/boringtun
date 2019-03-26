@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 mod tests;
-use noise::errors::*;
-use noise::make_array;
+use crate::noise::errors::*;
+use crate::noise::make_array;
 use std;
 use std::mem;
 use std::ops::AddAssign;

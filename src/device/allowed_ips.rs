@@ -445,7 +445,7 @@ macro_rules! build_iter {
                             ref left,
                             ref right,
                         }) => {
-                            let (mut key, mut bits) = self.key_hlp.pop().unwrap();
+                            let (key, mut bits) = self.key_hlp.pop().unwrap();
                             let cur_key = key ^ (cur_key >> bits);
                             bits += cur_bits;
 
