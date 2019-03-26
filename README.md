@@ -80,5 +80,13 @@ The library exposes a set of Java Native Interface bindings, those are defined i
 
 The project is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause).
 
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the 3-Clause BSD License, shall licensed as above, without any additional terms or conditions.
+
+If you want to contribute to this project, please read our [`CONTRIBUTING.md`].
+
+[`CONTRIBUTING.md`]: https://github.com/cloudflare/.github/blob/master/CONTRIBUTING.md
+
 ---
 <sub><sub><sub><sub>WireGuard is a registered trademark of Jason A. Donenfeld. boringtun is not sponsored or endorsed by Jason A. Donenfeld.</sub></sub></sub></sub>
