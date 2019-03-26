@@ -11,6 +11,8 @@ The project consists of two parts:
 * The executable `boringtun`, a [userspace WireGuard](https://www.wireguard.com/xplatform/) implementation for Linux and macOS.
 * The library `boringtun` that can be used to implement fast and efficient WireGuard client apps on various platforms, including iOS and Android. It implements the underlying WireGuard protocol, without the network or tunnel stacks, those can be implemented in a platform idiomatic way.
 
+⚠️ **NOTE:** This crate is still undergoing review for security concerns. Therefore, we recommend that you take caution before using it in a production application.
+
 ### Building
 
 - Library only: `cargo build --lib --release [--target $(TARGET_TRIPLE)]`
