@@ -70,7 +70,7 @@ The library exposes a set of C ABI bindings, those are defined in the `wireguard
 
 #### JNI bindings
 
-The library exposes a set of Java Native Interface bindings, those are defined in `src/cfjni/mod.rs`.
+The library exposes a set of Java Native Interface bindings, those are defined in `src/jni.rs`.
 
 ## License
 
