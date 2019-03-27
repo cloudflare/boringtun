@@ -144,13 +144,13 @@ impl Tunn {
             }
             self.timer_tick(TimerName::TimeLastDataPacketSent);
             self.tx_bytes.fetch_add(src.len(), Ordering::Relaxed);
-            TunnResult::WriteToNetwork(packet)
-        } else {
-            // If there is no session, queue the packet for future retry
-            self.queue_packet(src);
-            // Initiate a new handshake if none is in progress
-            self.format_handshake_initiation(dst, false)
+            return TunnResult::WriteToNetwork(packet);
         }
+
+        // If there is no session, queue the packet for future retry
+        self.queue_packet(src);
+        // Initiate a new handshake if none is in progress
+        self.format_handshake_initiation(dst, false)
     }
 
     /// Receives a UDP packet from the network and parses it.
