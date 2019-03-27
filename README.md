@@ -1,10 +1,10 @@
 ![boringtun logo banner](./banner.png)
 
-# boringtun
+# BoringTun
 
 [![crates.io](https://meritbadge.herokuapp.com/boringtun)](https://crates.io/crates/boringtun)
 
-**boringtun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
+**BoringTun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
 
 The project consists of two parts:
 
@@ -99,4 +99,4 @@ If you want to contribute to this project, please read our [`CONTRIBUTING.md`].
 [`CONTRIBUTING.md`]: https://github.com/cloudflare/.github/blob/master/CONTRIBUTING.md
 
 ---
-<sub><sub><sub><sub>WireGuard is a registered trademark of Jason A. Donenfeld. boringtun is not sponsored or endorsed by Jason A. Donenfeld.</sub></sub></sub></sub>
+<sub><sub><sub><sub>WireGuard is a registered trademark of Jason A. Donenfeld. BoringTun is not sponsored or endorsed by Jason A. Donenfeld.</sub></sub></sub></sub>
