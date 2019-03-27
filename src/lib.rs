@@ -5,8 +5,8 @@
 #[cfg(target_os = "android")]
 use jni;
 
-#[cfg(target_os = "android")]
-pub mod cfjni;
 pub mod crypto;
 pub mod ffi;
+#[cfg(target_os = "android")]
+pub mod jni;
 pub mod noise;
