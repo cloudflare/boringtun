@@ -28,7 +28,7 @@ As per the specification, to start a tunnel use:
 
 The tunnel can then be configured using [wg](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg.8), as a regular WireGuard tunnel, or any other tool.
 
-It is also possible to use with [wg-quick](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg-quick.8) by setting the enviroment variable `WG_QUICK_USERSPACE_IMPLEMENTATION` to `boringtun`. For example:
+It is also possible to use with [wg-quick](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg-quick.8) by setting the environment variable `WG_QUICK_USERSPACE_IMPLEMENTATION` to `boringtun`. For example:
 
 `sudo WG_QUICK_USERSPACE_IMPLEMENTATION=boringtun wg-quick up CONFIGURATION`
 
@@ -44,14 +44,10 @@ Testing this project has a few requirements:
 To benchmark this project you can run this command:
 
 ```
-cargo bench
+cargo +nightly bench
 ```
 
-This command depends on the unstable `test` feature of the Rust compiler.As a result, you'll need to use the `nightly` channel of Rust when you run it. You can tell `rustup` to use the nightly channel when running the bench mark command like this:
-
-```
-rustup run nightly cargo bench
-```
+This command depends on the unstable `test` feature of the Rust compiler. As a result, you'll need to use the `nightly` channel of Rust when you run it. You can tell `rustup` to use the nightly channel when running the bench mark command like this:
 
 ## Supported platforms
 
