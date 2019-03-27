@@ -3,7 +3,7 @@
 
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicUsize, Ordering, ATOMIC_USIZE_INIT};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A special type of read/write lock, that makes the following assumptions:
 /// a) Read access is frequent, and has to be very fast
@@ -42,7 +42,7 @@ impl<T> Lock<T> {
     /// New lock
     pub const fn new(user_data: T) -> Lock<T> {
         Lock {
-            lock: ATOMIC_USIZE_INIT,
+            lock: AtomicUsize::new(0),
             data: UnsafeCell::new(user_data),
         }
     }
