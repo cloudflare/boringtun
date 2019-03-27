@@ -1,13 +1,17 @@
 ![boringtun logo banner](./banner.png)
 
-# boringtun
+# BoringTun
 
-**boringtun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
+[![crates.io](https://meritbadge.herokuapp.com/boringtun)](https://crates.io/crates/boringtun)
+
+**BoringTun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
 
 The project consists of two parts:
 
 * The executable `boringtun`, a [userspace WireGuard](https://www.wireguard.com/xplatform/) implementation for Linux and macOS.
 * The library `boringtun` that can be used to implement fast and efficient WireGuard client apps on various platforms, including iOS and Android. It implements the underlying WireGuard protocol, without the network or tunnel stacks, those can be implemented in a platform idiomatic way.
+
+⚠️ **NOTE:** This crate is still undergoing review for security concerns. Therefore, we recommend that you take caution before using it in a production application.
 
 ### Building
 
@@ -15,13 +19,6 @@ The project consists of two parts:
 - Executable: `cargo build --bin boringtun --release [--target $(TARGET_TRIPLE)]`
 
 By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin boringtun --path .`.
-
-## Testing
-
-Testing this project has a few requirements:
-
-- `sudo`: required to create tunnels. When you run `cargo test` you'll be prompted for your password.
-- Docker: you can install it [here](https://www.docker.com/get-started). If you are on Ubuntu/Debian you can run `apt-get install docker.io`.
 
 ### Running
 
@@ -31,9 +28,26 @@ As per the specification, to start a tunnel use:
 
 The tunnel can then be configured using [wg](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg.8), as a regular WireGuard tunnel, or any other tool.
 
-It is also possible to use with [wg-quick](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg-quick.8) by setting the enviroment variable `WG_QUICK_USERSPACE_IMPLEMENTATION` to `boringtun`. For example:
+It is also possible to use with [wg-quick](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg-quick.8) by setting the environment variable `WG_QUICK_USERSPACE_IMPLEMENTATION` to `boringtun`. For example:
 
 `sudo WG_QUICK_USERSPACE_IMPLEMENTATION=boringtun wg-quick up CONFIGURATION`
+
+### Testing
+
+Testing this project has a few requirements:
+
+- `sudo`: required to create tunnels. When you run `cargo test` you'll be prompted for your password.
+- Docker: you can install it [here](https://www.docker.com/get-started). If you are on Ubuntu/Debian you can run `apt-get install docker.io`.
+
+### Benchmarking
+
+To benchmark this project you can run this command:
+
+```
+cargo +nightly bench
+```
+
+This command depends on the unstable `test` feature of the Rust compiler. As a result, you'll need to use the `nightly` channel of Rust when you run it. You can tell `rustup` to use the nightly channel when running the bench mark command like this:
 
 ## Supported platforms
 
@@ -76,5 +90,13 @@ The library exposes a set of Java Native Interface bindings, those are defined i
 
 The project is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause).
 
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the 3-Clause BSD License, shall licensed as above, without any additional terms or conditions.
+
+If you want to contribute to this project, please read our [`CONTRIBUTING.md`].
+
+[`CONTRIBUTING.md`]: https://github.com/cloudflare/.github/blob/master/CONTRIBUTING.md
+
 ---
-<sub><sub><sub><sub>WireGuard is a registered trademark of Jason A. Donenfeld. boringtun is not sponsored or endorsed by Jason A. Donenfeld.</sub></sub></sub></sub>
+<sub><sub><sub><sub>WireGuard is a registered trademark of Jason A. Donenfeld. BoringTun is not sponsored or endorsed by Jason A. Donenfeld.</sub></sub></sub></sub>
