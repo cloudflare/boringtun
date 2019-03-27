@@ -13,6 +13,14 @@ The project consists of two parts:
 
 ⚠️ **NOTE:** This crate is still undergoing review for security concerns. Therefore, we recommend that you take caution before using it in a production application.
 
+### Installation
+
+You can install this project using `cargo`:
+
+```
+cargo install boringtun
+```
+
 ### Building
 
 - Library only: `cargo build --lib --release [--target $(TARGET_TRIPLE)]`
@@ -47,7 +55,7 @@ To benchmark this project you can run this command:
 cargo +nightly bench
 ```
 
-This command depends on the unstable `test` feature of the Rust compiler. As a result, you'll need to use the `nightly` channel of Rust when you run it. You can tell `rustup` to use the nightly channel when running the bench mark command like this:
+This command depends on the unstable `test` feature of the Rust compiler. As a result, you'll need to use the `nightly` channel of Rust when you run it.
 
 ## Supported platforms
 
