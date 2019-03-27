@@ -20,7 +20,7 @@ ring = "0.14"
 
 [target.'cfg(not(any(target_os="windows", target_os="ios", target_os="android")))'.dependencies]
 chrono = "0.4"
-daemonize = {git = "https://github.com/vkrasnov/daemonize", rev = "fedb687a8d99b300b8461e650a598ded54a334a0"}
+daemonize = "0.4.1"
 clap = { version = "2.32.0", default-features=false, features = ["suggestions"] }
 
 [target.'cfg(target_os="android")'.dependencies]
