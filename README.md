@@ -76,9 +76,9 @@ arm-linux-androideabi         |      |   ✓   |JNI bindings
 
 #### Linux
 
-`x86-64`, `aarch64` and `armv7` architecures are supported. The behaviour should be identical to that of [wireguard-go](https://git.zx2c4.com/wireguard-go/about/), with the following difference:
+`x86-64`, `aarch64` and `armv7` architectures are supported. The behaviour should be identical to that of [wireguard-go](https://git.zx2c4.com/wireguard-go/about/), with the following difference:
 
-`boringtun` will drop priviliges when started. When priviliges are dropped it is not possible to set `fwmark`. If `fwmark` is required, instead running with `sudo`, give the executable the `CAP_NET_ADMIN` capability using: `sudo setcap cap_net_admin+epi boringtun`. Alternatively run with `--disable-drop-priviliges`.
+`boringtun` will drop privileges when started. When privileges are dropped it is not possible to set `fwmark`. If `fwmark` is required, instead running with `sudo`, give the executable the `CAP_NET_ADMIN` capability using: `sudo setcap cap_net_admin+epi boringtun`. Alternatively run with `--disable-drop-privileges`.
 
 #### macOS
 
