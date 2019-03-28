@@ -72,9 +72,9 @@ fn main() {
                 .env("WG_ERR_LOG_FILE")
                 .help("Critical errors log file")
                 .default_value("/tmp/boringtun.err"),
-            Arg::with_name("disable-drop-priviliges")
-                .long("disable-drop-priviliges")
-                .help("Do not drop sudo priviliges"),
+            Arg::with_name("disable-drop-privileges")
+                .long("disable-drop-privileges")
+                .help("Do not drop sudo privileges"),
             Arg::with_name("disable-connected-udp")
                 .long("disable-connected-udp")
                 .help("Disable connected UDP sockets to each peer"),
