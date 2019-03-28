@@ -45,6 +45,9 @@ pub struct ifreq {
     ifr_ifru: IfrIfru,
 }
 
+#[cfg(target_env = "musl")]
+const SIOCGIFMTU: int32_t = 0x8921;
+
 #[derive(Default, Debug)]
 pub struct TunSocket {
     fd: RawFd,
