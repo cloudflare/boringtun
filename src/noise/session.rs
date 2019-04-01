@@ -81,6 +81,14 @@ impl ReceivingKeyCounterValidator {
         self.bitmap[word] &= !(1u64 << bit);
     }
 
+    // Clear the word that contains idx
+    #[inline(always)]
+    fn clear_word(&mut self, idx: u64) {
+        let bit_idx = idx % N_BITS;
+        let word = (bit_idx / WORD_SIZE) as usize;
+        self.bitmap[word] = 0;
+    }
+
     // Returns true if bit is set, false otherwise
     #[inline(always)]
     fn check_bit(&self, idx: u64) -> bool {
@@ -128,10 +136,28 @@ impl ReceivingKeyCounterValidator {
             return Ok(());
         }
         // Packets where dropped, or maybe reordered, skip them and mark unused
-        let mut i = self.next;
-        while i < counter {
-            self.clear_bit(i);
-            i += 1;
+        if counter - self.next >= N_BITS {
+            // Too far ahead, clear all the bits
+            for c in self.bitmap.iter_mut() {
+                *c = 0;
+            }
+        } else {
+            let mut i = self.next;
+            while i % WORD_SIZE != 0 && i < counter {
+                // Clear until i aligned to word size
+                self.clear_bit(i);
+                i += 1;
+            }
+            while i + WORD_SIZE < counter {
+                // Clear whole word at a time
+                self.clear_word(i);
+                i = (i + WORD_SIZE) & 0u64.wrapping_sub(WORD_SIZE);
+            }
+            while i < counter {
+                // Clear any remaining bits
+                self.clear_bit(i);
+                i += 1;
+            }
         }
         self.set_bit(counter);
         self.next = counter + 1;
@@ -283,5 +309,52 @@ impl Session {
             self.receiving_counter_mark(receiving_key_counter)?;
             Ok(packet)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_replay_counter() {
+        let mut c: ReceivingKeyCounterValidator = Default::default();
+
+        assert!(c.mark_did_receive(0).is_ok());
+        assert!(c.mark_did_receive(0).is_err());
+        assert!(c.mark_did_receive(1).is_ok());
+        assert!(c.mark_did_receive(1).is_err());
+        assert!(c.mark_did_receive(63).is_ok());
+        assert!(c.mark_did_receive(63).is_err());
+        assert!(c.mark_did_receive(15).is_ok());
+        assert!(c.mark_did_receive(15).is_err());
+
+        for i in 64..N_BITS + 128 {
+            assert!(c.mark_did_receive(i).is_ok());
+            assert!(c.mark_did_receive(i).is_err());
+        }
+
+        assert!(c.mark_did_receive(N_BITS * 3).is_ok());
+        for i in 0..=N_BITS * 2 {
+            assert!(!c.will_accept(i));
+            assert!(c.mark_did_receive(i).is_err());
+        }
+        for i in N_BITS * 2 + 1..N_BITS * 3 {
+            assert!(c.will_accept(i));
+        }
+
+        for i in (N_BITS * 2 + 1..N_BITS * 3).rev() {
+            assert!(c.mark_did_receive(i).is_ok());
+            assert!(c.mark_did_receive(i).is_err());
+        }
+
+        assert!(c.mark_did_receive(N_BITS * 3 + 70).is_ok());
+        assert!(c.mark_did_receive(N_BITS * 3 + 71).is_ok());
+        assert!(c.mark_did_receive(N_BITS * 3 + 72).is_ok());
+        assert!(c.mark_did_receive(N_BITS * 3 + 72 + 125).is_ok());
+        assert!(c.mark_did_receive(N_BITS * 3 + 63).is_ok());
+
+        assert!(c.mark_did_receive(N_BITS * 3 + 70).is_err());
+        assert!(c.mark_did_receive(N_BITS * 3 + 71).is_err());
+        assert!(c.mark_did_receive(N_BITS * 3 + 72).is_err());
     }
 }
