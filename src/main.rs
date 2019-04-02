@@ -144,7 +144,7 @@ fn main() {
         }
     };
 
-    if !matches.is_present("disable-drop-priviliges") {
+    if !matches.is_present("disable-drop-privileges") {
         drop_privileges().ok();
     }
 
