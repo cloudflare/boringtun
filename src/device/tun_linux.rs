@@ -122,7 +122,7 @@ impl TunSocket {
 
         ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
 
-        if unsafe { ioctl(fd, SIOCGIFMTU, &ifr) } < 0 {
+        if unsafe { ioctl(fd, SIOCGIFMTU as _, &ifr) } < 0 {
             return Err(Error::IOCtl(errno_str()));
         }
 
