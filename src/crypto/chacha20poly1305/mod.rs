@@ -585,22 +585,22 @@ fn chacha20_block(state: [u32; 16], hchacha: bool) -> [u32; 16] {
 #[inline(always)]
 fn transmute_u8_u32(blk_in: [u8; 64]) -> [u32; 16] {
     [
-        u32::from_le_bytes([blk_in[0], blk_in[1], blk_in[2], blk_in[3]]),
-        u32::from_le_bytes([blk_in[4], blk_in[5], blk_in[6], blk_in[7]]),
-        u32::from_le_bytes([blk_in[8], blk_in[9], blk_in[10], blk_in[11]]),
-        u32::from_le_bytes([blk_in[12], blk_in[13], blk_in[14], blk_in[15]]),
-        u32::from_le_bytes([blk_in[16], blk_in[17], blk_in[18], blk_in[19]]),
-        u32::from_le_bytes([blk_in[20], blk_in[21], blk_in[22], blk_in[23]]),
-        u32::from_le_bytes([blk_in[24], blk_in[25], blk_in[26], blk_in[27]]),
-        u32::from_le_bytes([blk_in[28], blk_in[29], blk_in[30], blk_in[31]]),
-        u32::from_le_bytes([blk_in[32], blk_in[33], blk_in[34], blk_in[35]]),
-        u32::from_le_bytes([blk_in[36], blk_in[37], blk_in[38], blk_in[39]]),
-        u32::from_le_bytes([blk_in[40], blk_in[41], blk_in[42], blk_in[43]]),
-        u32::from_le_bytes([blk_in[44], blk_in[45], blk_in[46], blk_in[47]]),
-        u32::from_le_bytes([blk_in[48], blk_in[49], blk_in[50], blk_in[51]]),
-        u32::from_le_bytes([blk_in[52], blk_in[53], blk_in[54], blk_in[55]]),
-        u32::from_le_bytes([blk_in[56], blk_in[57], blk_in[58], blk_in[59]]),
-        u32::from_le_bytes([blk_in[60], blk_in[61], blk_in[62], blk_in[63]]),
+        u32::from_le_bytes(make_array(&blk_in[0..])),
+        u32::from_le_bytes(make_array(&blk_in[4..])),
+        u32::from_le_bytes(make_array(&blk_in[8..])),
+        u32::from_le_bytes(make_array(&blk_in[12..])),
+        u32::from_le_bytes(make_array(&blk_in[16..])),
+        u32::from_le_bytes(make_array(&blk_in[20..])),
+        u32::from_le_bytes(make_array(&blk_in[24..])),
+        u32::from_le_bytes(make_array(&blk_in[28..])),
+        u32::from_le_bytes(make_array(&blk_in[32..])),
+        u32::from_le_bytes(make_array(&blk_in[36..])),
+        u32::from_le_bytes(make_array(&blk_in[40..])),
+        u32::from_le_bytes(make_array(&blk_in[44..])),
+        u32::from_le_bytes(make_array(&blk_in[48..])),
+        u32::from_le_bytes(make_array(&blk_in[52..])),
+        u32::from_le_bytes(make_array(&blk_in[56..])),
+        u32::from_le_bytes(make_array(&blk_in[60..])),
     ]
 }
 
