@@ -20,12 +20,16 @@ use std::sync::Arc;
 const IPV4_MIN_HEADER_SIZE: usize = 20;
 const IPV4_LEN_OFF: usize = 2;
 const IPV4_SRC_IP_OFF: usize = 12;
-pub const IPV4_DST_IP_OFF: usize = 16;
+const IPV4_DST_IP_OFF: usize = 16;
+const IPV4_IP_SZ: usize = 4;
 
 const IPV6_MIN_HEADER_SIZE: usize = 40;
 const IPV6_LEN_OFF: usize = 4;
 const IPV6_SRC_IP_OFF: usize = 8;
-pub const IPV6_DST_IP_OFF: usize = 24;
+const IPV6_DST_IP_OFF: usize = 24;
+const IPV6_IP_SZ: usize = 16;
+
+const IP_LEN_SZ: usize = 2;
 
 const MAX_QUEUE_DEPTH: usize = 256;
 const N_SESSIONS: usize = 4; // number of sessions in the ring, better keep a PoT
@@ -268,12 +272,7 @@ impl Tunn {
             return TunnResult::Err(WireGuardError::InvalidPacket);
         }
         // Extract the reciever index
-        let idx = u32::from_le_bytes([
-            src[session::IDX_OFF],
-            src[session::IDX_OFF + 1],
-            src[session::IDX_OFF + 2],
-            src[session::IDX_OFF + 3],
-        ]) as usize;
+        let idx = u32::from_le_bytes(make_array(&src[session::IDX_OFF..])) as usize;
 
         // Get the (possibly) right session
         if let Some(ref session) = *self.sessions[idx % N_SESSIONS].read() {
@@ -294,74 +293,46 @@ impl Tunn {
         }
     }
 
+    /// Extract the destination address of a valid IP packet
     pub fn dst_address(packet: &[u8]) -> Option<IpAddr> {
         if packet.is_empty() {
             return None;
         }
 
         match packet[0] >> 4 {
-            4 if packet.len() >= IPV4_MIN_HEADER_SIZE => Some(IpAddr::from([
-                packet[IPV4_DST_IP_OFF],
-                packet[IPV4_DST_IP_OFF + 1],
-                packet[IPV4_DST_IP_OFF + 2],
-                packet[IPV4_DST_IP_OFF + 3],
-            ])),
-            6 if packet.len() >= IPV6_MIN_HEADER_SIZE => Some(IpAddr::from([
-                packet[IPV6_DST_IP_OFF],
-                packet[IPV6_DST_IP_OFF + 1],
-                packet[IPV6_DST_IP_OFF + 2],
-                packet[IPV6_DST_IP_OFF + 3],
-                packet[IPV6_DST_IP_OFF + 4],
-                packet[IPV6_DST_IP_OFF + 5],
-                packet[IPV6_DST_IP_OFF + 6],
-                packet[IPV6_DST_IP_OFF + 7],
-                packet[IPV6_DST_IP_OFF + 8],
-                packet[IPV6_DST_IP_OFF + 9],
-                packet[IPV6_DST_IP_OFF + 10],
-                packet[IPV6_DST_IP_OFF + 11],
-                packet[IPV6_DST_IP_OFF + 12],
-                packet[IPV6_DST_IP_OFF + 13],
-                packet[IPV6_DST_IP_OFF + 14],
-                packet[IPV6_DST_IP_OFF + 15],
-            ])),
+            4 if packet.len() >= IPV4_MIN_HEADER_SIZE => {
+                let addr_bytes: [u8; IPV4_IP_SZ] = make_array(&packet[IPV4_DST_IP_OFF..]);
+                Some(IpAddr::from(addr_bytes))
+            }
+            6 if packet.len() >= IPV6_MIN_HEADER_SIZE => {
+                let addr_bytes: [u8; IPV6_IP_SZ] = make_array(&packet[IPV6_DST_IP_OFF..]);
+                Some(IpAddr::from(addr_bytes))
+            }
             _ => None,
         }
     }
 
+    /// Check IP packet is v4 or v6, truncate to length indicated by the length field
+    /// Returns the truncated packet and the source IP as TunnResult
     fn check_decapsulated_packet<'a>(&self, packet: &'a mut [u8]) -> TunnResult<'a> {
         let (packet_len, src_ip_address) = match packet.len() {
             0 => return TunnResult::Done, // This is keepalive, and not an error
-            _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => (
-                u16::from_be_bytes([packet[IPV4_LEN_OFF], packet[IPV4_LEN_OFF + 1]]) as usize,
-                IpAddr::from([
-                    packet[IPV4_SRC_IP_OFF],
-                    packet[IPV4_SRC_IP_OFF + 1],
-                    packet[IPV4_SRC_IP_OFF + 2],
-                    packet[IPV4_SRC_IP_OFF + 3],
-                ]),
-            ),
-            _ if packet[0] >> 4 == 6 && packet.len() >= IPV6_MIN_HEADER_SIZE => (
-                u16::from_be_bytes([packet[IPV6_LEN_OFF], packet[IPV6_LEN_OFF + 1]]) as usize
-                    + IPV6_MIN_HEADER_SIZE,
-                IpAddr::from([
-                    packet[IPV6_SRC_IP_OFF],
-                    packet[IPV6_SRC_IP_OFF + 1],
-                    packet[IPV6_SRC_IP_OFF + 2],
-                    packet[IPV6_SRC_IP_OFF + 3],
-                    packet[IPV6_SRC_IP_OFF + 4],
-                    packet[IPV6_SRC_IP_OFF + 5],
-                    packet[IPV6_SRC_IP_OFF + 6],
-                    packet[IPV6_SRC_IP_OFF + 7],
-                    packet[IPV6_SRC_IP_OFF + 8],
-                    packet[IPV6_SRC_IP_OFF + 9],
-                    packet[IPV6_SRC_IP_OFF + 10],
-                    packet[IPV6_SRC_IP_OFF + 11],
-                    packet[IPV6_SRC_IP_OFF + 12],
-                    packet[IPV6_SRC_IP_OFF + 13],
-                    packet[IPV6_SRC_IP_OFF + 14],
-                    packet[IPV6_SRC_IP_OFF + 15],
-                ]),
-            ),
+            _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => {
+                let len_bytes: [u8; IP_LEN_SZ] = make_array(&packet[IPV4_LEN_OFF..]);
+                let addr_bytes: [u8; IPV4_IP_SZ] = make_array(&packet[IPV4_SRC_IP_OFF..]);
+                (
+                    u16::from_be_bytes(len_bytes) as usize,
+                    IpAddr::from(addr_bytes),
+                )
+            }
+            _ if packet[0] >> 4 == 6 && packet.len() >= IPV6_MIN_HEADER_SIZE => {
+                let len_bytes: [u8; IP_LEN_SZ] = make_array(&packet[IPV6_LEN_OFF..]);
+                let addr_bytes: [u8; IPV6_IP_SZ] = make_array(&packet[IPV6_SRC_IP_OFF..]);
+                (
+                    u16::from_be_bytes(len_bytes) as usize + IPV6_MIN_HEADER_SIZE,
+                    IpAddr::from(addr_bytes),
+                )
+            }
             _ => return TunnResult::Err(WireGuardError::InvalidPacket),
         };
 
