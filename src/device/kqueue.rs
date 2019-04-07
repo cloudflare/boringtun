@@ -91,7 +91,7 @@ impl<H: Send + Sync> EventPoll<H> {
     /// each event will be triggered independently.
     /// The event will keep triggering until a Read operation is no longer possible on the trigger.
     /// When triggered, one of the threads waiting on the poll will recieve the handler via an
-    /// appropriate EventGuard. It is guranteed that only a single thread can have a reference to
+    /// appropriate EventGuard. It is guaranteed that only a single thread can have a reference to
     /// the handler at any given time.
     pub fn new_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
         // Create an event descriptor
