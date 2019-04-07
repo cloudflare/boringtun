@@ -134,7 +134,7 @@ mod tests {
         packet.extend_from_slice(&ipv4_header);
         packet.extend_from_slice(&icmp_header);
         packet.extend_from_slice(&data);
-        // Compute the checkusm of the icmp header + payload
+        // Compute the checksum of the icmp header + payload
         let icmp_checksum = ipv4_checksum(&packet[20..]);
         write_u16_be(icmp_checksum, &mut packet[20 + 2..]);
         socket.send(&packet).unwrap();
