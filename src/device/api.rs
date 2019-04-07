@@ -85,7 +85,7 @@ impl Device {
                 // file was deleted by stating it.
                 // The problem is that on linux inotify can be used quite beautifully to detect
                 // deletion, and kqueue EVFILT_VNODE can be used for the same purpose, but that
-                // will require introducing new events, for no measureable benefit.
+                // will require introducing new events, for no measurable benefit.
                 // TODO: Could this be an issue if we restart the service too quickly?
                 let path = std::path::Path::new(&path);
                 if !path.exists() {
