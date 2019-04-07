@@ -253,7 +253,7 @@ pub unsafe extern "C" fn wireguard_read(
     wireguard_result::from(tunnel.network_to_tunnel(src, dst))
 }
 
-/// This is a state keeping function, that need to be called preriodically.
+/// This is a state keeping function, that need to be called periodically.
 /// Recommended interval: 100ms.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_tick(

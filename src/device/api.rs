@@ -93,7 +93,7 @@ impl Device {
                     return Action::Exit;
                 }
 
-                // Preriodically read the mtu of the interface in case it changes
+                // Periodically read the mtu of the interface in case it changes
                 if let Ok(mtu) = d.iface.mtu() {
                     d.mtu.store(mtu, Ordering::Relaxed);
                 }
