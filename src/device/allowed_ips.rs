@@ -356,7 +356,7 @@ macro_rules! build_node {
                             let dir = if next_bit { &mut right } else { &mut left };
                             $insert(dir, key << (shared_bits + 1), bits - shared_bits - 1, data);
                         }
-                        // The node is unchaged
+                        // The node is unchanged
                         *node = Some($name::Node {
                             cur_key,
                             cur_bits,
