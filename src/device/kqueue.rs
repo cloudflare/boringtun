@@ -51,7 +51,7 @@ enum EventKind {
 
 // A single event
 struct Event<H> {
-    event: kevent, // The kqueue event desctiption
+    event: kevent, // The kqueue event description
     handler: H,    // The associated data
     kind: EventKind,
 }
