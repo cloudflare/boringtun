@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 // This module contains some integration tests for boringtun
-// Those tests require docker and sudo priviliges to run
+// Those tests require docker and sudo privileges to run
 #[cfg(test)]
 mod tests {
     use crate::crypto::x25519::*;
