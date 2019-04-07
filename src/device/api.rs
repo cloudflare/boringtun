@@ -33,7 +33,7 @@ fn create_sock_dir() {
 }
 
 impl Device {
-    /// Register the api handler for this Device. The api handler recieves stream connections on a Unix socket
+    /// Register the api handler for this Device. The api handler receives stream connections on a Unix socket
     /// with a known path: /var/run/wireguard/{tun_name}.sock.
     pub fn register_api_handler(&mut self) -> Result<(), Error> {
         let path = format!("{}/{}.sock", SOCK_DIR, self.iface.name()?);

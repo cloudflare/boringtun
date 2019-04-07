@@ -163,7 +163,7 @@ pub struct Handshake {
     next_index: u32,                  // Index of the next session
     state: HandshakeState,            // Current handshake state
     cookie: Option<[u8; 16]>,         // An optional expirable cookie
-    last_handshake_timestamp: Tai64N, // The timestamp of the last handshake we recieved
+    last_handshake_timestamp: Tai64N, // The timestamp of the last handshake we received
     stamper: TimeStamper,             // TODO: make TimeStamper a singleton
 }
 

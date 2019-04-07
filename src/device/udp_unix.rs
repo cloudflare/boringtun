@@ -6,7 +6,7 @@ use libc::*;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::{AsRawFd, RawFd};
 
-/// Recieves and sends UDP packets over the network
+/// Receives and sends UDP packets over the network
 #[derive(Debug)]
 pub struct UDPSocket {
     fd: RawFd,
