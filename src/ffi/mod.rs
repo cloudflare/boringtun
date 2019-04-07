@@ -27,7 +27,7 @@ pub enum result_type {
     WIREGUARD_DONE = 0,
     /// Write dst buffer to network. Size indicates the number of bytes to write.
     WRITE_TO_NETWORK = 1,
-    /// Some error occured, no operation is required. Size indicates error code.
+    /// Some error occurred, no operation is required. Size indicates error code.
     WIREGUARD_ERROR = 2,
     /// Write dst buffer to the interface as an ipv4 packet. Size indicates the number of bytes to write.
     WRITE_TO_TUNNEL_IPV4 = 4,
@@ -281,7 +281,7 @@ pub unsafe extern "C" fn wireguard_force_handshake(
 }
 
 /// Returns stats from the tunnel:
-/// Time of last handshake in seconds (or -1 if no handshake occured)
+/// Time of last handshake in seconds (or -1 if no handshake occurred)
 /// Number of data bytes encapsulated
 /// Number of data bytes decapsulated
 #[no_mangle]
