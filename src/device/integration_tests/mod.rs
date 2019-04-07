@@ -163,7 +163,7 @@ mod tests {
                     "net.ipv6.conf.default.disable_ipv6=0",
                     "-p", // Open port for the endpoint
                     &format!("{0}:{0}/udp", self.endpoint.port()),
-                    "-v", // Map the generated wiregurad config file
+                    "-v", // Map the generated wireguard config file
                     &format!("{}:/wireguard/wg.conf", peer_config_file),
                     "-v", // Map the nginx config file
                     &format!("{}:/etc/nginx/conf.d/default.conf", nginx_config_file),
