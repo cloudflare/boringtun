@@ -244,7 +244,7 @@ impl<H: Send + Sync> EventPoll<H> {
         }
 
         if ev.kind == EventKind::Signal {
-            // Mask the signal if succesfully added to kqueue
+            // Mask the signal if successfully added to kqueue
             unsafe { signal(trigger, SIG_IGN) };
         }
 

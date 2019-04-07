@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn wireguard_handshake() {
-        // Test the connection is succesfully established and some packets are passed around
+        // Test the connection is successfully established and some packets are passed around
         {
             let (peer_iface_socket_sender, client_iface_socket_sender, close) =
                 wireguard_test_pair();
@@ -437,7 +437,7 @@ mod tests {
     #[test]
     #[ignore]
     fn wireguard_interop() {
-        // Test the connection with wireguard-go is succesfully established
+        // Test the connection with wireguard-go is successfully established
         // and we are getting ping from server
         let c_key_pair = key_pair();
         let itr = 1000;
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     #[ignore]
     fn wireguard_receiver() {
-        // Test the connection with wireguard-go is succesfully established
+        // Test the connection with wireguard-go is successfully established
         // when go is the initiator
         let c_key_pair = key_pair();
         let itr = 1000;

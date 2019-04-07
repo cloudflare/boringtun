@@ -354,7 +354,7 @@ impl UDPSocket {
         }
     }
 
-    /// Sends a message on a connected UDP socket. Returns number of bytes succesfully sent.
+    /// Sends a message on a connected UDP socket. Returns number of bytes successfully sent.
     pub fn write(&self, src: &[u8]) -> usize {
         UDPSocket::write_fd(self.fd, src)
     }
