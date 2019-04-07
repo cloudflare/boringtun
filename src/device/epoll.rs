@@ -302,7 +302,7 @@ impl<H: Sync + Send> EventPoll<H> {
 }
 
 impl<H> EventPoll<H> {
-    /// Disable and remove the event and assosiated handler, using the fd that was used
+    /// Disable and remove the event and associated handler, using the fd that was used
     /// to register it.
     /// This function is only safe to call when the event loop is not running, otherwise the
     /// memory of the handler may get freed while in use.
