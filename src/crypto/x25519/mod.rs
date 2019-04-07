@@ -50,7 +50,7 @@ pub struct X25519SecretKey {
 
 #[repr(C)]
 #[derive(Debug)]
-/// An ephemeral X25519 key. Ideally should only be used once, but because WG uses the same ephemral
+/// An ephemeral X25519 key. Ideally should only be used once, but because WG uses the same ephemeral
 /// key twice, it is essentialy identical to a secret key
 pub struct X25519EphemeralKey {
     internal: X25519SecretKey,
