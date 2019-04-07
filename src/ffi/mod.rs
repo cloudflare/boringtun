@@ -296,7 +296,7 @@ pub unsafe extern "C" fn wireguard_stats(tunnel: *mut Tunn) -> stats {
     }
 }
 
-/// Performs an iternal benchmark, and returns its result as a C-string.
+/// Performs an internal benchmark, and returns its result as a C-string.
 #[no_mangle]
 pub extern "C" fn benchmark(name: i32, idx: u32) -> *const c_char {
     if let Some(s) = do_benchmark(name != 0, idx as usize) {
