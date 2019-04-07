@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 /*
 static MAX_TIMER_HANDSHAKES: u32 = 90 / 5;
 static COOKIE_REFRESH_TIME: Duration = Duration::from_secs(120);
-static HANDSHAKE_INITATION_RATE: Duration = Duration::from_millis(50);
+static HANDSHAKE_INITIATION_RATE: Duration = Duration::from_millis(50);
 */
 
 // Some constants, represent time in seconds
