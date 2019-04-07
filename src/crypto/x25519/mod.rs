@@ -82,7 +82,7 @@ impl X25519SecretKey {
         }
     }
 
-    /// Derive a shared key from a secret key of one peer and a pulic key of another
+    /// Derive a shared key from a secret key of one peer and a public key of another
     pub fn shared_key(&self, peer_public: &X25519PublicKey) -> Result<[u8; 32], WireGuardError> {
         let shared_key = x25519_shared_key(&peer_public.internal[..], &self.internal[..]);
 
