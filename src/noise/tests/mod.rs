@@ -134,7 +134,7 @@ mod tests {
         packet.extend_from_slice(&ipv4_header);
         packet.extend_from_slice(&icmp_header);
         packet.extend_from_slice(&data);
-        // Compute the checkusm of the icmp header + payload
+        // Compute the checksum of the icmp header + payload
         let icmp_checksum = ipv4_checksum(&packet[20..]);
         write_u16_be(icmp_checksum, &mut packet[20 + 2..]);
         socket.send(&packet).unwrap();
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn wireguard_handshake() {
-        // Test the connection is succesfully established and some packets are passed around
+        // Test the connection is successfully established and some packets are passed around
         {
             let (peer_iface_socket_sender, client_iface_socket_sender, close) =
                 wireguard_test_pair();
@@ -437,7 +437,7 @@ mod tests {
     #[test]
     #[ignore]
     fn wireguard_interop() {
-        // Test the connection with wireguard-go is succesfully established
+        // Test the connection with wireguard-go is successfully established
         // and we are getting ping from server
         let c_key_pair = key_pair();
         let itr = 1000;
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     #[ignore]
     fn wireguard_receiver() {
-        // Test the connection with wireguard-go is succesfully established
+        // Test the connection with wireguard-go is successfully established
         // when go is the initiator
         let c_key_pair = key_pair();
         let itr = 1000;

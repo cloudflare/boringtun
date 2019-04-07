@@ -98,7 +98,7 @@ impl ReceivingKeyCounterValidator {
         ((self.bitmap[word] >> bit) & 1) == 1
     }
 
-    // Returns true if the counter was not yet recieved, and is not too far back
+    // Returns true if the counter was not yet received, and is not too far back
     #[inline(always)]
     fn will_accept(&self, counter: u64) -> bool {
         if counter >= self.next {
@@ -295,7 +295,7 @@ impl Session {
                 &mut dst[..src.len() - DATA_OFF],
             )
             .map_err(|_| WireGuardError::InvalidAeadTag)?;
-            // After decryption is done, check counter again, and mark as recieved
+            // After decryption is done, check counter again, and mark as received
             self.receiving_counter_mark(receiving_key_counter)?;
             Ok(packet)
         }

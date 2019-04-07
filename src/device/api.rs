@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering;
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
 fn create_sock_dir() {
-    create_dir(SOCK_DIR).is_ok(); // Create the directory if not existant
+    create_dir(SOCK_DIR).is_ok(); // Create the directory if it does not exist
 
     if let Ok((saved_uid, saved_gid)) = get_saved_ids() {
         unsafe {
@@ -33,7 +33,7 @@ fn create_sock_dir() {
 }
 
 impl Device {
-    /// Register the api handler for this Device. The api handler recieves stream connections on a Unix socket
+    /// Register the api handler for this Device. The api handler receives stream connections on a Unix socket
     /// with a known path: /var/run/wireguard/{tun_name}.sock.
     pub fn register_api_handler(&mut self) -> Result<(), Error> {
         let path = format!("{}/{}.sock", SOCK_DIR, self.iface.name()?);
@@ -69,7 +69,7 @@ impl Device {
                     // The protocol requires to return an error code as the response, or zero on success
                     writeln!(writer, "errno={}\n", status).ok();
                 }
-                Action::Continue // Inidicates the worker thread should continue as normal
+                Action::Continue // Indicates the worker thread should continue as normal
             }),
         )?;
 
@@ -85,7 +85,7 @@ impl Device {
                 // file was deleted by stating it.
                 // The problem is that on linux inotify can be used quite beautifully to detect
                 // deletion, and kqueue EVFILT_VNODE can be used for the same purpose, but that
-                // will require introducing new events, for no measureable benefit.
+                // will require introducing new events, for no measurable benefit.
                 // TODO: Could this be an issue if we restart the service too quickly?
                 let path = std::path::Path::new(&path);
                 if !path.exists() {
@@ -93,7 +93,7 @@ impl Device {
                     return Action::Exit;
                 }
 
-                // Preriodically read the mtu of the interface in case it changes
+                // Periodically read the mtu of the interface in case it changes
                 if let Ok(mtu) = d.iface.mtu() {
                     d.mtu.store(mtu, Ordering::Relaxed);
                 }

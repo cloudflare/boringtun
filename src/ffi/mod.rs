@@ -27,7 +27,7 @@ pub enum result_type {
     WIREGUARD_DONE = 0,
     /// Write dst buffer to network. Size indicates the number of bytes to write.
     WRITE_TO_NETWORK = 1,
-    /// Some error occured, no operation is required. Size indicates error code.
+    /// Some error occurred, no operation is required. Size indicates error code.
     WIREGUARD_ERROR = 2,
     /// Write dst buffer to the interface as an ipv4 packet. Size indicates the number of bytes to write.
     WRITE_TO_TUNNEL_IPV4 = 4,
@@ -253,7 +253,7 @@ pub unsafe extern "C" fn wireguard_read(
     wireguard_result::from(tunnel.network_to_tunnel(src, dst))
 }
 
-/// This is a state keeping function, that need to be called preriodically.
+/// This is a state keeping function, that need to be called periodically.
 /// Recommended interval: 100ms.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_tick(
@@ -281,7 +281,7 @@ pub unsafe extern "C" fn wireguard_force_handshake(
 }
 
 /// Returns stats from the tunnel:
-/// Time of last handshake in seconds (or -1 if no handshake occured)
+/// Time of last handshake in seconds (or -1 if no handshake occurred)
 /// Number of data bytes encapsulated
 /// Number of data bytes decapsulated
 #[no_mangle]
@@ -296,7 +296,7 @@ pub unsafe extern "C" fn wireguard_stats(tunnel: *mut Tunn) -> stats {
     }
 }
 
-/// Performs an iternal benchmark, and returns its result as a C-string.
+/// Performs an internal benchmark, and returns its result as a C-string.
 #[no_mangle]
 pub extern "C" fn benchmark(name: i32, idx: u32) -> *const c_char {
     if let Some(s) = do_benchmark(name != 0, idx as usize) {

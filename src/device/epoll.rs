@@ -76,8 +76,8 @@ impl<H: Sync + Send> EventPoll<H> {
     /// event overrides all previous events. In case the same trigger is used with multiple polls,
     /// each event will be triggered independently.
     /// The event will keep triggering until a Read operation is no longer possible on the trigger.
-    /// When triggered, one of the threads waiting on the poll will recieve the handler via an
-    /// appropriate EventGuard. It is guranteed that only a single thread can have a reference to
+    /// When triggered, one of the threads waiting on the poll will receive the handler via an
+    /// appropriate EventGuard. It is guaranteed that only a single thread can have a reference to
     /// the handler at any given time.
     pub fn new_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
         // Create an event descriptor
@@ -193,7 +193,7 @@ impl<H: Sync + Send> EventPoll<H> {
 
     /// Wait until one of the registered events becomes triggered. Once an event
     /// is triggered, a single caller thread gets the handler for that event.
-    /// In case a notifier is triggered, all waiting threads will recieve the same
+    /// In case a notifier is triggered, all waiting threads will receive the same
     /// handler.
     pub fn wait<'a>(&'a self) -> WaitResult<'a, H> {
         let mut event = epoll_event { events: 0, u64: 0 };
@@ -302,7 +302,7 @@ impl<H: Sync + Send> EventPoll<H> {
 }
 
 impl<H> EventPoll<H> {
-    /// Disable and remove the event and assosiated handler, using the fd that was used
+    /// Disable and remove the event and associated handler, using the fd that was used
     /// to register it.
     /// This function is only safe to call when the event loop is not running, otherwise the
     /// memory of the handler may get freed while in use.

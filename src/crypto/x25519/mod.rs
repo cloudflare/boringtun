@@ -50,8 +50,8 @@ pub struct X25519SecretKey {
 
 #[repr(C)]
 #[derive(Debug)]
-/// An ephemeral X25519 key. Ideally should only be used once, but because WG uses the same ephemral
-/// key twice, it is essentialy identical to a secret key
+/// An ephemeral X25519 key. Ideally should only be used once, but because WG uses the same ephemeral
+/// key twice, it is essentially identical to a secret key
 pub struct X25519EphemeralKey {
     internal: X25519SecretKey,
 }
@@ -82,7 +82,7 @@ impl X25519SecretKey {
         }
     }
 
-    /// Derive a shared key from a secret key of one peer and a pulic key of another
+    /// Derive a shared key from a secret key of one peer and a public key of another
     pub fn shared_key(&self, peer_public: &X25519PublicKey) -> Result<[u8; 32], WireGuardError> {
         let shared_key = x25519_shared_key(&peer_public.internal[..], &self.internal[..]);
 

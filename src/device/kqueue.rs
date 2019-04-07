@@ -51,7 +51,7 @@ enum EventKind {
 
 // A single event
 struct Event<H> {
-    event: kevent, // The kqueue event desctiption
+    event: kevent, // The kqueue event description
     handler: H,    // The associated data
     kind: EventKind,
 }
@@ -90,8 +90,8 @@ impl<H: Send + Sync> EventPoll<H> {
     /// event overrides all previous events. In case the same trigger is used with multiple polls,
     /// each event will be triggered independently.
     /// The event will keep triggering until a Read operation is no longer possible on the trigger.
-    /// When triggered, one of the threads waiting on the poll will recieve the handler via an
-    /// appropriate EventGuard. It is guranteed that only a single thread can have a reference to
+    /// When triggered, one of the threads waiting on the poll will receive the handler via an
+    /// appropriate EventGuard. It is guaranteed that only a single thread can have a reference to
     /// the handler at any given time.
     pub fn new_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
         // Create an event descriptor
@@ -174,7 +174,7 @@ impl<H: Send + Sync> EventPoll<H> {
 
     /// Wait until one of the registered events becomes triggered. Once an event
     /// is triggered, a single caller thread gets the handler for that event.
-    /// In case a notifier is triggered, all waiting threads will recieve the same
+    /// In case a notifier is triggered, all waiting threads will receive the same
     /// handler.
     pub fn wait(&'_ self) -> WaitResult<'_, H> {
         let mut event = kevent {
@@ -244,7 +244,7 @@ impl<H: Send + Sync> EventPoll<H> {
         }
 
         if ev.kind == EventKind::Signal {
-            // Mask the signal if succesfully added to kqueue
+            // Mask the signal if successfully added to kqueue
             unsafe { signal(trigger, SIG_IGN) };
         }
 

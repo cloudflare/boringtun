@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 /*
 static MAX_TIMER_HANDSHAKES: u32 = 90 / 5;
 static COOKIE_REFRESH_TIME: Duration = Duration::from_secs(120);
-static HANDSHAKE_INITATION_RATE: Duration = Duration::from_millis(50);
+static HANDSHAKE_INITIATION_RATE: Duration = Duration::from_millis(50);
 */
 
 // Some constants, represent time in seconds
@@ -28,11 +28,11 @@ pub enum TimerName {
     TimeCurrent,                // Current time, updated each call to `update_timers`
     TimeSessionEstablished,     // Time when last handshake was completed
     TimeLastHandshakeStarted,   // Time the last attempt for a new handshake began
-    TimeLastPacketReceived,     // Time we last recieved and authenticated a packet
+    TimeLastPacketReceived,     // Time we last received and authenticated a packet
     TimeLastPacketSent,         // Time we last send a packet
-    TimeLastDataPacketReceived, // Time we last recieved and authenticated a DATA packet
+    TimeLastDataPacketReceived, // Time we last received and authenticated a DATA packet
     TimeLastDataPacketSent,     // Time we last send a DATA packet
-    TimeCookieReceived,         // Time we last recieved a cookie
+    TimeCookieReceived,         // Time we last received a cookie
     TimePersistentKeepalive,    // Time we last sent persistent keepalive
     Top,
 }
@@ -50,8 +50,8 @@ pub struct Timers {
     is_initiator: AtomicBool, // Is the owner of the timer the initiator or the responder for the last handshake?
     time_started: Instant,    // Start time of the tunnel
     timers: [Timer; TimerName::Top as usize],
-    want_keepalive: AtomicBool, // Did we recieve data without sending anything back?
-    want_handshake: AtomicBool, // Did we send data withoug hearing back?
+    want_keepalive: AtomicBool, // Did we receive data without sending anything back?
+    want_handshake: AtomicBool, // Did we send data without hearing back?
     persistent_keepalive: AtomicUsize,
 }
 
@@ -234,7 +234,7 @@ impl Tunn {
                     {
                         self.log(
                         Verbosity::Debug,
-                        "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on recieve))",
+                        "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))",
                     );
                         hanshake_initiation_required = true;
                     }

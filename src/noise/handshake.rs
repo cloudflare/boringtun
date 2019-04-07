@@ -163,7 +163,7 @@ pub struct Handshake {
     next_index: u32,                  // Index of the next session
     state: HandshakeState,            // Current handshake state
     cookie: Option<[u8; 16]>,         // An optional expirable cookie
-    last_handshake_timestamp: Tai64N, // The timestamp of the last handshake we recieved
+    last_handshake_timestamp: Tai64N, // The timestamp of the last handshake we received
     stamper: TimeStamper,             // TODO: make TimeStamper a singleton
 }
 
@@ -229,8 +229,8 @@ pub fn parse_handshake_anon(
         [0x01]
     );
     // temp = HMAC(initiator.chaining_key, DH(initiator.ephemeral_private, responder.static_public))
-    let epehemeral_shared = static_private.shared_key(&peer_ephemeral_public)?;
-    let temp = HMAC!(chaining_key, &epehemeral_shared[..]);
+    let ephemeral_shared = static_private.shared_key(&peer_ephemeral_public)?;
+    let temp = HMAC!(chaining_key, &ephemeral_shared[..]);
     // initiator.chaining_key = HMAC(temp, 0x1)
     chaining_key = HMAC!(temp, [0x01]);
     // key = HMAC(temp, initiator.chaining_key || 0x2)
@@ -400,8 +400,8 @@ impl Handshake {
         // initiator.chaining_key = HMAC(temp, 0x1)
         chaining_key = HMAC!(HMAC!(chaining_key, dst[EPH_OFF..EPH_OFF + EPH_SZ]), [0x01]);
         // temp = HMAC(initiator.chaining_key, DH(initiator.ephemeral_private, responder.static_public))
-        let epehemeral_shared = ephemeral_private.shared_key(&self.params.peer_static_public)?;
-        let temp = HMAC!(chaining_key, epehemeral_shared);
+        let ephemeral_shared = ephemeral_private.shared_key(&self.params.peer_static_public)?;
+        let temp = HMAC!(chaining_key, ephemeral_shared);
         // initiator.chaining_key = HMAC(temp, 0x1)
         chaining_key = HMAC!(temp, [0x01]);
         // key = HMAC(temp, initiator.chaining_key || 0x2)

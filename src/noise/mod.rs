@@ -271,7 +271,7 @@ impl Tunn {
         if src.len() < session::IDX_OFF + session::IDX_SZ {
             return TunnResult::Err(WireGuardError::InvalidPacket);
         }
-        // Extract the reciever index
+        // Extract the receiver index
         let idx = u32::from_le_bytes(make_array(&src[session::IDX_OFF..])) as usize;
 
         // Get the (possibly) right session
