@@ -69,7 +69,7 @@ impl Device {
                     // The protocol requires to return an error code as the response, or zero on success
                     writeln!(writer, "errno={}\n", status).ok();
                 }
-                Action::Continue // Inidicates the worker thread should continue as normal
+                Action::Continue // Indicates the worker thread should continue as normal
             }),
         )?;
 
