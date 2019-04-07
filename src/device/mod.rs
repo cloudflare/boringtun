@@ -253,7 +253,7 @@ impl Device {
 
     fn remove_peer(&mut self, pub_key: &X25519PublicKey) {
         if let Some(peer) = self.peers.remove(pub_key) {
-            // Found a peer to remove, now perge all references to is:
+            // Found a peer to remove, now perge all references to it:
             peer.shutdown_endpoint(); // close open udp socket and free the closure
             self.peers_by_idx.remove(&peer.index()); // peers_by_idx
             self.peers_by_ip
