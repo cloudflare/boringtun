@@ -51,7 +51,7 @@ pub struct Timers {
     time_started: Instant,    // Start time of the tunnel
     timers: [Timer; TimerName::Top as usize],
     want_keepalive: AtomicBool, // Did we receive data without sending anything back?
-    want_handshake: AtomicBool, // Did we send data withoug hearing back?
+    want_handshake: AtomicBool, // Did we send data without hearing back?
     persistent_keepalive: AtomicUsize,
 }
 
