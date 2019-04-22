@@ -102,7 +102,11 @@ impl<H: Sync + Send> EventPoll<H> {
     pub fn new_periodic_event(&self, handler: H, period: Duration) -> Result<EventRef, Error> {
         // The periodic event on Linux uses the timerfd
         let tfd = match unsafe { timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK) } {
-            -1 => return Err(Error::Timer(errno_str())),
+            -1 => match unsafe { timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK) } {
+                // A fallback for kernels < 3.15
+                -1 => return Err(Error::Timer(errno_str())),
+                efd => efd,
+            },
             efd => efd,
         };
 
