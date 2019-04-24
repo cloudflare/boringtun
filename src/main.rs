@@ -13,6 +13,7 @@ use clap::{value_t, App, Arg};
 use daemonize::Daemonize;
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
+use std::process::exit;
 
 fn check_tun_name(_v: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -92,7 +93,7 @@ fn main() {
 
     // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
-    sock1.set_nonblocking(true).ok();
+    let _ = sock1.set_nonblocking(true);
 
     if background {
         let log = matches.value_of("log").unwrap();
@@ -109,20 +110,20 @@ fn main() {
             .stderr(stderr)
             .exit_action(move || {
                 let mut b = [0u8; 1];
-                sock2.recv(&mut b).ok();
-
-                println!(
-                    "{}",
-                    match b[0] {
-                        0 => "boringtun failed to start",
-                        _ => "boringtun started successfully",
-                    }
-                );
+                if sock2.recv(&mut b).is_ok() && b[0] == 1 {
+                    println!("BoringTun started successfully");
+                } else {
+                    eprintln!("BoringTun failed to start");
+                    exit(1);
+                };
             });
 
         match daemonize.start() {
             Ok(_) => println!("Success, daemonized"),
-            Err(e) => eprintln!("Error, {}", e),
+            Err(e) => {
+                eprintln!("Error, {}", e);
+                exit(1);
+            }
         }
     }
 
@@ -138,18 +139,22 @@ fn main() {
         Ok(d) => d,
         Err(e) => {
             // Notify parent that tunnel initialization failed
-            println!("{:?}", e);
-            sock1.send(&[0]).ok();
-            return;
+            eprintln!("Failed to initialize tunnel: {:?}", e);
+            sock1.send(&[0]).unwrap();
+            exit(1);
         }
     };
 
     if !matches.is_present("disable-drop-privileges") {
-        drop_privileges().ok();
+        if let Err(e) = drop_privileges() {
+            eprintln!("Failed to drop privileges: {:?}", e);
+            sock1.send(&[0]).unwrap();
+            exit(1);
+        }
     }
 
     // Notify parent that tunnel initialization succeeded
-    sock1.send(&[1]).ok();
+    sock1.send(&[1]).unwrap();
     drop(sock1);
 
     device_handle.wait();
