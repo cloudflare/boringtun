@@ -30,7 +30,7 @@ pub struct EventPoll<H: Sized> {
 /// Once the EventGuard goes out of scope, the underlying Event will be re-enabled
 pub struct EventGuard<'a, H> {
     epoll: RawFd,
-    event: &'a Event<H>,
+    event: &'a mut Event<H>,
     poll: &'a EventPoll<H>,
 }
 
@@ -82,6 +82,26 @@ impl<H: Sync + Send> EventPoll<H> {
     pub fn new_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
         // Create an event descriptor
         let flags = EPOLLIN | EPOLLONESHOT;
+        let ev = Event {
+            event: epoll_event {
+                events: flags as _,
+                u64: 0,
+            },
+            fd: trigger,
+            handler,
+            notifier: false,
+            needs_read: false,
+        };
+
+        self.register_event(ev)
+    }
+
+    /// Add and enable a new write event with the factory.
+    /// The event is triggered when a Write operation on the provided trigger becomes possible
+    /// For TCP sockets it means that the socket was succesfully connected
+    pub fn new_write_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
+        // Create an event descriptor
+        let flags = EPOLLOUT | EPOLLET | EPOLLONESHOT;
         let ev = Event {
             event: epoll_event {
                 events: flags as _,
@@ -205,11 +225,11 @@ impl<H: Sync + Send> EventPoll<H> {
             return WaitResult::Error(errno_str());
         }
 
-        let event_data = unsafe { (event.u64 as *mut Event<H>).as_ref().unwrap() };
+        let event_data = unsafe { (event.u64 as *mut Event<H>).as_mut().unwrap() };
 
         let guard = EventGuard {
             epoll: self.epoll,
-            event: &event_data,
+            event: event_data,
             poll: self,
         };
 
@@ -346,6 +366,11 @@ impl<'a, H> Drop for EventGuard<'a, H> {
 }
 
 impl<'a, H> EventGuard<'a, H> {
+    /// Get a mutable reference to the stored value
+    pub fn get_mut(&mut self) -> &mut H {
+        &mut self.event.handler
+    }
+
     /// Cancel and remove the event referenced by this guard
     pub fn cancel(self) {
         unsafe { self.poll.clear_event_by_fd(self.event.fd) };
