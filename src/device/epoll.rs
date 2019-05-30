@@ -382,3 +382,17 @@ impl<'a, H> EventGuard<'a, H> {
         std::mem::forget(self); // Don't call the regular drop that would enable the event
     }
 }
+
+pub fn block_signal(signal: c_int) -> Result<sigset_t, String> {
+    unsafe {
+        let mut sigset = std::mem::zeroed();
+        sigemptyset(&mut sigset);
+        if sigaddset(&mut sigset, signal) == -1 {
+            return Err(errno_str());
+        }
+        if sigprocmask(SIG_BLOCK, &sigset, null_mut()) == -1 {
+            return Err(errno_str());
+        }
+        Ok(sigset)
+    }
+}
