@@ -189,7 +189,7 @@ impl<H: Sync + Send> EventPoll<H> {
             fd: sfd,
             handler,
             notifier: false,
-            needs_read: false,
+            needs_read: true,
         };
 
         self.register_event(ev)
