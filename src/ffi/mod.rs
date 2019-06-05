@@ -85,7 +85,7 @@ impl From<u32> for Verbosity {
             0 => Verbosity::None,
             1 => Verbosity::Info,
             2 => Verbosity::Debug,
-            _ => Verbosity::All,
+            _ => Verbosity::Trace,
         }
     }
 }
@@ -188,7 +188,14 @@ pub unsafe extern "C" fn new_tunnel(
         Ok(key) => key,
     };
 
-    let mut tunnel = match Tunn::new(Arc::new(private_key), Arc::new(public_key), None, None, 0) {
+    let mut tunnel = match Tunn::new(
+        Arc::new(private_key),
+        Arc::new(public_key),
+        None,
+        None,
+        0,
+        None,
+    ) {
         Ok(t) => t,
         Err(_) => return ptr::null_mut(),
     };
@@ -233,7 +240,7 @@ pub unsafe extern "C" fn wireguard_write(
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.tunnel_to_network(src, dst))
+    wireguard_result::from(tunnel.encapsulate(src, dst))
 }
 
 /// Read a UDP packet from the server.
@@ -250,7 +257,7 @@ pub unsafe extern "C" fn wireguard_read(
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.network_to_tunnel(src, dst))
+    wireguard_result::from(tunnel.decapsulate(None, src, dst))
 }
 
 /// This is a state keeping function, that need to be called periodically.

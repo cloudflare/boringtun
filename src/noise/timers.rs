@@ -53,10 +53,11 @@ pub struct Timers {
     want_keepalive: AtomicBool, // Did we receive data without sending anything back?
     want_handshake: AtomicBool, // Did we send data without hearing back?
     persistent_keepalive: AtomicUsize,
+    pub(super) should_reset_rr: bool, // Should this timer call reset rr function (if not a shared rr instance)
 }
 
 impl Timers {
-    pub fn new(persistent_keepalive: Option<u16>) -> Timers {
+    pub fn new(persistent_keepalive: Option<u16>, reset_rr: bool) -> Timers {
         Timers {
             is_initiator: AtomicBool::new(false),
             time_started: Instant::now(),
@@ -64,6 +65,7 @@ impl Timers {
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
             persistent_keepalive: AtomicUsize::new(usize::from(persistent_keepalive.unwrap_or(0))),
+            should_reset_rr: reset_rr,
         }
     }
 
@@ -72,7 +74,7 @@ impl Timers {
     }
 
     // We don't really clear the timers, but we set them to the current time to
-    // so the reference timeframe is the same
+    // so the reference time frame is the same
     pub fn clear(&self) {
         let now = Instant::now().duration_since(self.time_started);
         for t in &self.timers[..] {
@@ -129,7 +131,7 @@ impl Tunn {
     }
 
     // We don't really clear the timers, but we set them to the current time to
-    // so the reference timeframe is the same
+    // so the reference time frame is the same
     fn clear_all(&self) {
         for session in &self.sessions {
             *session.write() = None;
@@ -144,11 +146,15 @@ impl Tunn {
     }
 
     pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
-        let mut hanshake_initiation_required = false;
+        let mut handshake_initiation_required = false;
         let mut keepalive_required = false;
 
         let time = Instant::now();
         let timers = &self.timers;
+
+        if timers.should_reset_rr {
+            self.rate_limiter.reset_count();
+        }
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded
         // to a second, as there is no real benefit to having highly accurate timers.
@@ -208,20 +214,20 @@ impl Tunn {
                     // if a response has not been received, where jitter is some random
                     // value between 0 and 333 ms.
                     self.log(Verbosity::Debug, "HANDSHAKE(REKEY_TIMEOUT)");
-                    hanshake_initiation_required = true;
+                    handshake_initiation_required = true;
                 }
             } else {
                 if timers.is_initiator() {
                     // After sending a packet, if the sender was the original initiator
                     // of the handshake and if the current session key is REKEY_AFTER_TIME
                     // ms old, we initiate a new handshake. If the sender was the original
-                    // responder of the handshake, it does not reinitiate a new handshake
+                    // responder of the handshake, it does not re-initiate a new handshake
                     // after REKEY_AFTER_TIME ms like the original initiator does.
                     if session_established < data_packet_sent
                         && now - session_established >= REKEY_AFTER_TIME
                     {
                         self.log(Verbosity::Debug, "HANDSHAKE(REKEY_AFTER_TIME (on send))");
-                        hanshake_initiation_required = true;
+                        handshake_initiation_required = true;
                     }
 
                     // After receiving a packet, if the receiver was the original initiator
@@ -236,7 +242,7 @@ impl Tunn {
                         Verbosity::Debug,
                         "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))",
                     );
-                        hanshake_initiation_required = true;
+                        handshake_initiation_required = true;
                     }
                 }
 
@@ -247,10 +253,10 @@ impl Tunn {
                     && timers.want_handshake.swap(false, Ordering::Relaxed)
                 {
                     self.log(Verbosity::Debug, "HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
-                    hanshake_initiation_required = true;
+                    handshake_initiation_required = true;
                 }
 
-                if !hanshake_initiation_required {
+                if !handshake_initiation_required {
                     // If a packet has been received from a given peer, but we have not sent one back
                     // to the given peer in KEEPALIVE ms, we send an empty packet.
                     if now - aut_packet_sent >= KEEPALIVE_TIMEOUT
@@ -273,12 +279,12 @@ impl Tunn {
             }
         }
 
-        if hanshake_initiation_required {
+        if handshake_initiation_required {
             return self.format_handshake_initiation(dst, true);
         }
 
         if keepalive_required {
-            return self.tunnel_to_network(&[], dst);
+            return self.encapsulate(&[], dst);
         }
 
         TunnResult::Done
