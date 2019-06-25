@@ -381,6 +381,16 @@ impl<'a, H> EventGuard<'a, H> {
         unsafe { self.poll.clear_event_by_fd(self.event.fd) };
         std::mem::forget(self); // Don't call the regular drop that would enable the event
     }
+
+    /// Change the event flags to enable or disable notifying when the fd is writable
+    pub fn notify_writable(&mut self, enabled: bool) {
+        let flags = if enabled {
+            EPOLLOUT | EPOLLIN | EPOLLET | EPOLLONESHOT
+        } else {
+            EPOLLIN | EPOLLONESHOT
+        };
+        self.event.event.events = flags as _;
+    }
 }
 
 pub fn block_signal(signal: c_int) -> Result<sigset_t, String> {
