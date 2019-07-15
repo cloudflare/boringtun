@@ -541,6 +541,38 @@ impl Tunn {
         q.pop_front()
     }
 
+    fn estimate_loss(&self) -> f32 {
+        let session_idx = self.current.load(Ordering::SeqCst);
+
+        let mut weight = 9.0;
+        let mut cur_avg = 0.0;
+        let mut total_weight = 0.0;
+
+        for i in 0..N_SESSIONS {
+            if let Some(ref session) =
+                *self.sessions[(session_idx.wrapping_sub(i)) % N_SESSIONS].read()
+            {
+                let (expected, received) = session.current_packet_cnt();
+
+                let loss = if expected == 0 {
+                    0.0
+                } else {
+                    1.0 - received as f32 / expected as f32
+                };
+
+                cur_avg += loss * weight;
+                total_weight += weight;
+                weight /= 3.0;
+            }
+        }
+
+        if total_weight == 0.0 {
+            0.0
+        } else {
+            cur_avg / total_weight
+        }
+    }
+
     pub fn log(&self, lvl: Verbosity, entry: &str) {
         if let Some(ref logger) = self.logger {
             if self.verbosity >= lvl {
@@ -553,7 +585,7 @@ impl Tunn {
     /// * Time since last handshake in seconds
     /// * Data bytes sent
     /// * Data bytes received
-    pub fn stats(&self) -> (Option<u64>, usize, usize) {
+    pub fn stats(&self) -> (Option<u64>, usize, usize, f32, Option<u32>) {
         let time = if let Some(time) = self.time_since_last_handshake() {
             Some(time.as_secs())
         } else {
@@ -561,8 +593,10 @@ impl Tunn {
         };
         let tx_bytes = self.tx_bytes.load(Ordering::Relaxed);
         let rx_bytes = self.rx_bytes.load(Ordering::Relaxed);
+        let loss = self.estimate_loss();
+        let rtt = self.handshake.lock().last_rtt;
 
-        (time, tx_bytes, rx_bytes)
+        (time, tx_bytes, rx_bytes, loss, rtt)
     }
 }
 

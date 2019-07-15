@@ -156,8 +156,10 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
             writeln!(writer, "last_handshake_time_nsec={}", time.subsec_nanos());
         }
 
-        writeln!(writer, "rx_bytes={}", p.get_rx_bytes());
-        writeln!(writer, "tx_bytes={}", p.get_tx_bytes());
+        let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
+
+        writeln!(writer, "rx_bytes={}", tx_bytes);
+        writeln!(writer, "tx_bytes={}", rx_bytes);
     }
     0
 }
