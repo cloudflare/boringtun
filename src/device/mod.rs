@@ -176,7 +176,7 @@ impl DeviceHandle {
     pub fn clean(&mut self) {
         for path in &self.device.read().cleanup_paths {
             // attempt to remove any file we created in the work dir
-            std::fs::remove_file(&path).ok();
+            let _ = std::fs::remove_file(&path);
         }
     }
 
