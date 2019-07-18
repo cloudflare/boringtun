@@ -21,7 +21,7 @@ mod tests {
     static NEXT_IFACE_IDX: AtomicUsize = AtomicUsize::new(100); // utun 100+ should be vacant during testing on CI
     static NEXT_PORT: AtomicUsize = AtomicUsize::new(61111); // Use ports starting with 61111, hoping we don't run into a taken port 🤷
     static NEXT_IP: AtomicUsize = AtomicUsize::new(0xc0000200); // Use 192.0.2.0/24 for those tests, we might use more than 256 addresses though, usize must be >=32 bits on all supported platforms
-    static NEXT_IP_V6: AtomicUsize = AtomicUsize::new(0); // Use the 2001:db8:: address space, append this atomic counter for buttom 32 bits
+    static NEXT_IP_V6: AtomicUsize = AtomicUsize::new(0); // Use the 2001:db8:: address space, append this atomic counter for bottom 32 bits
 
     fn next_ip() -> IpAddr {
         IpAddr::V4(Ipv4Addr::from(
@@ -54,7 +54,7 @@ mod tests {
         container_name: Option<String>,
     }
 
-    /// Represents a single wireguard interface on local machine
+    /// Represents a single WireGuard interface on local machine
     struct WGHandle {
         _device: DeviceHandle,
         name: String,
@@ -163,7 +163,7 @@ mod tests {
                     "net.ipv6.conf.default.disable_ipv6=0",
                     "-p", // Open port for the endpoint
                     &format!("{0}:{0}/udp", self.endpoint.port()),
-                    "-v", // Map the generated wireguard config file
+                    "-v", // Map the generated WireGuard config file
                     &format!("{}:/wireguard/wg.conf", peer_config_file),
                     "-v", // Map the nginx config file
                     &format!("{}:/etc/nginx/conf.d/default.conf", nginx_config_file),

@@ -3,7 +3,6 @@
 
 use crate::device::udp::UDPSocket;
 use crate::device::*;
-use crate::noise::errors::WireGuardError;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -16,8 +15,8 @@ pub struct Endpoint {
 }
 
 pub struct Peer {
-    tunnel: Box<Tunn>, // The associated tunnel struct
-    index: u32,        // The index the tunnel uses
+    pub(crate) tunnel: Box<Tunn>, // The associated tunnel struct
+    index: u32,                   // The index the tunnel uses
     rx_bytes: AtomicUsize,
     tx_bytes: AtomicUsize,
     endpoint: spin::RwLock<Endpoint>,
@@ -75,14 +74,6 @@ impl Peer {
         }
 
         peer
-    }
-
-    pub fn encapsulate<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.tunnel_to_network(src, dst)
-    }
-
-    pub fn decapsulate<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.network_to_tunnel(src, dst)
     }
 
     pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
@@ -170,8 +161,8 @@ impl Peer {
         self.tx_bytes.load(Ordering::Relaxed)
     }
 
-    pub fn is_allowed_ip(&self, addr: IpAddr) -> bool {
-        self.allowed_ips.find(addr).is_some()
+    pub fn is_allowed_ip<I: Into<IpAddr>>(&self, addr: I) -> bool {
+        self.allowed_ips.find(addr.into()).is_some()
     }
 
     pub fn allowed_ips(&self) -> Iter<(())> {
@@ -188,13 +179,6 @@ impl Peer {
 
     pub fn preshared_key(&self) -> Option<&[u8; 32]> {
         self.preshared_key.as_ref()
-    }
-
-    pub fn set_static_private(
-        &self,
-        static_private: Arc<X25519SecretKey>,
-    ) -> Result<(), WireGuardError> {
-        self.tunnel.set_static_private(static_private)
     }
 
     pub fn index(&self) -> u32 {

@@ -29,7 +29,7 @@ pub struct EventPoll<H: Sized> {
 
 /// A type that hold a reference to a triggered Event
 /// While an EventGuard exists for a given Event, it will not be triggered by any other thread
-/// Once the EventGuard goes out of scope, the underlying Event will be reenabled
+/// Once the EventGuard goes out of scope, the underlying Event will be re-enabled
 pub struct EventGuard<'a, H> {
     kqueue: RawFd,
     event: &'a Event<H>,
@@ -316,7 +316,7 @@ impl<'a, H> Deref for EventGuard<'a, H> {
 impl<'a, H> Drop for EventGuard<'a, H> {
     fn drop(&mut self) {
         unsafe {
-            // Reenable the event once EventGuard goes out of scope
+            // Re-enable the event once EventGuard goes out of scope
             kevent(self.kqueue, &self.event.event, 1, null_mut(), 0, null());
         }
     }

@@ -27,7 +27,7 @@ pub struct EventPoll<H: Sized> {
 
 /// A type that hold a reference to a triggered Event
 /// While an EventGuard exists for a given Event, it will not be triggered by any other thread
-/// Once the EventGuard goes out of scope, the underlying Event will be reenabled
+/// Once the EventGuard goes out of scope, the underlying Event will be re-enabled
 pub struct EventGuard<'a, H> {
     epoll: RawFd,
     event: &'a Event<H>,
@@ -97,7 +97,7 @@ impl<H: Sync + Send> EventPoll<H> {
     }
 
     /// Add and enable a new timed event with the factory.
-    /// The even will be triggered for the first time after period time, and hencefore triggered
+    /// The even will be triggered for the first time after period time, and henceforth triggered
     /// every period time. Period is counted from the moment the appropriate EventGuard is released.
     pub fn new_periodic_event(&self, handler: H, period: Duration) -> Result<EventRef, Error> {
         // The periodic event on Linux uses the timerfd

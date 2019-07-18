@@ -49,7 +49,7 @@ impl<T> Lock<T> {
 }
 
 impl<T: ?Sized> Lock<T> {
-    /// Aquire a read lock
+    /// Acquire a read lock
     pub fn read(&self) -> LockReadGuard<T> {
         loop {
             let try_lock = self.lock.fetch_add(1, Ordering::SeqCst); // Increment readers counter optimistically
@@ -90,10 +90,10 @@ impl<'a, T: ?Sized> LockReadGuard<'a, T> {
 }
 
 impl<'a, T: ?Sized> UpgradableReadGuard<'a, T> {
-    /// Aquire a write lock
+    /// Acquire a write lock
     pub fn write(&mut self) -> LockWriteGuard<T> {
         while self.lock.load(Ordering::SeqCst) != (MSB_MASK + 1) {
-            // Because we already hold the read lock, wait until count drops to 1, this is essentially a spinlock
+            // Because we already hold the read lock, wait until count drops to 1, this is essentially a spin lock
             std::sync::atomic::spin_loop_hint()
         }
         LockWriteGuard {
