@@ -50,6 +50,7 @@ pub struct Timers {
     is_initiator: AtomicBool, // Is the owner of the timer the initiator or the responder for the last handshake?
     time_started: Instant,    // Start time of the tunnel
     timers: [Timer; TimerName::Top as usize],
+    pub(super) session_timers: [Timer; super::N_SESSIONS],
     want_keepalive: AtomicBool, // Did we receive data without sending anything back?
     want_handshake: AtomicBool, // Did we send data without hearing back?
     persistent_keepalive: AtomicUsize,
@@ -57,11 +58,12 @@ pub struct Timers {
 }
 
 impl Timers {
-    pub fn new(persistent_keepalive: Option<u16>, reset_rr: bool) -> Timers {
+    pub(super) fn new(persistent_keepalive: Option<u16>, reset_rr: bool) -> Timers {
         Timers {
             is_initiator: AtomicBool::new(false),
             time_started: Instant::now(),
             timers: Default::default(),
+            session_timers: Default::default(),
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
             persistent_keepalive: AtomicUsize::new(usize::from(persistent_keepalive.unwrap_or(0))),
@@ -75,7 +77,7 @@ impl Timers {
 
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
-    pub fn clear(&self) {
+    pub(super) fn clear(&self) {
         let now = Instant::now().duration_since(self.time_started);
         for t in &self.timers[..] {
             t.set(now);
@@ -93,7 +95,7 @@ impl Index<TimerName> for Timers {
 }
 
 impl Timer {
-    fn time(&self) -> Duration {
+    pub(super) fn time(&self) -> Duration {
         Duration::from_secs(self.time.load(Ordering::Relaxed) as _)
     }
 
@@ -103,11 +105,7 @@ impl Timer {
 }
 
 impl Tunn {
-    pub fn tick_handshake_started(&self) {
-        self.timers[TimeLastHandshakeStarted].set(self.timers[TimeCurrent].time());
-    }
-
-    pub fn timer_tick(&self, timer_name: TimerName) {
+    pub(super) fn timer_tick(&self, timer_name: TimerName) {
         match timer_name {
             TimeLastPacketReceived => {
                 self.timers.want_keepalive.store(true, Ordering::Relaxed);
@@ -123,8 +121,10 @@ impl Tunn {
         self.timers[timer_name].set(self.timers[TimeCurrent].time());
     }
 
-    pub fn timer_tick_session_established(&self, is_initiator: bool) {
+    pub(super) fn timer_tick_session_established(&self, is_initiator: bool, session_idx: usize) {
         self.timer_tick(TimeSessionEstablished);
+        self.timers.session_timers[session_idx % crate::noise::N_SESSIONS]
+            .set(self.timers[TimeCurrent].time());
         self.timers
             .is_initiator
             .store(is_initiator, Ordering::Relaxed)
@@ -145,6 +145,19 @@ impl Tunn {
         self.timers.clear();
     }
 
+    fn update_session_timers(&self, time_now: Duration) {
+        let timers = &self.timers;
+
+        for (i, t) in timers.session_timers.iter().enumerate() {
+            if time_now - t.time() > REJECT_AFTER_TIME {
+                if (*self.sessions[i].write()).take().is_some() {
+                    self.log(Verbosity::Debug, "SESSION_EXPIRED(REJECT_AFTER_TIME)");
+                }
+                t.set(time_now);
+            }
+        }
+    }
+
     pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
         let mut handshake_initiation_required = false;
         let mut keepalive_required = false;
@@ -160,6 +173,8 @@ impl Tunn {
         // to a second, as there is no real benefit to having highly accurate timers.
         let now = time.duration_since(timers.time_started);
         timers[TimeCurrent].set(now);
+
+        self.update_session_timers(now);
 
         // Load timers only once:
         let session_established = timers[TimeSessionEstablished].time();
@@ -249,7 +264,8 @@ impl Tunn {
                 // If we have sent a packet to a given peer but have not received a
                 // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
                 // we initiate a new handshake.
-                if now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
+                if aut_packet_sent > aut_packet_received
+                    && now - aut_packet_sent >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                     && timers.want_handshake.swap(false, Ordering::Relaxed)
                 {
                     self.log(Verbosity::Debug, "HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
@@ -259,7 +275,8 @@ impl Tunn {
                 if !handshake_initiation_required {
                     // If a packet has been received from a given peer, but we have not sent one back
                     // to the given peer in KEEPALIVE ms, we send an empty packet.
-                    if now - aut_packet_sent >= KEEPALIVE_TIMEOUT
+                    if aut_packet_received > aut_packet_sent
+                        && now - aut_packet_received >= KEEPALIVE_TIMEOUT
                         && timers.want_keepalive.swap(false, Ordering::Relaxed)
                     {
                         self.log(Verbosity::Debug, "KEEPALIVE(KEEPALIVE_TIMEOUT)");

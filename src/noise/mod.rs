@@ -38,7 +38,7 @@ const IPV6_IP_SZ: usize = 16;
 const IP_LEN_SZ: usize = 2;
 
 const MAX_QUEUE_DEPTH: usize = 256;
-const N_SESSIONS: usize = 4; // number of sessions in the ring, better keep a PoT
+const N_SESSIONS: usize = 8; // number of sessions in the ring, better keep a PoT
 
 #[derive(Debug)]
 pub enum TunnResult<'a> {
@@ -329,12 +329,12 @@ impl Tunn {
             handshake.receive_handshake_initialization(p, dst)?
         };
         // Store new session in ring buffer
-        let index = session.local_index();
-        *self.sessions[index % N_SESSIONS].write() = Some(session);
+        let index = session.local_index() % N_SESSIONS;
+        *self.sessions[index].write() = Some(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeLastPacketSent);
-        self.timer_tick_session_established(false); // New session established, we are not the initiator
+        self.timer_tick_session_established(false, index); // New session established, we are not the initiator
 
         self.log(Verbosity::Debug, "Sending handshake_response");
         Ok(TunnResult::WriteToNetwork(packet))
@@ -354,13 +354,13 @@ impl Tunn {
 
         let keepalive_packet = session.format_packet_data(&[], dst);
         // Store new session in ring buffer
-        let index = session.local_index();
-        *self.sessions[index % N_SESSIONS].write() = Some(session);
+        let index = session.local_index() % N_SESSIONS;
+        *self.sessions[index].write() = Some(session);
         // The new session becomes the currently used session
         self.current.store(index, Ordering::SeqCst);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
-        self.timer_tick_session_established(true); // New session established, we are the initiator
+        self.timer_tick_session_established(true, index); // New session established, we are the initiator
 
         self.log(Verbosity::Debug, "Sending keepalive");
         Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
@@ -382,24 +382,41 @@ impl Tunn {
         Ok(TunnResult::Done)
     }
 
+    // Update the index of the currently used session, if needed
+    fn set_current_session(&self, new_idx: usize) {
+        let cur_idx = self.current.load(Ordering::Relaxed);
+        if cur_idx == new_idx {
+            // There is nothing to do, already using this session, this is the common case
+            return;
+        }
+        if self.sessions[cur_idx].read().is_none()
+            || self.timers.session_timers[new_idx].time()
+                > self.timers.session_timers[cur_idx].time()
+        {
+            self.current.store(new_idx, Ordering::Relaxed);
+        }
+    }
+
     // Decrypts a data packet, and stores the decapsulated packet in dst.
     fn handle_data<'a>(
         &self,
         packet: PacketData,
         dst: &'a mut [u8],
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        let idx = packet.receiver_idx as usize;
+        let idx = packet.receiver_idx as usize % N_SESSIONS;
         // Get the (probably) right session
-        let lock = self.sessions[idx % N_SESSIONS].read();
-        let session = (*lock).as_ref().ok_or(WireGuardError::NoCurrentSession)?;
-        let packet = session.receive_packet_data(packet, dst)?;
-        // Update current session, the exact session we use is not important as long as it is valid
-        self.current.store(idx, Ordering::Relaxed);
+        let decapsulated_packet = {
+            let lock = self.sessions[idx].read();
+            let session = (*lock).as_ref().ok_or(WireGuardError::NoCurrentSession)?;
+            session.receive_packet_data(packet, dst)?
+        };
+
+        self.set_current_session(idx);
 
         self.timer_tick(TimerName::TimeLastDataPacketReceived);
         self.timer_tick(TimerName::TimeLastPacketReceived);
 
-        Ok(self.validate_decapsulated_packet(packet))
+        Ok(self.validate_decapsulated_packet(decapsulated_packet))
     }
 
     // Formats a new handshake initiation message and store it in dst. If force_resend is true will send

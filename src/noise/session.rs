@@ -9,21 +9,16 @@ use crate::noise::errors::WireGuardError;
 use ring::aead::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[cfg(not(target_arch = "arm"))]
 pub struct Session {
     receiving_index: u32,
     sending_index: u32,
+    #[cfg(not(target_arch = "arm"))]
     receiver: OpeningKey,
+    #[cfg(not(target_arch = "arm"))]
     sender: SealingKey,
-    sending_key_counter: AtomicUsize,
-    receiving_key_counter: spin::Mutex<ReceivingKeyCounterValidator>,
-}
-
-#[cfg(target_arch = "arm")]
-pub struct Session {
-    receiving_index: u32,
-    sending_index: u32,
+    #[cfg(target_arch = "arm")]
     receiver: ChaCha20Poly1305,
+    #[cfg(target_arch = "arm")]
     sender: ChaCha20Poly1305,
     sending_key_counter: AtomicUsize,
     receiving_key_counter: spin::Mutex<ReceivingKeyCounterValidator>,
@@ -163,21 +158,16 @@ impl Session {
         receiving_key: [u8; 32],
         sending_key: [u8; 32],
     ) -> Session {
-        #[cfg(not(target_arch = "arm"))]
         return Session {
             receiving_index: local_index,
             sending_index: peer_index,
+            #[cfg(not(target_arch = "arm"))]
             receiver: OpeningKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
+            #[cfg(not(target_arch = "arm"))]
             sender: SealingKey::new(&CHACHA20_POLY1305, &sending_key).unwrap(),
-            sending_key_counter: AtomicUsize::new(0),
-            receiving_key_counter: spin::Mutex::new(Default::default()),
-        };
-
-        #[cfg(target_arch = "arm")]
-        return Session {
-            receiving_index: local_index,
-            sending_index: peer_index,
+            #[cfg(target_arch = "arm")]
             receiver: ChaCha20Poly1305::new_aead(&receiving_key[..]),
+            #[cfg(target_arch = "arm")]
             sender: ChaCha20Poly1305::new_aead(&sending_key[..]),
             sending_key_counter: AtomicUsize::new(0),
             receiving_key_counter: spin::Mutex::new(Default::default()),
