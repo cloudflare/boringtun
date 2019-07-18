@@ -658,7 +658,7 @@ impl Handshake {
         let (sender_index, rest) = rest.split_at_mut(4);
         let (receiver_index, rest) = rest.split_at_mut(4);
         let (unencrypted_ephemeral, rest) = rest.split_at_mut(32);
-        let (mut encrypted_nothing, _) = rest.split_at_mut(0 + 16);
+        let (mut encrypted_nothing, _) = rest.split_at_mut(16);
 
         // responder.ephemeral_private = DH_GENERATE()
         let ephemeral_private = X25519EphemeralKey::new();

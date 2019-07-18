@@ -166,7 +166,7 @@ impl RateLimiter {
             let (mac1, mac2) = macs.split_at(16);
 
             let computed_mac1 = Blake2s::new_mac(&self.mac1_key).hash(msg).finalize();
-            constant_time_mac_check(&computed_mac1[..16], mac1).map_err(|e| TunnResult::Err(e))?;
+            constant_time_mac_check(&computed_mac1[..16], mac1).map_err(TunnResult::Err)?;
 
             if self.is_under_load() {
                 let addr = match src_addr {
@@ -184,7 +184,7 @@ impl RateLimiter {
                 if constant_time_mac_check(&computed_mac2[..16], mac2).is_err() {
                     let cookie_packet = self
                         .format_cookie_reply(sender_idx, cookie, mac1, dst)
-                        .map_err(|e| TunnResult::Err(e))?;
+                        .map_err(TunnResult::Err)?;
                     return Err(TunnResult::WriteToNetwork(cookie_packet));
                 }
             }

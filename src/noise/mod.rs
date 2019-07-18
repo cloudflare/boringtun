@@ -278,11 +278,11 @@ impl Tunn {
             Packet::PacketCookieReply(p) => self.handle_cookie_reply(p),
             Packet::PacketData(p) => self.handle_data(p, dst),
         }
-        .unwrap_or_else(|e| TunnResult::from(e))
+        .unwrap_or_else(TunnResult::from)
     }
 
     #[inline(always)]
-    pub fn parse_incoming_packet<'a>(src: &'a [u8]) -> Result<Packet<'a>, WireGuardError> {
+    pub fn parse_incoming_packet(src: &[u8]) -> Result<Packet, WireGuardError> {
         if src.len() < 4 {
             return Err(WireGuardError::InvalidPacket);
         }

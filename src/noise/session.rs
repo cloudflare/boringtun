@@ -158,7 +158,7 @@ impl Session {
         receiving_key: [u8; 32],
         sending_key: [u8; 32],
     ) -> Session {
-        return Session {
+        Session {
             receiving_index: local_index,
             sending_index: peer_index,
             #[cfg(not(target_arch = "arm"))]
@@ -171,7 +171,7 @@ impl Session {
             sender: ChaCha20Poly1305::new_aead(&sending_key[..]),
             sending_key_counter: AtomicUsize::new(0),
             receiving_key_counter: spin::Mutex::new(Default::default()),
-        };
+        }
     }
 
     pub fn local_index(&self) -> usize {

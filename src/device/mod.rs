@@ -268,6 +268,7 @@ impl Device {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn update_peer(
         &mut self,
         pub_key: X25519PublicKey,
@@ -510,7 +511,9 @@ impl Device {
         self.queue.new_periodic_event(
             // Reset the rate limiter every second give or take
             Box::new(|d, _| {
-                d.rate_limiter.as_ref().map(|r| r.reset_count());
+                if let Some(r) = d.rate_limiter.as_ref() {
+                    r.reset_count()
+                }
                 Action::Continue
             }),
             std::time::Duration::from_secs(1),
