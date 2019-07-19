@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering;
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
 fn create_sock_dir() {
-    create_dir(SOCK_DIR).is_ok(); // Create the directory if it does not exist
+    let _ = create_dir(SOCK_DIR); // Create the directory if it does not exist
 
     if let Ok((saved_uid, saved_gid)) = get_saved_ids() {
         unsafe {
@@ -40,7 +40,7 @@ impl Device {
 
         create_sock_dir();
 
-        remove_file(&path).is_ok(); // Attempt to remove the socket if already exists
+        let _ = remove_file(&path); // Attempt to remove the socket if already exists
 
         let api_listener = UnixListener::bind(&path).map_err(Error::ApiSocket)?; // Bind a new socket to the path
 
@@ -156,8 +156,10 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
             writeln!(writer, "last_handshake_time_nsec={}", time.subsec_nanos());
         }
 
-        writeln!(writer, "rx_bytes={}", p.get_rx_bytes());
-        writeln!(writer, "tx_bytes={}", p.get_tx_bytes());
+        let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
+
+        writeln!(writer, "rx_bytes={}", tx_bytes);
+        writeln!(writer, "tx_bytes={}", rx_bytes);
     }
     0
 }

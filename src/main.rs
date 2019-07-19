@@ -75,6 +75,7 @@ fn main() {
                 .default_value("/tmp/boringtun.err"),
             Arg::with_name("disable-drop-privileges")
                 .long("disable-drop-privileges")
+                .env("WG_SUDO")
                 .help("Do not drop sudo privileges"),
             Arg::with_name("disable-connected-udp")
                 .long("disable-connected-udp")

@@ -40,7 +40,9 @@ struct stats
     int64_t time_since_last_handshake;
     size_t tx_bytes;
     size_t rx_bytes;
-    uint8_t reserved[64];
+    float estimated_loss;
+    int32_t estimated_rtt; // rtt estimated on time it took to complete lateset initiated handshake in ms
+    uint8_t reserved[56];  // decrement appropriately when adding new fields
 };
 
 struct x25519_key

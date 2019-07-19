@@ -176,7 +176,7 @@ impl DeviceHandle {
     pub fn clean(&mut self) {
         for path in &self.device.read().cleanup_paths {
             // attempt to remove any file we created in the work dir
-            std::fs::remove_file(&path).ok();
+            let _ = std::fs::remove_file(&path);
         }
     }
 
@@ -268,6 +268,7 @@ impl Device {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn update_peer(
         &mut self,
         pub_key: X25519PublicKey,
@@ -510,7 +511,9 @@ impl Device {
         self.queue.new_periodic_event(
             // Reset the rate limiter every second give or take
             Box::new(|d, _| {
-                d.rate_limiter.as_ref().map(|r| r.reset_count());
+                if let Some(r) = d.rate_limiter.as_ref() {
+                    r.reset_count()
+                }
                 Action::Continue
             }),
             std::time::Duration::from_secs(1),
@@ -540,10 +543,10 @@ impl Device {
                         }
                         TunnResult::Err(e) => eprintln!("Timer error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {
-                            peer.add_tx_bytes(match endpoint_addr {
+                            match endpoint_addr {
                                 SocketAddr::V4(_) => udp4.sendto(packet, endpoint_addr),
                                 SocketAddr::V6(_) => udp6.sendto(packet, endpoint_addr),
-                            });
+                            };
                         }
                         _ => panic!("Unexpected result from update_timers"),
                     };
@@ -622,16 +625,16 @@ impl Device {
                         TunnResult::Err(_) => continue,
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
-                            peer.add_tx_bytes(udp.sendto(packet, addr));
+                            udp.sendto(packet, addr);
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if peer.is_allowed_ip(addr) {
-                                peer.add_rx_bytes(t.iface.write4(packet))
+                                t.iface.write4(packet);
                             }
                         }
                         TunnResult::WriteToTunnelV6(packet, addr) => {
                             if peer.is_allowed_ip(addr) {
-                                peer.add_rx_bytes(t.iface.write6(packet))
+                                t.iface.write6(packet);
                             }
                         }
                     };
@@ -641,7 +644,7 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             peer.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            peer.add_tx_bytes(udp.write(packet));
+                            udp.write(packet);
                         }
                     }
 
@@ -691,16 +694,16 @@ impl Device {
                         TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
-                            peer.add_tx_bytes(udp.write(packet));
+                            udp.write(packet);
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if peer.is_allowed_ip(addr) {
-                                peer.add_rx_bytes(iface.write4(packet))
+                                iface.write4(packet);
                             }
                         }
                         TunnResult::WriteToTunnelV6(packet, addr) => {
                             if peer.is_allowed_ip(addr) {
-                                peer.add_rx_bytes(iface.write6(packet))
+                                iface.write6(packet);
                             }
                         }
                     };
@@ -710,7 +713,7 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             peer.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            peer.add_tx_bytes(udp.write(packet));
+                            udp.write(packet);
                         }
                     }
 
@@ -761,11 +764,11 @@ impl Device {
                                 let endpoint = peer.endpoint();
                                 if let Some(ref conn) = endpoint.conn {
                                     // Prefer to send using the connected socket
-                                    peer.add_tx_bytes(conn.write(packet));
+                                    conn.write(packet);
                                 } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
-                                    peer.add_tx_bytes(udp4.sendto(packet, addr));
+                                    udp4.sendto(packet, addr);
                                 } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
-                                    peer.add_tx_bytes(udp6.sendto(packet, addr));
+                                    udp6.sendto(packet, addr);
                                 } else {
                                     eprintln!("No endpoint for peer");
                                 }

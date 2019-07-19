@@ -6,7 +6,6 @@ use crate::device::*;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Default, Debug)]
 pub struct Endpoint {
@@ -17,8 +16,6 @@ pub struct Endpoint {
 pub struct Peer {
     pub(crate) tunnel: Box<Tunn>, // The associated tunnel struct
     index: u32,                   // The index the tunnel uses
-    rx_bytes: AtomicUsize,
-    tx_bytes: AtomicUsize,
     endpoint: spin::RwLock<Endpoint>,
     allowed_ips: AllowedIps<()>,
     preshared_key: Option<[u8; 32]>,
@@ -56,24 +53,16 @@ impl Peer {
         allowed_ips: &[AllowedIP],
         preshared_key: Option<[u8; 32]>,
     ) -> Peer {
-        let mut peer = Peer {
+        Peer {
             tunnel,
             index,
-            rx_bytes: AtomicUsize::new(0),
-            tx_bytes: AtomicUsize::new(0),
             endpoint: spin::RwLock::new(Endpoint {
                 addr: endpoint,
                 conn: None,
             }),
-            allowed_ips: Default::default(),
+            allowed_ips: allowed_ips.iter().collect(),
             preshared_key,
-        };
-
-        for AllowedIP { addr, cidr } in allowed_ips {
-            peer.allowed_ips.insert(*addr, *cidr as _, ());
         }
-
-        peer
     }
 
     pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
@@ -143,22 +132,6 @@ impl Peer {
         endpoint.conn = Some(Arc::clone(&udp_conn));
 
         Ok(udp_conn)
-    }
-
-    pub fn add_rx_bytes(&self, amt: usize) {
-        self.rx_bytes.fetch_add(amt, Ordering::Relaxed);
-    }
-
-    pub fn add_tx_bytes(&self, amt: usize) {
-        self.tx_bytes.fetch_add(amt, Ordering::Relaxed);
-    }
-
-    pub fn get_rx_bytes(&self) -> usize {
-        self.rx_bytes.load(Ordering::Relaxed)
-    }
-
-    pub fn get_tx_bytes(&self) -> usize {
-        self.tx_bytes.load(Ordering::Relaxed)
     }
 
     pub fn is_allowed_ip<I: Into<IpAddr>>(&self, addr: I) -> bool {

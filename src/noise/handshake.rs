@@ -165,6 +165,7 @@ pub struct Handshake {
     cookies: Cookies,
     last_handshake_timestamp: Tai64N, // The timestamp of the last handshake we received
     stamper: TimeStamper,             // TODO: make TimeStamper a singleton
+    pub(super) last_rtt: Option<u32>,
 }
 
 #[derive(Default)]
@@ -281,6 +282,7 @@ impl Handshake {
             last_handshake_timestamp: Tai64N::zero(),
             stamper: TimeStamper::new(),
             cookies: Default::default(),
+            last_rtt: None,
         })
     }
 
@@ -418,14 +420,21 @@ impl Handshake {
     ) -> Result<Session, WireGuardError> {
         let state = std::mem::replace(&mut self.state, HandshakeState::None);
 
-        let (mut chaining_key, mut hash, ephemeral_private, local_index) = match state {
+        let (mut chaining_key, mut hash, ephemeral_private, local_index, time_sent) = match state {
             HandshakeState::InitSent {
                 chaining_key,
                 hash,
                 ephemeral_private,
                 local_index,
+                time_sent,
                 ..
-            } => (chaining_key, hash, ephemeral_private, local_index),
+            } => (
+                chaining_key,
+                hash,
+                ephemeral_private,
+                local_index,
+                time_sent,
+            ),
             _ => {
                 std::mem::replace(&mut self.state, state);
                 return Err(WireGuardError::UnexpectedPacket);
@@ -492,6 +501,9 @@ impl Handshake {
         let temp3 = HMAC!(temp1, temp2, [0x02]);
 
         self.state = HandshakeState::None;
+
+        let rtt_time = Instant::now().duration_since(time_sent);
+        self.last_rtt = Some(rtt_time.as_millis() as u32);
 
         Ok(Session::new(local_index, peer_index, temp3, temp2))
     }
@@ -658,7 +670,7 @@ impl Handshake {
         let (sender_index, rest) = rest.split_at_mut(4);
         let (receiver_index, rest) = rest.split_at_mut(4);
         let (unencrypted_ephemeral, rest) = rest.split_at_mut(32);
-        let (mut encrypted_nothing, _) = rest.split_at_mut(0 + 16);
+        let (mut encrypted_nothing, _) = rest.split_at_mut(16);
 
         // responder.ephemeral_private = DH_GENERATE()
         let ephemeral_private = X25519EphemeralKey::new();

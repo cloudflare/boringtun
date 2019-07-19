@@ -47,6 +47,7 @@ struct ReceivingKeyCounterValidator {
     // In order to avoid replays while allowing for some reordering of the packets, we keep a
     // bitmap of received packets, and the value of the highest counter
     next: u64,
+    receive_cnt: u64, // Used to estimate packet loss
     bitmap: [u64; N_WORDS as usize],
 }
 
@@ -158,7 +159,7 @@ impl Session {
         receiving_key: [u8; 32],
         sending_key: [u8; 32],
     ) -> Session {
-        return Session {
+        Session {
             receiving_index: local_index,
             sending_index: peer_index,
             #[cfg(not(target_arch = "arm"))]
@@ -171,10 +172,10 @@ impl Session {
             sender: ChaCha20Poly1305::new_aead(&sending_key[..]),
             sending_key_counter: AtomicUsize::new(0),
             receiving_key_counter: spin::Mutex::new(Default::default()),
-        };
+        }
     }
 
-    pub fn local_index(&self) -> usize {
+    pub(super) fn local_index(&self) -> usize {
         self.receiving_index as usize
     }
 
@@ -191,7 +192,11 @@ impl Session {
     // Returns true if receiving counter is good to use, and marks it as used {
     fn receiving_counter_mark(&self, counter: u64) -> Result<(), WireGuardError> {
         let mut counter_validator = self.receiving_key_counter.lock();
-        counter_validator.mark_did_receive(counter)
+        let ret = counter_validator.mark_did_receive(counter);
+        if ret.is_ok() {
+            counter_validator.receive_cnt += 1;
+        }
+        ret
     }
 
     // src - an IP packet from the interface
@@ -285,6 +290,12 @@ impl Session {
         // After decryption is done, check counter again, and mark as received
         self.receiving_counter_mark(packet.counter)?;
         Ok(ret)
+    }
+
+    // Returns the estimated downstream packet loss for this session
+    pub(super) fn current_packet_cnt(&self) -> (u64, u64) {
+        let counter_validator = self.receiving_key_counter.lock();
+        (counter_validator.next, counter_validator.receive_cnt)
     }
 }
 

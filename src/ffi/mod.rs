@@ -49,7 +49,9 @@ pub struct stats {
     pub time_since_last_handshake: i64,
     pub tx_bytes: usize,
     pub rx_bytes: usize,
-    reserved: [u8; 64], // Make sure to add new fields in this space, keeping total size constant
+    pub estimated_loss: f32,
+    pub estimated_rtt: i32,
+    reserved: [u8; 56], // Make sure to add new fields in this space, keeping total size constant
 }
 
 impl<'a> From<TunnResult<'a>> for wireguard_result {
@@ -294,12 +296,14 @@ pub unsafe extern "C" fn wireguard_force_handshake(
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_stats(tunnel: *mut Tunn) -> stats {
     let tunnel = tunnel.as_ref().unwrap();
-    let (time, tx_bytes, rx_bytes) = tunnel.stats();
+    let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt) = tunnel.stats();
     stats {
         time_since_last_handshake: time.map(|t| t as i64).unwrap_or(-1),
         tx_bytes,
         rx_bytes,
-        reserved: [0u8; 64],
+        estimated_loss,
+        estimated_rtt: estimated_rtt.map(|r| r as i32).unwrap_or(-1),
+        reserved: [0u8; 56],
     }
 }
 
