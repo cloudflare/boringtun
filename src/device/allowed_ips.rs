@@ -1,7 +1,10 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use crate::device::peer::AllowedIP;
+
 use std::cmp::min;
+use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// A trie of IP/cidr addresses
@@ -13,6 +16,18 @@ pub struct AllowedIps<D> {
 impl<D> Default for AllowedIps<D> {
     fn default() -> Self {
         Self { v4: None, v6: None }
+    }
+}
+
+impl<'a> FromIterator<&'a AllowedIP> for AllowedIps<()> {
+    fn from_iter<I: IntoIterator<Item = &'a AllowedIP>>(iter: I) -> Self {
+        let mut allowed_ips: AllowedIps<()> = Default::default();
+
+        for ip in iter {
+            allowed_ips.insert(ip.addr, ip.cidr as usize, ());
+        }
+
+        allowed_ips
     }
 }
 

@@ -53,22 +53,16 @@ impl Peer {
         allowed_ips: &[AllowedIP],
         preshared_key: Option<[u8; 32]>,
     ) -> Peer {
-        let mut peer = Peer {
+        Peer {
             tunnel,
             index,
             endpoint: spin::RwLock::new(Endpoint {
                 addr: endpoint,
                 conn: None,
             }),
-            allowed_ips: Default::default(),
+            allowed_ips: allowed_ips.iter().collect(),
             preshared_key,
-        };
-
-        for AllowedIP { addr, cidr } in allowed_ips {
-            peer.allowed_ips.insert(*addr, *cidr as _, ());
         }
-
-        peer
     }
 
     pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
