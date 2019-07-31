@@ -165,6 +165,7 @@ pub unsafe extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> 
 pub unsafe extern "C" fn new_tunnel(
     static_private: *const c_char,
     server_static_public: *const c_char,
+    keep_alive: u16,
     log_printer: Option<unsafe extern "C" fn(*const c_char)>,
     log_level: u32,
 ) -> *mut Tunn {
@@ -190,11 +191,17 @@ pub unsafe extern "C" fn new_tunnel(
         Ok(key) => key,
     };
 
+    let keep_alive = if keep_alive == 0 {
+        None
+    } else {
+        Some(keep_alive)
+    };
+
     let mut tunnel = match Tunn::new(
         Arc::new(private_key),
         Arc::new(public_key),
         None,
-        None,
+        keep_alive,
         0,
         None,
     ) {
