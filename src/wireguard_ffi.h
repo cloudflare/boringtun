@@ -67,6 +67,7 @@ int check_base64_encoded_x25519_key(const char *key);
 // Allocate a new tunnel
 struct wireguard_tunnel *new_tunnel(const char *static_private,
                                     const char *server_static_public,
+                                    uint16_t keep_alive,
                                     void (*log_printer)(const char *),
                                     enum log_level log_level);
 
