@@ -599,6 +599,10 @@ impl Tunn {
 
         (time, tx_bytes, rx_bytes, loss, rtt)
     }
+
+    pub fn is_expired(&self) -> bool {
+        self.handshake.lock().is_expired()
+    }
 }
 
 #[inline(always)]
