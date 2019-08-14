@@ -3,10 +3,7 @@
 
 use super::Error;
 use libc::*;
-use std::mem::size_of;
-use std::mem::size_of_val;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::ptr::null_mut;
 
 pub fn errno() -> i32 {
     unsafe { *__error() }
@@ -18,8 +15,10 @@ pub fn errno_str() -> String {
     c_str.to_string_lossy().into_owned()
 }
 
+#[cfg(target_os = "macos")]
 const CTRL_NAME: &[u8] = b"com.apple.net.utun_control";
 
+#[cfg(target_os = "macos")]
 #[repr(C)]
 pub struct ctl_info {
     pub ctl_id: uint32_t,
@@ -39,7 +38,7 @@ union IfrIfru {
     ifru_phys: c_int,
     ifru_media: c_int,
     ifru_intval: c_int,
-    //ifru_data: caddr_t,
+    ifru_data: *mut c_char,
     //ifru_devmtu: ifdevmtu,
     //ifru_kpi: ifkpi,
     ifru_wake_flags: uint32_t,
@@ -54,17 +53,40 @@ pub struct ifreq {
     ifr_ifru: IfrIfru,
 }
 
-const CTLIOCGINFO: uint64_t = 0x0000_0000_c064_4e03;
-const SIOCGIFMTU: uint64_t = 0x0000_0000_c020_6933;
+#[cfg(target_os = "macos")]
+const CTLIOCGINFO: uint64_t = 0xc064_4e03;
+const SIOCGIFMTU: uint64_t = 0xc020_6933;
+#[cfg(target_os = "freebsd")]
+const TUNSIFHEAD: u64 = 0x8004_7460;
+#[cfg(target_os = "freebsd")]
+const SIOCIFDESTROY: u64 = 0x8020_6979;
+#[cfg(target_os = "freebsd")]
+const SIOCSIFNAME: u64 = 0x8020_6928;
+
+#[cfg(target_os = "freebsd")]
+extern "C" {
+    fn fdevname(fd: RawFd) -> *mut c_char;
+}
+
+#[cfg(target_os = "freebsd")]
+fn devname(fd: RawFd) -> String {
+    let name = unsafe { fdevname(fd) };
+    let c_str = unsafe { std::ffi::CStr::from_ptr(name) };
+    c_str.to_string_lossy().into_owned()
+}
 
 #[derive(Default, Debug)]
 pub struct TunSocket {
     fd: RawFd,
+    name: String,
 }
 
 impl Drop for TunSocket {
     fn drop(&mut self) {
         unsafe { close(self.fd) };
+        #[cfg(target_os = "freebsd")]
+        // On FreeBSD we want to remove the tunnel manually
+        TunSocket::remove(&self.name).ok();
     }
 }
 
@@ -74,6 +96,7 @@ impl AsRawFd for TunSocket {
     }
 }
 
+#[cfg(target_os = "macos")]
 // On Darwin tunnel can only be named utunXXX
 pub fn parse_utun_name(name: &str) -> Result<u32, Error> {
     if !name.starts_with("utun") {
@@ -95,6 +118,7 @@ pub fn parse_utun_name(name: &str) -> Result<u32, Error> {
 }
 
 impl TunSocket {
+    #[cfg(target_os = "macos")]
     pub fn new(name: &str) -> Result<TunSocket, Error> {
         let idx = parse_utun_name(name)?;
 
@@ -115,7 +139,7 @@ impl TunSocket {
         }
 
         let addr = sockaddr_ctl {
-            sc_len: size_of::<sockaddr_ctl>() as u8,
+            sc_len: std::mem::size_of::<sockaddr_ctl>() as u8,
             sc_family: AF_SYSTEM as u8,
             ss_sysaddr: AF_SYS_CONTROL as u16,
             sc_id: info.ctl_id,
@@ -127,7 +151,7 @@ impl TunSocket {
             connect(
                 fd,
                 &addr as *const sockaddr_ctl as _,
-                size_of_val(&addr) as _,
+                std::mem::size_of_val(&addr) as _,
             )
         } < 0
         {
@@ -137,15 +161,44 @@ impl TunSocket {
             return Err(Error::Connect(err_string));
         }
 
-        Ok(TunSocket { fd })
+        let name = TunSocket::get_name(fd)?;
+
+        Ok(TunSocket { fd, name })
     }
 
-    pub fn name(&self) -> Result<String, Error> {
+    #[cfg(target_os = "freebsd")]
+    pub fn new(name: &str) -> Result<TunSocket, Error> {
+        let name_cstr = std::ffi::CString::new(name).unwrap();
+        if unsafe { if_nametoindex(name_cstr.as_ptr()) } > 0 {
+            // An interface with the desired name already exists, try to remove it first
+            // it will only succeed if the interface is unused
+            TunSocket::remove(name)?;
+        }
+
+        // Open a new tunnel
+        let fd = match unsafe { open(b"/dev/tun\0".as_ptr() as _, O_RDWR) } {
+            -1 => return Err(Error::Socket(errno_str())),
+            fd => fd,
+        };
+
+        // This enables 4 byte header to allow ipv6 packets
+        let enable: c_int = 1;
+        if unsafe { ioctl(fd, TUNSIFHEAD, &enable) } < 0 {
+            return Err(Error::IOCtl(errno_str()));
+        }
+
+        let name = TunSocket::set_name(&devname(fd), name)?;
+
+        Ok(TunSocket { fd, name })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn get_name(fd: RawFd) -> Result<String, Error> {
         let mut tunnel_name = [0u8; 256];
         let mut tunnel_name_len: socklen_t = tunnel_name.len() as u32;
         if unsafe {
             getsockopt(
-                self.fd,
+                fd,
                 SYSPROTO_CONTROL,
                 UTUN_OPT_IFNAME,
                 tunnel_name.as_mut_ptr() as _,
@@ -158,6 +211,71 @@ impl TunSocket {
         }
 
         Ok(String::from_utf8_lossy(&tunnel_name[..(tunnel_name_len - 1) as usize]).to_string())
+    }
+
+    #[cfg(target_os = "freebsd")]
+    // Attempt to rename an interface
+    fn set_name(old_name: &str, new_name: &str) -> Result<String, Error> {
+        let fd = match unsafe { socket(AF_INET, SOCK_STREAM, IPPROTO_IP) } {
+            -1 => return Err(Error::Socket(errno_str())),
+            fd @ _ => fd,
+        };
+
+        let wanted_name = std::ffi::CString::new(new_name).unwrap();
+        let iface_name: &[u8] = old_name.as_ref();
+        let mut ifr = ifreq {
+            ifr_name: [0; IF_NAMESIZE],
+            ifr_ifru: IfrIfru {
+                ifru_data: wanted_name.as_ptr() as _,
+            },
+        };
+
+        if iface_name.len() >= ifr.ifr_name.len() {
+            return Err(Error::InvalidTunnelName);
+        }
+
+        ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
+
+        if unsafe { ioctl(fd, SIOCSIFNAME, &ifr) } < 0 {
+            return Err(Error::IOCtl(errno_str()));
+        }
+
+        unsafe { close(fd) };
+
+        Ok(new_name.to_owned())
+    }
+
+    #[cfg(target_os = "freebsd")]
+    // Attempt to remove an interface by name
+    fn remove(name: &str) -> Result<(), Error> {
+        let fd = match unsafe { socket(AF_INET, SOCK_STREAM, IPPROTO_IP) } {
+            -1 => return Err(Error::Socket(errno_str())),
+            fd @ _ => fd,
+        };
+
+        let iface_name: &[u8] = name.as_ref();
+        let mut ifr = ifreq {
+            ifr_name: [0; IF_NAMESIZE],
+            ifr_ifru: IfrIfru { ifru_mtu: 0 },
+        };
+
+        if iface_name.len() >= ifr.ifr_name.len() {
+            return Err(Error::InvalidTunnelName);
+        }
+
+        ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
+
+        if unsafe { ioctl(fd, SIOCIFDESTROY, &ifr) } < 0 {
+            return Err(Error::IOCtl(errno_str()));
+        }
+
+        unsafe { close(fd) };
+
+        Ok(())
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn set_non_blocking(self) -> Result<TunSocket, Error> {
@@ -177,8 +295,7 @@ impl TunSocket {
             fd => fd,
         };
 
-        let name = self.name()?;
-        let iface_name: &[u8] = name.as_ref();
+        let iface_name: &[u8] = self.name.as_ref();
         let mut ifr = ifreq {
             ifr_name: [0; IF_NAMESIZE],
             ifr_ifru: IfrIfru { ifru_mtu: 0 },
@@ -197,7 +314,7 @@ impl TunSocket {
 
     fn write(&self, src: &[u8], af: u8) -> usize {
         let mut hdr = [0u8, 0u8, 0u8, af as u8];
-        let mut iov = [
+        let iov = [
             iovec {
                 iov_base: hdr.as_mut_ptr() as _,
                 iov_len: hdr.len(),
@@ -208,17 +325,7 @@ impl TunSocket {
             },
         ];
 
-        let msg_hdr = msghdr {
-            msg_name: null_mut(),
-            msg_namelen: 0,
-            msg_iov: &mut iov[0],
-            msg_iovlen: iov.len() as _,
-            msg_control: null_mut(),
-            msg_controllen: 0,
-            msg_flags: 0,
-        };
-
-        match unsafe { sendmsg(self.fd, &msg_hdr, 0) } {
+        match unsafe { writev(self.fd, iov.as_ptr(), 2) } {
             -1 => 0,
             n => n as usize,
         }
@@ -246,17 +353,7 @@ impl TunSocket {
             },
         ];
 
-        let mut msg_hdr = msghdr {
-            msg_name: null_mut(),
-            msg_namelen: 0,
-            msg_iov: &mut iov[0],
-            msg_iovlen: iov.len() as _,
-            msg_control: null_mut(),
-            msg_controllen: 0,
-            msg_flags: 0,
-        };
-
-        match unsafe { recvmsg(self.fd, &mut msg_hdr, 0) } {
+        match unsafe { readv(self.fd, iov.as_mut_ptr(), 2) } {
             -1 => Err(Error::IfaceRead(errno())),
             0..=4 => Ok(&mut dst[..0]),
             n => Ok(&mut dst[..(n - 4) as usize]),

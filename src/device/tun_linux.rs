@@ -92,8 +92,8 @@ impl TunSocket {
         Ok(TunSocket { fd, name })
     }
 
-    pub fn name(&self) -> Result<String, Error> {
-        Ok(self.name.clone())
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn set_non_blocking(self) -> Result<TunSocket, Error> {
