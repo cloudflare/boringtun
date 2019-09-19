@@ -33,10 +33,10 @@ union IfrIfru {
     //ifru_data: caddr_t,
     //ifru_devmtu: ifdevmtu,
     //ifru_kpi: ifkpi,
-    ifru_wake_flags: uint32_t,
-    ifru_route_refcnt: uint32_t,
+    ifru_wake_flags: u32,
+    ifru_route_refcnt: u32,
     ifru_cap: [c_int; 2],
-    ifru_functional_type: uint32_t,
+    ifru_functional_type: u32,
 }
 
 #[repr(C)]
@@ -67,7 +67,7 @@ impl TunSocket {
     pub fn new(name: &str) -> Result<TunSocket, Error> {
         let fd = match unsafe { open(b"/dev/net/tun\0".as_ptr() as _, O_RDWR) } {
             -1 => return Err(Error::Socket(errno_str())),
-            fd @ _ => fd,
+            fd => fd,
         };
 
         let iface_name = name.as_bytes();
@@ -99,7 +99,7 @@ impl TunSocket {
     pub fn set_non_blocking(self) -> Result<TunSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
             -1 => Err(Error::FCntl(errno_str())),
-            flags @ _ => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
+            flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
                 -1 => Err(Error::FCntl(errno_str())),
                 _ => Ok(self),
             },
@@ -110,7 +110,7 @@ impl TunSocket {
     pub fn mtu(&self) -> Result<usize, Error> {
         let fd = match unsafe { socket(AF_INET, SOCK_STREAM, IPPROTO_IP) } {
             -1 => return Err(Error::Socket(errno_str())),
-            fd @ _ => fd,
+            fd => fd,
         };
 
         let name = self.name()?;
@@ -149,7 +149,7 @@ impl TunSocket {
     pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         match unsafe { read(self.fd, dst.as_mut_ptr() as _, dst.len()) } {
             -1 => Err(Error::IfaceRead(errno())),
-            n @ _ => Ok(&mut dst[..n as usize]),
+            n => Ok(&mut dst[..n as usize]),
         }
     }
 }

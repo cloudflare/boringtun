@@ -99,6 +99,7 @@ impl<H: Sync + Send> EventPoll<H> {
     /// Add and enable a new write event with the factory.
     /// The event is triggered when a Write operation on the provided trigger becomes possible
     /// For TCP sockets it means that the socket was succesfully connected
+    #[allow(dead_code)]
     pub fn new_write_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
         // Create an event descriptor
         let flags = EPOLLOUT | EPOLLET | EPOLLONESHOT;
@@ -132,7 +133,7 @@ impl<H: Sync + Send> EventPoll<H> {
 
         let ts = timespec {
             tv_sec: period.as_secs() as _,
-            tv_nsec: period.subsec_nanos() as _,
+            tv_nsec: i64::from(period.subsec_nanos()) as _,
         };
 
         let spec = itimerspec {
@@ -194,7 +195,7 @@ impl<H: Sync + Send> EventPoll<H> {
             let mut sigset = std::mem::zeroed();
             sigemptyset(&mut sigset);
             sigaddset(&mut sigset, signal);
-            sigprocmask(SIG_BLOCK, &mut sigset, null_mut());
+            sigprocmask(SIG_BLOCK, &sigset, null_mut());
             signalfd(-1, &sigset, SFD_NONBLOCK)
         } {
             -1 => return Err(Error::EventQueue(errno_str())),
@@ -219,7 +220,7 @@ impl<H: Sync + Send> EventPoll<H> {
     /// is triggered, a single caller thread gets the handler for that event.
     /// In case a notifier is triggered, all waiting threads will receive the same
     /// handler.
-    pub fn wait<'a>(&'a self) -> WaitResult<'a, H> {
+    pub fn wait(&self) -> WaitResult<'_, H> {
         let mut event = epoll_event { events: 0, u64: 0 };
         if unsafe { epoll_wait(self.epoll, &mut event, 1, -1) } == -1 {
             return WaitResult::Error(errno_str());
@@ -333,7 +334,7 @@ impl<H> EventPoll<H> {
     pub unsafe fn clear_event_by_fd(&self, index: RawFd) {
         let mut events = self.events.lock();
         assert!(index >= 0);
-        if let Some(_) = events[index as usize].take() {
+        if events[index as usize].take().is_some() {
             epoll_ctl(self.epoll, EPOLL_CTL_DEL, index, null_mut());
         }
     }
@@ -359,7 +360,7 @@ impl<'a, H> Drop for EventGuard<'a, H> {
                 self.epoll,
                 EPOLL_CTL_MOD,
                 self.event.fd,
-                &mut self.event.event.clone(),
+                &mut self.event.event,
             );
         }
     }
@@ -367,6 +368,7 @@ impl<'a, H> Drop for EventGuard<'a, H> {
 
 impl<'a, H> EventGuard<'a, H> {
     /// Get a mutable reference to the stored value
+    #[allow(dead_code)]
     pub fn get_mut(&mut self) -> &mut H {
         &mut self.event.handler
     }

@@ -57,7 +57,7 @@ impl<D> AllowedIps<D> {
         }
     }
 
-    pub fn remove(&mut self, predicate: &Fn(&D) -> bool) {
+    pub fn remove(&mut self, predicate: &dyn Fn(&D) -> bool) {
         remove32(&mut self.v4, predicate);
         remove128(&mut self.v6, predicate);
     }
@@ -166,7 +166,7 @@ macro_rules! build_node {
             }
         }
 
-        fn $remove<D>(node: &mut Option<$name<D>>, predicate: &Fn(&D) -> bool) {
+        fn $remove<D>(node: &mut Option<$name<D>>, predicate: &dyn Fn(&D) -> bool) {
             match node {
                 None => return,
                 Some($name::Node {
