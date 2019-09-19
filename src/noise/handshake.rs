@@ -13,8 +13,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 // static CONSTRUCTION: &'static [u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
 // static IDENTIFIER: &'static [u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
-pub static LABEL_MAC1: &'static [u8] = b"mac1----";
-pub static LABEL_COOKIE: &'static [u8] = b"cookie--";
+pub static LABEL_MAC1: &[u8] = b"mac1----";
+pub static LABEL_COOKIE: &[u8] = b"cookie--";
 const KEY_LEN: usize = 32;
 const TIMESTAMP_LEN: usize = 12;
 

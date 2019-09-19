@@ -168,7 +168,7 @@ mod tests {
         network_socket: UdpSocket,
         static_private: &str,
         peer_static_public: &str,
-        logger: Box<Fn(&str) + Send>,
+        logger: Box<dyn Fn(&str) + Send>,
         close: Arc<AtomicBool>,
     ) -> UdpSocket {
         let static_private = static_private.parse().unwrap();

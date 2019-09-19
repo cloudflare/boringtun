@@ -76,7 +76,7 @@ impl<'a> From<WireGuardError> for TunnResult<'a> {
     }
 }
 
-type LogFunction = Box<Fn(&str) + Send>;
+type LogFunction = Box<dyn Fn(&str) + Send>;
 
 /// Tunnel represents a point-to-point WireGuard connection
 pub struct Tunn {
@@ -308,7 +308,7 @@ impl Tunn {
                 nonce: &src[8..32],
                 encrypted_cookie: &src[32..64],
             }),
-            (DATA, DATA_OVERHEAD_SZ...std::usize::MAX) => Packet::PacketData(PacketData {
+            (DATA, DATA_OVERHEAD_SZ..=std::usize::MAX) => Packet::PacketData(PacketData {
                 receiver_idx: u32::from_le_bytes(make_array(&src[4..8])),
                 counter: u64::from_le_bytes(make_array(&src[8..16])),
                 encrypted_encapsulated_packet: &src[16..],

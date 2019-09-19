@@ -49,7 +49,7 @@ fn format_float(number: f64) -> String {
     formatted
 }
 
-fn run_bench(test_func: &mut FnMut() -> usize) -> f64 {
+fn run_bench(test_func: &mut dyn FnMut() -> usize) -> f64 {
     let mut best_time = std::f64::MAX;
 
     // Take the best result out of ITRS runs

@@ -22,7 +22,7 @@ const CTRL_NAME: &[u8] = b"com.apple.net.utun_control";
 
 #[repr(C)]
 pub struct ctl_info {
-    pub ctl_id: uint32_t,
+    pub ctl_id: u32,
     pub ctl_name: [c_uchar; 96],
 }
 
@@ -42,10 +42,10 @@ union IfrIfru {
     //ifru_data: caddr_t,
     //ifru_devmtu: ifdevmtu,
     //ifru_kpi: ifkpi,
-    ifru_wake_flags: uint32_t,
-    ifru_route_refcnt: uint32_t,
+    ifru_wake_flags: u32,
+    ifru_route_refcnt: u32,
     ifru_cap: [c_int; 2],
-    ifru_functional_type: uint32_t,
+    ifru_functional_type: u32,
 }
 
 #[repr(C)]
@@ -54,8 +54,8 @@ pub struct ifreq {
     ifr_ifru: IfrIfru,
 }
 
-const CTLIOCGINFO: uint64_t = 0x0000_0000_c064_4e03;
-const SIOCGIFMTU: uint64_t = 0x0000_0000_c020_6933;
+const CTLIOCGINFO: u64 = 0x0000_0000_c064_4e03;
+const SIOCGIFMTU: u64 = 0x0000_0000_c020_6933;
 
 #[derive(Default, Debug)]
 pub struct TunSocket {
