@@ -328,6 +328,7 @@ impl Tunn {
             let mut handshake = self.handshake.lock();
             handshake.receive_handshake_initialization(p, dst)?
         };
+
         // Store new session in ring buffer
         let index = session.local_index() % N_SESSIONS;
         *self.sessions[index].write() = Some(session);
@@ -391,7 +392,7 @@ impl Tunn {
         }
         if self.sessions[cur_idx].read().is_none()
             || self.timers.session_timers[new_idx].time()
-                > self.timers.session_timers[cur_idx].time()
+                >= self.timers.session_timers[cur_idx].time()
         {
             self.current.store(new_idx, Ordering::Relaxed);
         }

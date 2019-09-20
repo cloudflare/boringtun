@@ -330,7 +330,7 @@ impl Handshake {
         let index = self.next_index;
         let idx8 = index as u8;
         self.next_index = (index & !0xff) | u32::from(idx8.wrapping_add(1));
-        index
+        self.next_index
     }
 
     pub(crate) fn set_static_private(
