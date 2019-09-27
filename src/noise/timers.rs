@@ -78,7 +78,7 @@ impl Timers {
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     pub(super) fn clear(&self) {
-        let now = Instant::now().duration_since(self.time_started);
+        let now = self.time_started.elapsed();
         for t in &self.timers[..] {
             t.set(now);
         }
@@ -164,6 +164,14 @@ impl Tunn {
 
         let time = Instant::now();
         let timers = &self.timers;
+        // This should be unnecessary, but we observe actual panics in the wild
+        // where both clock monotonicity *and* the Rust stdlib protections
+        // against nonmonotonic clocks violate their contracts.
+        let time = if time > timers.time_started {
+            time
+        } else {
+            timers.time_started
+        };
 
         if timers.should_reset_rr {
             self.rate_limiter.reset_count();
