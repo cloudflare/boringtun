@@ -310,11 +310,7 @@ impl Device {
 
         if self.config.log_level > Verbosity::None {
             let pub_key = base64::encode(pub_key.as_bytes());
-            let peer_name = format!(
-                "peer({}…{})",
-                &pub_key[0..4],
-                &pub_key[pub_key.len() - 4..]
-            );
+            let peer_name = format!("peer({}…{})", &pub_key[0..4], &pub_key[pub_key.len() - 4..]);
             tunn.set_logger(
                 Box::new(move |e: &str| println!("{:?} {} {}", chrono::Utc::now(), peer_name, e)),
                 self.config.log_level,

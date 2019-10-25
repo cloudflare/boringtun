@@ -224,7 +224,9 @@ impl Tunn {
                     return TunnResult::Err(WireGuardError::ConnectionExpired);
                 }
 
-                if time.duration_since(time_init_sent) >= REKEY_TIMEOUT {
+                if time_init_sent.elapsed() >= REKEY_TIMEOUT {
+                    // We avoid using `time` here, because it can be earlier than `time_init_sent`.
+                    // Once `checked_duration_since` is stable we can use that.
                     // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
                     // if a response has not been received, where jitter is some random
                     // value between 0 and 333 ms.
