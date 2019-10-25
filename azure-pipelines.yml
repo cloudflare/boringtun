@@ -34,6 +34,11 @@ jobs:
       rustup target add aarch64-apple-ios
       cargo build --lib --target aarch64-apple-ios
     displayName: 'Build library for iOS'
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      rustup component add rustfmt
+      cargo fmt --all -- --check
+    displayName: 'Cargo fmt'
 
 - job: Linux_x86_64
   displayName: 'Linux x86-64'
@@ -47,6 +52,11 @@ jobs:
       sudo apt-get install wireguard -y
     displayName: 'Install wireguard'
   - template: ci/azure-build.yml
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      rustup component add rustfmt
+      cargo fmt --all -- --check
+    displayName: 'Cargo fmt'
 
 - job: Linux_aarch64
   displayName: 'Linux aarch64'
