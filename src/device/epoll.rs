@@ -351,7 +351,8 @@ impl<'a, H> Drop for EventGuard<'a, H> {
     fn drop(&mut self) {
         if self.event.needs_read {
             // Must read from the event to reset it before we enable it
-            let mut buf: [u8; 256] = unsafe { std::mem::uninitialized() };
+            let mut buf: [std::mem::MaybeUninit<u8>; 256] =
+                unsafe { std::mem::MaybeUninit::uninit().assume_init() };
             while unsafe { read(self.event.fd, buf.as_mut_ptr() as _, buf.len() as _) } != -1 {}
         }
 
