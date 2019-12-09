@@ -100,10 +100,16 @@ fn main() {
         let log = matches.value_of("log").unwrap();
         let err_log = matches.value_of("err").unwrap();
 
-        let stdout =
-            File::create(&log).unwrap_or_else(|_| panic!("Could not create log file {}", log));
-        let stderr = File::create(&err_log)
-            .unwrap_or_else(|_| panic!("Could not create error log file {}", err_log));
+        let stdout = match File::open(&log) {
+            Ok(fd) => fd,
+            Err(_) => File::create(&log).unwrap_or_else(|_| panic!("Could not create log file {}", log)),
+        };
+
+        let stderr = match File::open(&log) {
+            Ok(fd) => fd,
+            Err(_) => File::create(&err_log)
+                .unwrap_or_else(|_| panic!("Could not create error log file {}", err_log)),
+        };
 
         let daemonize = Daemonize::new()
             .working_directory("/tmp")
