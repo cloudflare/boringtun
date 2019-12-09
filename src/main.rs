@@ -105,7 +105,7 @@ fn main() {
             Err(_) => File::create(&log).unwrap_or_else(|_| panic!("Could not create log file {}", log)),
         };
 
-        let stderr = match File::open(&log) {
+        let stderr = match File::open(&err_log) {
             Ok(fd) => fd,
             Err(_) => File::create(&err_log)
                 .unwrap_or_else(|_| panic!("Could not create error log file {}", err_log)),
