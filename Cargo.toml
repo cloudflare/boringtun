@@ -14,6 +14,7 @@ hex = "0.3"
 untrusted = "0.6"
 spin = { version = "0.5", default-features=false }
 libc = "0.2"
+blake2s_simd = "0.5.9"
 
 [target.'cfg(not(target_arch="arm"))'.dependencies]
 ring = "0.14"

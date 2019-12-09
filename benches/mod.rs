@@ -32,18 +32,21 @@ mod tests {
 
     #[bench]
     fn bench_blake2s_hash_128b(b: &mut Bencher) {
+        b.bytes = 128;
         let data = [0_u8; 128];
         b.iter(|| black_box(Blake2s::new_hash().hash(&data).finalize()));
     }
 
     #[bench]
     fn bench_blake2s_hash_1024b(b: &mut Bencher) {
+        b.bytes = 1024;
         let data = [0_u8; 1024];
         b.iter(|| black_box(Blake2s::new_hash().hash(&data).finalize()));
     }
 
     #[bench]
     fn bench_chacha20poly1305_seal_192b(b: &mut Bencher) {
+        b.bytes = 192;
         let pc = ChaCha20Poly1305::new_aead(&[
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
             25, 26, 27, 28, 29, 30, 31, 32,
@@ -57,6 +60,7 @@ mod tests {
 
     #[bench]
     fn bench_chacha20poly1305_open_192b(b: &mut Bencher) {
+        b.bytes = 192;
         let pc = ChaCha20Poly1305::new_aead(&[
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
             25, 26, 27, 28, 29, 30, 31, 32,
@@ -73,6 +77,7 @@ mod tests {
 
     #[bench]
     fn bench_chacha20poly1305_seal_512b(b: &mut Bencher) {
+        b.bytes = 512;
         let pc = ChaCha20Poly1305::new_aead(&[
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
             25, 26, 27, 28, 29, 30, 31, 32,
@@ -86,6 +91,7 @@ mod tests {
 
     #[bench]
     fn bench_chacha20poly1305_seal_8192b(b: &mut Bencher) {
+        b.bytes = 8192;
         let pc = ChaCha20Poly1305::new_aead(&[
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
             25, 26, 27, 28, 29, 30, 31, 32,
