@@ -193,3 +193,22 @@ impl RateLimiter {
         Ok(packet)
     }
 }
+
+fn constant_time_mac_check(mac1: &[u8], mac2: &[u8]) -> Result<(), WireGuardError> {
+    assert!(mac1.len() == 16);
+    assert!(mac2.len() == 16);
+    if mac1.len() != 16 || mac2.len() != 16 {
+        return Err(WireGuardError::InvalidMac);
+    }
+
+    let mut r = 0u8;
+    for i in 0..16 {
+        r |= mac1[i] ^ mac2[i];
+    }
+
+    if r == 0 {
+        Ok(())
+    } else {
+        Err(WireGuardError::InvalidMac)
+    }
+}
