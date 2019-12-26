@@ -102,7 +102,9 @@ fn main() {
 
         let stdout = match File::open(&log) {
             Ok(fd) => fd,
-            Err(_) => File::create(&log).unwrap_or_else(|_| panic!("Could not create log file {}", log)),
+            Err(_) => {
+                File::create(&log).unwrap_or_else(|_| panic!("Could not create log file {}", log))
+            }
         };
 
         let stderr = match File::open(&err_log) {
