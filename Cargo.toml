@@ -16,7 +16,7 @@ spin = { version = "0.5", default-features=false }
 libc = "0.2"
 
 [target.'cfg(not(target_arch="arm"))'.dependencies]
-ring = "0.14"
+ring = "0.16"
 
 [target.'cfg(not(any(target_os="windows", target_os="ios", target_os="android")))'.dependencies]
 chrono = "0.4"

@@ -13,9 +13,9 @@ pub struct Session {
     receiving_index: u32,
     sending_index: u32,
     #[cfg(not(target_arch = "arm"))]
-    receiver: OpeningKey,
+    receiver: LessSafeKey,
     #[cfg(not(target_arch = "arm"))]
-    sender: SealingKey,
+    sender: LessSafeKey,
     #[cfg(target_arch = "arm")]
     receiver: ChaCha20Poly1305,
     #[cfg(target_arch = "arm")]
@@ -163,9 +163,11 @@ impl Session {
             receiving_index: local_index,
             sending_index: peer_index,
             #[cfg(not(target_arch = "arm"))]
-            receiver: OpeningKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
+            receiver: LessSafeKey::new(
+                UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
+            ),
             #[cfg(not(target_arch = "arm"))]
-            sender: SealingKey::new(&CHACHA20_POLY1305, &sending_key).unwrap(),
+            sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
             #[cfg(target_arch = "arm")]
             receiver: ChaCha20Poly1305::new_aead(&receiving_key[..]),
             #[cfg(target_arch = "arm")]
@@ -223,14 +225,17 @@ impl Session {
             let mut nonce = [0u8; 12];
             nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
             data[..src.len()].copy_from_slice(src);
-            seal_in_place(
-                &self.sender,
-                Nonce::assume_unique_for_key(nonce),
-                Aad::from(&[]),
-                &mut data[..src.len() + AEAD_SIZE],
-                AEAD_SIZE,
-            )
-            .unwrap()
+            self.sender
+                .seal_in_place_separate_tag(
+                    Nonce::assume_unique_for_key(nonce),
+                    Aad::from(&[]),
+                    &mut data[..src.len()],
+                )
+                .map(|tag| {
+                    data[src.len()..src.len() + AEAD_SIZE].copy_from_slice(tag.as_ref());
+                    src.len() + AEAD_SIZE
+                })
+                .unwrap()
         };
 
         #[cfg(target_arch = "arm")]
@@ -269,14 +274,13 @@ impl Session {
             let mut nonce = [0u8; 12];
             nonce[4..12].copy_from_slice(&packet.counter.to_le_bytes());
             dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
-            open_in_place(
-                &self.receiver,
-                Nonce::assume_unique_for_key(nonce),
-                Aad::from(&[]),
-                0,
-                &mut dst[..ct_len],
-            )
-            .map_err(|_| WireGuardError::InvalidAeadTag)?
+            self.receiver
+                .open_in_place(
+                    Nonce::assume_unique_for_key(nonce),
+                    Aad::from(&[]),
+                    &mut dst[..ct_len],
+                )
+                .map_err(|_| WireGuardError::InvalidAeadTag)?
         };
 
         #[cfg(target_arch = "arm")]
