@@ -138,7 +138,7 @@ impl Peer {
         self.allowed_ips.find(addr.into()).is_some()
     }
 
-    pub fn allowed_ips(&self) -> Iter<(())> {
+    pub fn allowed_ips(&self) -> Iter<()> {
         self.allowed_ips.iter()
     }
 

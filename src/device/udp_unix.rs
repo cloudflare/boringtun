@@ -76,7 +76,7 @@ impl UDPSocket {
     /// Query the local port the socket is bound to
     /// # Panics
     /// If socket is IPv6
-    pub fn port(&self) -> Result<(u16), Error> {
+    pub fn port(&self) -> Result<u16, Error> {
         if self.version != 4 {
             panic!("Can only query ports of IPv4 sockets");
         }

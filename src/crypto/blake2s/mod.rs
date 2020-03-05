@@ -4,7 +4,6 @@
 mod tests;
 use crate::noise::errors::*;
 use crate::noise::make_array;
-use std;
 use std::mem;
 use std::ops::AddAssign;
 use std::ops::BitXorAssign;
