@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
-use crate::crypto::blake2s::Blake2s;
+use crate::crypto::blake2s::Context as Blake2s;
 use crate::crypto::chacha20poly1305::ChaCha20Poly1305;
 use crate::crypto::x25519::*;
 use crate::noise::errors::WireGuardError;

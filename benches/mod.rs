@@ -6,7 +6,7 @@ extern crate test;
 
 #[cfg(test)]
 mod tests {
-    use boringtun::crypto::blake2s::*;
+    use boringtun::crypto::blake2s::Context as Blake2s;
     use boringtun::crypto::chacha20poly1305::*;
     use boringtun::crypto::x25519::*;
     use test::{black_box, Bencher};

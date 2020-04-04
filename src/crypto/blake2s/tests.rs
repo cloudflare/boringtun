@@ -1348,7 +1348,7 @@ mod tests {
     #[test]
     fn blake2s_test_vectors() {
         for i in TEST_VECTORS.iter() {
-            let mut b = Blake2s::new(i.key, 32, false);
+            let mut b = Context::new(i.key, 32, false);
             b.hash(i.data);
             let res = b.finalize();
             assert_eq!(i.expect, res);
@@ -1364,7 +1364,7 @@ mod tests {
 
         for i in 0..BLAKE2S_KAT.len() {
             let split = i * 2 / 3;
-            let res = Blake2s::new_hash()
+            let res = Context::new_hash()
                 .hash(&data[..split])
                 .hash(&data[split..i])
                 .finalize();
@@ -1374,7 +1374,7 @@ mod tests {
         for i in 0..BLAKE2S_KAT.len() {
             let split1 = i / 5;
             let split2 = i / 4;
-            let res = Blake2s::new_hash()
+            let res = Context::new_hash()
                 .hash(&data[..split1])
                 .hash(&data[split1..split2])
                 .hash(&data[split2..i])

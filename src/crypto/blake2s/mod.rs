@@ -1,7 +1,10 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! BLAKE2s hash algorithm defined by [RFC 7693].
+
 mod tests;
+
 use crate::noise::errors::*;
 use crate::noise::make_array;
 use std::mem;
@@ -61,7 +64,7 @@ static IV: [u32; 8] = [
     0x5BE0_CD19,
 ];
 
-pub struct Blake2s {
+pub struct Context {
     state: [u32; 8],
     buf: [u8; 64],
     key: [u8; 64],
@@ -115,12 +118,12 @@ macro_rules! ROUND {
     };
 }
 
-impl Blake2s {
-    fn new(key: &[u8], outlen: usize, mac: bool) -> Blake2s {
+impl Context {
+    fn new(key: &[u8], outlen: usize, mac: bool) -> Context {
         let max_keylen = if mac { 64 } else { 32 }; // We truncate the key with no error, since the usage is internal
 
         let keylen = std::cmp::min(key.len(), max_keylen);
-        let mut b = Blake2s {
+        let mut b = Context {
             state: IV,
             buf: [0; 64],
             key: [0; 64],
@@ -149,16 +152,16 @@ impl Blake2s {
         b
     }
 
-    pub fn new_mac(key: &[u8]) -> Blake2s {
-        Blake2s::new(key, 16, false)
+    pub fn new_mac(key: &[u8]) -> Context {
+        Context::new(key, 16, false)
     }
 
-    pub fn new_hash() -> Blake2s {
-        Blake2s::new(&[], 32, false)
+    pub fn new_hash() -> Context {
+        Context::new(&[], 32, false)
     }
 
-    pub fn new_hmac(key: &[u8]) -> Blake2s {
-        Blake2s::new(key, 32, true)
+    pub fn new_hmac(key: &[u8]) -> Context {
+        Context::new(key, 32, true)
     }
 
     #[allow(clippy::many_single_char_names)]
@@ -287,7 +290,7 @@ impl Blake2s {
         s[7] = b.0[3];
     }
 
-    pub fn hash(&mut self, mut data: &[u8]) -> &mut Blake2s {
+    pub fn hash(&mut self, mut data: &[u8]) -> &mut Context {
         while !data.is_empty() {
             while self.used == 0 && data.len() > 64 {
                 self.buf[..].copy_from_slice(&data[..64]);
@@ -326,7 +329,7 @@ impl Blake2s {
         let s = unsafe { mem::transmute::<[u32; 8], [u8; 32]>(self.state) };
 
         if self.is_mac {
-            return Blake2s::new_hash().hash(&self.key).hash(&s).finalize();
+            return Context::new_hash().hash(&self.key).hash(&s).finalize();
         }
         s
     }
