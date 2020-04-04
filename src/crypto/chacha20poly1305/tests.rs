@@ -5,7 +5,7 @@
 mod tests {
 
     extern crate hex;
-    use super::super::*;
+    use super::super::ChaCha20Poly1305;
 
     struct Chacha20poly1305TestVector {
         pt: &'static str,

@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::*;
+    use super::super::Blake2s;
 
     struct BlakeTest<'a> {
         data: &'a [u8],
