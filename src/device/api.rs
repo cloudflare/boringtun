@@ -158,8 +158,8 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
 
         let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
 
-        writeln!(writer, "rx_bytes={}", tx_bytes);
-        writeln!(writer, "tx_bytes={}", rx_bytes);
+        writeln!(writer, "rx_bytes={}", rx_bytes);
+        writeln!(writer, "tx_bytes={}", tx_bytes);
     }
     0
 }
