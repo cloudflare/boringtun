@@ -9,9 +9,9 @@ repository = "https://github.com/cloudflare/boringtun"
 edition = "2018"
 
 [dependencies]
-base64 = "0.9"
-hex = "0.3"
-untrusted = "0.6"
+base64 = "0.12"
+hex = "0.4"
+untrusted = "0.7"
 spin = { version = "0.5", default-features=false }
 libc = "0.2"
 
@@ -21,7 +21,7 @@ ring = "0.16"
 [target.'cfg(not(any(target_os="windows", target_os="ios", target_os="android")))'.dependencies]
 chrono = "0.4"
 daemonize = "0.4.1"
-clap = { version = "2.32", default-features=false, features = ["suggestions"] }
+clap = { version = "2.33", default-features=false, features = ["suggestions"] }
 
 [target.'cfg(target_os="android")'.dependencies]
 jni = "0.10"
