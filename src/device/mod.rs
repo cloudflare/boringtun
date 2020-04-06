@@ -30,6 +30,7 @@ pub mod udp;
 
 use std::collections::HashMap;
 use std::convert::From;
+use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -740,43 +741,48 @@ impl Device {
                 let udp6 = d.udp6.as_ref().expect("Not connected");
 
                 let peers = &d.peers_by_ip;
-                {
-                    let mut iter = MAX_ITR;
-                    while let Ok(src) = iface.read(&mut t.src_buf[..mtu]) {
-                        let dst_addr = match Tunn::dst_address(src) {
-                            Some(addr) => addr,
-                            None => continue,
-                        };
-
-                        let peer = match peers.find(dst_addr) {
-                            Some(peer) => peer,
-                            None => continue,
-                        };
-
-                        match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
-                            TunnResult::Done => {}
-                            TunnResult::Err(e) => eprintln!("Encapsulate error {:?}", e),
-                            TunnResult::WriteToNetwork(packet) => {
-                                let endpoint = peer.endpoint();
-                                if let Some(ref conn) = endpoint.conn {
-                                    // Prefer to send using the connected socket
-                                    conn.write(packet);
-                                } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
-                                    udp4.sendto(packet, addr);
-                                } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
-                                    udp6.sendto(packet, addr);
-                                } else {
-                                    eprintln!("No endpoint for peer");
-                                }
+                for _ in 0..MAX_ITR {
+                    let src = match iface.read(&mut t.src_buf[..mtu]) {
+                        Ok(src) => src,
+                        Err(Error::IfaceRead(errno)) => {
+                            let ek = io::Error::from_raw_os_error(errno).kind();
+                            if ek != io::ErrorKind::Interrupted && ek != io::ErrorKind::WouldBlock {
+                                eprintln!("Fatal error on tun interface: errno {:?}", errno);
+                                return Action::Exit;
                             }
-                            _ => panic!("Unexpected result from encapsulate"),
-                        };
-
-                        iter -= 1;
-                        if iter == 0 {
-                            break;
+                            continue;
                         }
-                    }
+                        Err(_) => continue,
+                    };
+
+                    let dst_addr = match Tunn::dst_address(src) {
+                        Some(addr) => addr,
+                        None => continue,
+                    };
+
+                    let peer = match peers.find(dst_addr) {
+                        Some(peer) => peer,
+                        None => continue,
+                    };
+
+                    match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
+                        TunnResult::Done => {}
+                        TunnResult::Err(e) => eprintln!("Encapsulate error {:?}", e),
+                        TunnResult::WriteToNetwork(packet) => {
+                            let endpoint = peer.endpoint();
+                            if let Some(ref conn) = endpoint.conn {
+                                // Prefer to send using the connected socket
+                                conn.write(packet);
+                            } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
+                                udp4.sendto(packet, addr);
+                            } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
+                                udp6.sendto(packet, addr);
+                            } else {
+                                eprintln!("No endpoint for peer");
+                            }
+                        }
+                        _ => panic!("Unexpected result from encapsulate"),
+                    };
                 }
                 Action::Continue
             }),
