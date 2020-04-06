@@ -25,9 +25,7 @@ mod tests {
         let secret_key = X25519SecretKey::new();
         let public_key = X25519SecretKey::new().public_key();
 
-        b.iter(|| {
-            black_box(secret_key.shared_key(&public_key));
-        });
+        b.iter(|| black_box(secret_key.shared_key(&public_key)));
     }
 
     #[bench]
