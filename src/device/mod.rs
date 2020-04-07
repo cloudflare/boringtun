@@ -746,13 +746,16 @@ impl Device {
                         Ok(src) => src,
                         Err(Error::IfaceRead(errno)) => {
                             let ek = io::Error::from_raw_os_error(errno).kind();
-                            if ek != io::ErrorKind::Interrupted && ek != io::ErrorKind::WouldBlock {
-                                eprintln!("Fatal error on tun interface: errno {:?}", errno);
-                                return Action::Exit;
+                            if ek == io::ErrorKind::Interrupted || ek == io::ErrorKind::WouldBlock {
+                                break;
                             }
-                            continue;
+                            eprintln!("Fatal read error on tun interface: errno {:?}", errno);
+                            return Action::Exit;
                         }
-                        Err(_) => continue,
+                        Err(e) => {
+                            eprintln!("Unexpected error on tun interface: {:?}", e);
+                            return Action::Exit;
+                        }
                     };
 
                     let dst_addr = match Tunn::dst_address(src) {
