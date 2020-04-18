@@ -16,6 +16,9 @@ use std::str::FromStr;
 #[cfg(not(target_arch = "arm"))]
 use ring::rand::*;
 
+const MASK_63BITS: u128 = 0x7fff_ffff_ffff_ffff;
+const MASK_64BITS: u128 = 0xffff_ffff_ffff_ffff;
+
 #[cfg(target_arch = "arm")]
 #[allow(non_snake_case)]
 pub mod SystemRandom {
@@ -537,13 +540,38 @@ fn mod_final_25519(x: Felem) -> Felem {
     let mut acc3 = u128::from(x.0[3]);
 
     let mut top = acc3 >> 63;
-    acc3 &= 0x7fff_ffff_ffff_ffff;
-
+    acc3 &= MASK_63BITS;
     top = top.wrapping_mul(19);
     acc0 = acc0.wrapping_add(top);
     acc1 = acc1.wrapping_add(acc0 >> 64);
     acc2 = acc2.wrapping_add(acc1 >> 64);
     acc3 = acc3.wrapping_add(acc2 >> 64);
+
+    // Mask
+    acc0 &= MASK_64BITS;
+    acc1 &= MASK_64BITS;
+    acc2 &= MASK_64BITS;
+    acc3 &= MASK_64BITS;
+
+    // At this point, acc{0-3} is in the range between 0 and 2^255 + 18, inclusively. It's not
+    // under 2^255 - 19 yet. So we are doing another round of modulo operation.
+
+    top = acc0.wrapping_add(19) >> 64;
+    top = acc1.wrapping_add(top) >> 64;
+    top = acc2.wrapping_add(top) >> 64;
+    top = acc3.wrapping_add(top) >> 63;
+    top = top.wrapping_mul(19);
+
+    // top is 19 if acc{0-3} is between 2^255 - 19 and 2^255 + 18, inclusively. Otherwise, it's
+    // zero.
+
+    acc0 = acc0.wrapping_add(top);
+    acc1 = acc1.wrapping_add(acc0 >> 64);
+    acc2 = acc2.wrapping_add(acc1 >> 64);
+    acc3 = acc3.wrapping_add(acc2 >> 64);
+    acc3 &= MASK_63BITS;
+
+    // Now acc{0-3} is between 0 and 2^255 - 20, inclusively.
 
     Felem([acc0 as u64, acc1 as u64, acc2 as u64, acc3 as u64])
 }
