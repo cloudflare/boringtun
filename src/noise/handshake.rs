@@ -140,15 +140,18 @@ struct NoiseParams {
 }
 
 #[derive(Debug)]
-pub enum HandshakeState {
-    None, // No handshake in process
-    InitSent {
-        local_index: u32,
-        hash: [u8; KEY_LEN],
-        chaining_key: [u8; KEY_LEN],
-        ephemeral_private: X25519EphemeralKey,
-        time_sent: Instant,
-    }, // We initiated the handshake
+struct HandshakeInitSentState {
+    local_index: u32,
+    hash: [u8; KEY_LEN],
+    chaining_key: [u8; KEY_LEN],
+    ephemeral_private: X25519EphemeralKey,
+    time_sent: Instant,
+}
+
+#[derive(Debug)]
+enum HandshakeState {
+    None,                             // No handshake in process
+    InitSent(HandshakeInitSentState), // We initiated the handshake
     InitReceived {
         hash: [u8; KEY_LEN],
         chaining_key: [u8; KEY_LEN],
@@ -160,8 +163,9 @@ pub enum HandshakeState {
 
 pub struct Handshake {
     params: NoiseParams,
-    next_index: u32,       // Index of the next session
-    state: HandshakeState, // Current handshake state
+    next_index: u32,          // Index of the next session
+    previous: HandshakeState, // Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed response to a handshake with bad networks
+    state: HandshakeState,    // Current handshake state
     cookies: Cookies,
     last_handshake_timestamp: Tai64N, // The timestamp of the last handshake we received
     stamper: TimeStamper,             // TODO: make TimeStamper a singleton
@@ -278,6 +282,7 @@ impl Handshake {
         Ok(Handshake {
             params,
             next_index: global_idx,
+            previous: HandshakeState::None,
             state: HandshakeState::None,
             last_handshake_timestamp: Tai64N::zero(),
             stamper: TimeStamper::new(),
@@ -295,12 +300,13 @@ impl Handshake {
 
     pub(crate) fn timer(&self) -> Option<Instant> {
         match self.state {
-            HandshakeState::InitSent { time_sent, .. } => Some(time_sent),
+            HandshakeState::InitSent(HandshakeInitSentState { time_sent, .. }) => Some(time_sent),
             _ => None,
         }
     }
 
     pub(crate) fn set_expired(&mut self) {
+        self.previous = HandshakeState::Expired;
         self.state = HandshakeState::Expired;
     }
 
@@ -324,7 +330,7 @@ impl Handshake {
         let index = self.next_index;
         let idx8 = index as u8;
         self.next_index = (index & !0xff) | u32::from(idx8.wrapping_add(1));
-        index
+        self.next_index
     }
 
     pub(crate) fn set_static_private(
@@ -404,12 +410,15 @@ impl Handshake {
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
         hash = HASH!(hash, packet.encrypted_timestamp);
 
-        self.state = HandshakeState::InitReceived {
-            chaining_key,
-            hash,
-            peer_ephemeral_public,
-            peer_index,
-        };
+        self.previous = std::mem::replace(
+            &mut self.state,
+            HandshakeState::InitReceived {
+                chaining_key,
+                hash,
+                peer_ephemeral_public,
+                peer_index,
+            },
+        );
 
         self.format_handshake_response(dst)
     }
@@ -418,44 +427,26 @@ impl Handshake {
         &mut self,
         packet: HandshakeResponse,
     ) -> Result<Session, WireGuardError> {
-        let state = std::mem::replace(&mut self.state, HandshakeState::None);
-
-        let (mut chaining_key, mut hash, ephemeral_private, local_index, time_sent) = match state {
-            HandshakeState::InitSent {
-                chaining_key,
-                hash,
-                ephemeral_private,
-                local_index,
-                time_sent,
-                ..
-            } => (
-                chaining_key,
-                hash,
-                ephemeral_private,
-                local_index,
-                time_sent,
-            ),
-            _ => {
-                std::mem::replace(&mut self.state, state);
-                return Err(WireGuardError::UnexpectedPacket);
-            }
+        // Check if there is a handshake awaiting a response and return the correct one
+        let (state, is_previous) = match (&self.state, &self.previous) {
+            (HandshakeState::InitSent(s), _) if s.local_index == packet.receiver_idx => (s, false),
+            (_, HandshakeState::InitSent(s)) if s.local_index == packet.receiver_idx => (s, true),
+            _ => return Err(WireGuardError::UnexpectedPacket),
         };
 
         let peer_index = packet.sender_idx;
-        if packet.receiver_idx != local_index {
-            return Err(WireGuardError::WrongIndex);
-        }
+        let local_index = state.local_index;
 
         let unencrypted_ephemeral = X25519PublicKey::from(packet.unencrypted_ephemeral);
         // msg.unencrypted_ephemeral = DH_PUBKEY(responder.ephemeral_private)
         // responder.hash = HASH(responder.hash || msg.unencrypted_ephemeral)
-        hash = HASH!(hash, unencrypted_ephemeral.as_bytes());
+        let mut hash = HASH!(state.hash, unencrypted_ephemeral.as_bytes());
         // temp = HMAC(responder.chaining_key, msg.unencrypted_ephemeral)
-        let temp = HMAC!(chaining_key, unencrypted_ephemeral.as_bytes());
+        let temp = HMAC!(state.chaining_key, unencrypted_ephemeral.as_bytes());
         // responder.chaining_key = HMAC(temp, 0x1)
-        chaining_key = HMAC!(temp, [0x01]);
+        let mut chaining_key = HMAC!(temp, [0x01]);
         // temp = HMAC(responder.chaining_key, DH(responder.ephemeral_private, initiator.ephemeral_public))
-        let ephemeral_shared = ephemeral_private.shared_key(&unencrypted_ephemeral)?;
+        let ephemeral_shared = state.ephemeral_private.shared_key(&unencrypted_ephemeral)?;
         let temp = HMAC!(chaining_key, &ephemeral_shared[..]);
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = HMAC!(temp, [0x01]);
@@ -500,11 +491,14 @@ impl Handshake {
         let temp2 = HMAC!(temp1, [0x01]);
         let temp3 = HMAC!(temp1, temp2, [0x02]);
 
-        self.state = HandshakeState::None;
-
-        let rtt_time = Instant::now().duration_since(time_sent);
+        let rtt_time = Instant::now().duration_since(state.time_sent);
         self.last_rtt = Some(rtt_time.as_millis() as u32);
 
+        if is_previous {
+            self.previous = HandshakeState::None;
+        } else {
+            self.state = HandshakeState::None;
+        }
         Ok(Session::new(local_index, peer_index, temp3, temp2))
     }
 
@@ -582,7 +576,6 @@ impl Handshake {
         let (mut encrypted_static, rest) = rest.split_at_mut(32 + 16);
         let (mut encrypted_timestamp, _) = rest.split_at_mut(12 + 16);
 
-        self.state = HandshakeState::None;
         let local_index = self.inc_index();
 
         // initiator.chaining_key = HASH(CONSTRUCTION)
@@ -634,13 +627,16 @@ impl Handshake {
         hash = HASH!(hash, encrypted_timestamp);
 
         let time_now = Instant::now();
-        self.state = HandshakeState::InitSent {
-            local_index,
-            chaining_key,
-            hash,
-            ephemeral_private,
-            time_sent: time_now,
-        };
+        self.previous = std::mem::replace(
+            &mut self.state,
+            HandshakeState::InitSent(HandshakeInitSentState {
+                local_index,
+                chaining_key,
+                hash,
+                ephemeral_private,
+                time_sent: time_now,
+            }),
+        );
 
         self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_INIT_SZ])
     }
