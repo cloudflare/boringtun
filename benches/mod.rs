@@ -6,7 +6,7 @@ extern crate test;
 
 #[cfg(test)]
 mod tests {
-    use boringtun::crypto::blake2s::*;
+    use boringtun::crypto::blake2s::Blake2s;
     use boringtun::crypto::chacha20poly1305::*;
     use boringtun::crypto::x25519::*;
     use test::{black_box, Bencher};
@@ -25,9 +25,7 @@ mod tests {
         let secret_key = X25519SecretKey::new();
         let public_key = X25519SecretKey::new().public_key();
 
-        b.iter(|| {
-            black_box(secret_key.shared_key(&public_key));
-        });
+        b.iter(|| black_box(secret_key.shared_key(&public_key)));
     }
 
     #[bench]

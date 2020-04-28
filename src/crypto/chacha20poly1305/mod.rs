@@ -1,21 +1,26 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! ChaCha20-Poly1305 authenticated encryption.
+
 mod poly1305;
 mod tests;
 
-use self::poly1305::*;
-use crate::noise::errors::*;
+use self::poly1305::Poly1305;
+use crate::noise::errors::WireGuardError;
 use crate::noise::make_array;
 use std::ops::AddAssign;
 use std::ops::BitXorAssign;
 use std::ops::ShlAssign;
 
+/// An instance of the ChaCha20-Poly1305 AEAD with a fixed key.
 pub struct ChaCha20Poly1305 {
     key: [u32; 8],
 }
 
 impl ChaCha20Poly1305 {
+    /// Returns a new instance of the ChaCha20-Poly1305 AEAD with the key `key`, which must be 256
+    /// bits.
     pub fn new_aead(key: &[u8]) -> ChaCha20Poly1305 {
         assert_eq!(key.len(), 32);
         ChaCha20Poly1305 {
@@ -32,7 +37,6 @@ impl ChaCha20Poly1305 {
         }
     }
 
-    #[allow(dead_code)]
     fn seal_slow(&self, mut state: [u32; 16], aad: &[u8], mut pt: &[u8], ct: &mut [u8]) -> usize {
         let blk = chacha20_block(state, false);
         state[12] += 1;
@@ -164,7 +168,6 @@ impl ChaCha20Poly1305 {
         enced + 16
     }
 
-    #[allow(dead_code)]
     fn open_slow<'a>(
         &self,
         mut state: [u32; 16],
@@ -354,6 +357,10 @@ impl ChaCha20Poly1305 {
         ]
     }
 
+    /// Encrypts and authenticates `plaintext`, authenticates the additional data `aad`, and stores
+    /// the result in `ciphertext` returning the number of bytes written.
+    ///
+    /// It simply unpacks the nonce as a 64-bit little endian counter.
     pub fn seal_wg(
         &self,
         nonce_ctr: u64,
@@ -366,6 +373,8 @@ impl ChaCha20Poly1305 {
         self.seal_slow(state, aad, plaintext, ciphertext)
     }
 
+    /// Decrypts and authenticates `ciphertext`, authenticates the additional data `aad`, and
+    /// stores the result in `plaintext` returning the plaintext or an error.
     pub fn open_wg<'a>(
         &self,
         nonce_ctr: u64,
@@ -379,6 +388,10 @@ impl ChaCha20Poly1305 {
         self.open_slow(state, aad, ciphertext, plaintext)
     }
 
+    /// Encrypts and authenticates `plaintext`, authenticates the additional data `aad`, and stores
+    /// the result in `ciphertext` returning the number of bytes written.
+    ///
+    /// The same nonce must not be used to encrypt multiple plaintexts.
     pub fn seal(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8], ciphertext: &mut [u8]) -> usize {
         assert!(plaintext.len() <= ciphertext.len() + 16);
 
@@ -386,6 +399,8 @@ impl ChaCha20Poly1305 {
         self.seal_slow(state, aad, plaintext, ciphertext)
     }
 
+    /// Decrypts and authenticates `ciphertext`, authenticates the additional data `aad`, and
+    /// stores the result in `plaintext` returning the plaintext or an error.
     pub fn open<'a>(
         &self,
         nonce: &[u8],
@@ -399,6 +414,11 @@ impl ChaCha20Poly1305 {
         self.open_slow(state, aad, ciphertext, plaintext)
     }
 
+    /// Encrypts and authenticates `plaintext`, authenticates the additional data `aad`, and stores
+    /// the result in `ciphertext` returning the number of bytes written.
+    ///
+    /// This should be preferred over `seal` when nonce uniqueness cannot be ensured, or whenever
+    /// nonces are randomly generated.
     pub fn xseal(
         &self,
         nonce: &[u8],
@@ -411,6 +431,8 @@ impl ChaCha20Poly1305 {
         self.seal_slow(state, aad, plaintext, ciphertext)
     }
 
+    /// Decrypts and authenticates `ciphertext`, authenticates the additional data `aad`, and
+    /// stores the result in `plaintext` returning the plaintext or an error.
     pub fn xopen<'a>(
         &self,
         nonce: &[u8],
@@ -424,11 +446,6 @@ impl ChaCha20Poly1305 {
         self.open_slow(state, aad, ciphertext, plaintext)
     }
 }
-
-#[derive(Clone, Copy)]
-struct Vec4([u32; 4]);
-#[derive(Clone, Copy)]
-struct Vec8([u32; 8]);
 
 fn chacha20_block_x2(state: [u32; 16]) -> [[u32; 16]; 2] {
     let a_block = Vec8([
@@ -613,6 +630,9 @@ fn transmute_u32_u8(blk_in: [u32; 16]) -> [u8; 64] {
     ret
 }
 
+#[derive(Clone, Copy)]
+struct Vec4([u32; 4]);
+
 impl AddAssign for Vec4 {
     fn add_assign(&mut self, other: Vec4) {
         for i in 0..4 {
@@ -650,6 +670,9 @@ impl Vec4 {
         *self = Vec4([self.0[3], self.0[0], self.0[1], self.0[2]])
     }
 }
+
+#[derive(Clone, Copy)]
+struct Vec8([u32; 8]);
 
 impl AddAssign for Vec8 {
     fn add_assign(&mut self, other: Vec8) {

@@ -1,10 +1,34 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! BLAKE2s hash and MAC algorithm.
+//!
+//! ## Example Usage
+//!
+//! ```
+//! use boringtun::crypto::blake2s::{constant_time_mac_check, Blake2s};
+//!
+//! // validate_mac returns true if the MAC of `msg` under `key` equals `expected`. It checks this
+//! // in constant time.
+//! fn validate_mac(key: &[u8; 32], msg: &[u8], expected: &[u8; 16]) -> bool {
+//!     let computed_mac = Blake2s::new_mac(key).hash(msg).finalize();
+//!     constant_time_mac_check(&computed_mac[..16], expected).is_ok()
+//! }
+//!
+//! let key = &[0u8; 32];
+//! let msg = b"Hello, World!";
+//! let expected_mac = &[
+//!     0xe5, 0xd5, 0x49, 0x4f, 0x56, 0x74, 0xb2, 0x14,
+//!     0xee, 0x1c, 0x07, 0x8f, 0xf4, 0x46, 0x21, 0xe2,
+//! ];
+//!
+//! assert!(validate_mac(key, msg, expected_mac));
+//! ```
+
 mod tests;
-use crate::noise::errors::*;
+
+use crate::noise::errors::WireGuardError;
 use crate::noise::make_array;
-use std::mem;
 use std::ops::AddAssign;
 use std::ops::BitXorAssign;
 use std::ops::ShrAssign;
@@ -61,6 +85,7 @@ static IV: [u32; 8] = [
     0x5BE0_CD19,
 ];
 
+/// A context for multi-step digest calculations.
 pub struct Blake2s {
     state: [u32; 8],
     buf: [u8; 64],
@@ -149,14 +174,17 @@ impl Blake2s {
         b
     }
 
+    /// Returns a new Blake2s context, operating as a MAC under `key`.
     pub fn new_mac(key: &[u8]) -> Blake2s {
         Blake2s::new(key, 16, false)
     }
 
+    /// Returns a new Blake2s context, operating as an unkeyed hash.
     pub fn new_hash() -> Blake2s {
         Blake2s::new(&[], 32, false)
     }
 
+    /// Returns a new Blake2s context, using the HMAC-Blake2s construction.
     pub fn new_hmac(key: &[u8]) -> Blake2s {
         Blake2s::new(key, 32, true)
     }
@@ -287,6 +315,7 @@ impl Blake2s {
         s[7] = b.0[3];
     }
 
+    /// Adds more data to the running hash.
     pub fn hash(&mut self, mut data: &[u8]) -> &mut Blake2s {
         while !data.is_empty() {
             while self.used == 0 && data.len() > 64 {
@@ -313,7 +342,10 @@ impl Blake2s {
         self
     }
 
+    /// Computes the final hash output and returns it. No more data can be hashed after this is
+    /// called.
     pub fn finalize(&mut self) -> [u8; 32] {
+        // Hash the remaining buffered data.
         self.hashed += self.used as u64;
 
         while self.used < 64 {
@@ -323,8 +355,13 @@ impl Blake2s {
 
         self.hash_block(true);
 
-        let s = unsafe { mem::transmute::<[u32; 8], [u8; 32]>(self.state) };
+        // Convert the internal state from a [u32; 8] to a [u8; 32].
+        let mut s = [0u8; 32];
+        for i in 0..self.outlen {
+            s[i] = (self.state[i / 4] >> 8 * (i % 4)) as u8;
+        }
 
+        // Return the final output.
         if self.is_mac {
             return Blake2s::new_hash().hash(&self.key).hash(&s).finalize();
         }
@@ -332,6 +369,7 @@ impl Blake2s {
     }
 }
 
+/// Checks if both MACs are equal in constant time.
 pub fn constant_time_mac_check(mac1: &[u8], mac2: &[u8]) -> Result<(), WireGuardError> {
     assert!(mac1.len() == 16);
     assert!(mac2.len() == 16);

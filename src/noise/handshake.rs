@@ -4,7 +4,7 @@
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::crypto::blake2s::Blake2s;
 use crate::crypto::chacha20poly1305::ChaCha20Poly1305;
-use crate::crypto::x25519::*;
+use crate::crypto::x25519::{X25519PublicKey, X25519SecretKey};
 use crate::noise::errors::WireGuardError;
 use crate::noise::make_array;
 use crate::noise::session::Session;
@@ -144,7 +144,7 @@ struct HandshakeInitSentState {
     local_index: u32,
     hash: [u8; KEY_LEN],
     chaining_key: [u8; KEY_LEN],
-    ephemeral_private: X25519EphemeralKey,
+    ephemeral_private: X25519SecretKey,
     time_sent: Instant,
 }
 
@@ -386,7 +386,7 @@ impl Handshake {
 
         self.params
             .peer_static_public
-            .is_equal_constant_time(&X25519PublicKey::from(&peer_static_public_decrypted[..]))?;
+            .constant_time_is_equal(&X25519PublicKey::from(&peer_static_public_decrypted[..]))?;
 
         // initiator.hash = HASH(initiator.hash || msg.encrypted_static)
         hash = HASH!(hash, packet.encrypted_static);
@@ -584,7 +584,7 @@ impl Handshake {
         let mut hash = INITIAL_CHAIN_HASH;
         hash = HASH!(hash, self.params.peer_static_public.as_bytes());
         // initiator.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = X25519EphemeralKey::new();
+        let ephemeral_private = X25519SecretKey::new();
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
         message_type.copy_from_slice(&super::HANDSHAKE_INIT.to_le_bytes());
@@ -669,7 +669,7 @@ impl Handshake {
         let (mut encrypted_nothing, _) = rest.split_at_mut(16);
 
         // responder.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = X25519EphemeralKey::new();
+        let ephemeral_private = X25519SecretKey::new();
         let local_index = self.inc_index();
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
