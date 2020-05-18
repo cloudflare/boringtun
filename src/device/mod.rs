@@ -3,7 +3,7 @@
 
 pub mod allowed_ips;
 pub mod api;
-pub mod dev_lock;
+mod dev_lock;
 pub mod drop_privileges;
 mod integration_tests;
 pub mod peer;
@@ -44,11 +44,12 @@ use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::*;
 use allowed_ips::*;
-use dev_lock::*;
 use peer::*;
 use poll::*;
 use tun::*;
 use udp::*;
+
+use dev_lock::{Lock, LockReadGuard};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 

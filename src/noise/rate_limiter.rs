@@ -9,6 +9,8 @@ use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use parking_lot::Mutex;
+
 const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can optimize out the division
 const COOKIE_SIZE: usize = 16;
 const COOKIE_NONCE_SIZE: usize = 24;
@@ -33,8 +35,8 @@ pub struct RateLimiter {
     mac1_key: [u8; 32],
     cookie_key: [u8; 32],
     limit: u64,
-    count: AtomicU64,                 // The counter since last reset
-    last_reset: spin::Mutex<Instant>, // The time last reset was performed on this rate limiter
+    count: AtomicU64,           // The counter since last reset
+    last_reset: Mutex<Instant>, // The time last reset was performed on this rate limiter
 }
 
 impl RateLimiter {
@@ -54,7 +56,7 @@ impl RateLimiter {
                 .finalize(),
             limit,
             count: AtomicU64::new(0),
-            last_reset: spin::Mutex::new(Instant::now()),
+            last_reset: Mutex::new(Instant::now()),
         }
     }
 
