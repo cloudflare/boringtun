@@ -3,6 +3,7 @@
 
 use crate::device::udp::UDPSocket;
 use crate::device::*;
+use parking_lot::RwLock;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -16,7 +17,7 @@ pub struct Endpoint {
 pub struct Peer {
     pub(crate) tunnel: Box<Tunn>, // The associated tunnel struct
     index: u32,                   // The index the tunnel uses
-    endpoint: spin::RwLock<Endpoint>,
+    endpoint: RwLock<Endpoint>,
     allowed_ips: AllowedIps<()>,
     preshared_key: Option<[u8; 32]>,
 }
@@ -56,7 +57,7 @@ impl Peer {
         Peer {
             tunnel,
             index,
-            endpoint: spin::RwLock::new(Endpoint {
+            endpoint: RwLock::new(Endpoint {
                 addr: endpoint,
                 conn: None,
             }),
@@ -69,7 +70,7 @@ impl Peer {
         self.tunnel.update_timers(dst)
     }
 
-    pub fn endpoint(&self) -> spin::RwLockReadGuard<'_, Endpoint> {
+    pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
         self.endpoint.read()
     }
 

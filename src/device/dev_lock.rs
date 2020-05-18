@@ -1,49 +1,24 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::cell::UnsafeCell;
-use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use parking_lot::{Condvar, Mutex, RwLock, RwLockReadGuard};
+use std::ops::Deref;
 
 /// A special type of read/write lock, that makes the following assumptions:
-/// a) Read access is frequent, and has to be very fast
+/// a) Read access is frequent, and has to be very fast, so we want to hold it indefinitely
 /// b) Write access is very rare (think less than once per second) and can be a bit slower
-/// c) A thread that holds a read lock, can ask for an upgrade to a write lock
+/// c) A thread that holds a read lock, can ask for an upgrade to a write lock, cooperatively asking other threads to yield their locks
 pub struct Lock<T: ?Sized> {
-    lock: AtomicUsize,
-    data: UnsafeCell<T>,
+    wants_write: (Mutex<bool>, Condvar),
+    inner: RwLock<T>, // Although parking lot lock is upgradable, it does not allow a two staged mark + lock upgrade
 }
-
-#[derive(Debug)]
-pub struct LockReadGuard<'a, T: 'a + ?Sized> {
-    lock: &'a AtomicUsize,
-    data: &'a mut T,
-}
-
-#[derive(Debug)]
-pub struct UpgradableReadGuard<'a, T: 'a + ?Sized> {
-    lock: &'a AtomicUsize,
-    data: &'a mut T,
-}
-
-#[derive(Debug)]
-pub struct LockWriteGuard<'a, T: 'a + ?Sized> {
-    lock: &'a AtomicUsize,
-    data: &'a mut T,
-}
-
-unsafe impl<T: ?Sized + Send> Send for Lock<T> {}
-unsafe impl<T: ?Sized + Send + Sync> Sync for Lock<T> {}
-
-// The MSB marks the intent to write lock, or the presence of a write lock
-const MSB_MASK: usize = !(std::usize::MAX >> 1);
 
 impl<T> Lock<T> {
     /// New lock
-    pub const fn new(user_data: T) -> Lock<T> {
+    pub fn new(user_data: T) -> Lock<T> {
         Lock {
-            lock: AtomicUsize::new(0),
-            data: UnsafeCell::new(user_data),
+            wants_write: (Mutex::new(false), Condvar::new()),
+            inner: RwLock::new(user_data),
         }
     }
 }
@@ -51,55 +26,76 @@ impl<T> Lock<T> {
 impl<T: ?Sized> Lock<T> {
     /// Acquire a read lock
     pub fn read(&self) -> LockReadGuard<T> {
-        loop {
-            let try_lock = self.lock.fetch_add(1, Ordering::SeqCst); // Increment readers counter optimistically
-            if try_lock < MSB_MASK {
-                return LockReadGuard {
-                    lock: &self.lock,
-                    data: unsafe { &mut *self.data.get() },
-                };
-            }
+        let &(ref lock, ref cvar) = &self.wants_write;
+        let mut wants_write = lock.lock();
+        while *wants_write {
+            // We have a writer and we want to wait for it to go away
+            cvar.wait(&mut wants_write);
+        }
 
-            // We have a writer waiting or in progress
-            self.lock.fetch_sub(1, Ordering::SeqCst);
-
-            // We actively yield the thread until the write lock is done
-            while self.lock.load(Ordering::Relaxed) > MSB_MASK {
-                std::thread::yield_now()
-            }
+        LockReadGuard {
+            wants_write: &self.wants_write,
+            inner: self.inner.read(),
         }
     }
+}
+
+pub struct LockReadGuard<'a, T: 'a + ?Sized> {
+    wants_write: &'a (Mutex<bool>, Condvar),
+    inner: RwLockReadGuard<'a, T>,
 }
 
 impl<'a, T: ?Sized> LockReadGuard<'a, T> {
-    /// Notify of an intent to upgrade the lock to a write lock
-    /// Returns None if another thread wants to write, or performs a write
-    pub fn mark_want_write(&mut self) -> Option<UpgradableReadGuard<T>> {
-        // We mark for write, by setting the MSB
-        let try_mark = self.lock.fetch_or(MSB_MASK, Ordering::SeqCst);
-        if try_mark < MSB_MASK {
-            // If wasn't already set, return an upgradable lock
-            Some(UpgradableReadGuard {
-                lock: self.lock,
-                data: self.data,
-            })
-        } else {
-            None
-        }
-    }
-}
+    /// Perform a closure on a mutable reference of the inner locked value.
+    ///
+    /// # Parameters
+    ///
+    /// `prep_func` - A closure that will run once, after the lock marks its intention to write,
+    /// this can be used to tell other threads to yield their read locks temporarily. It will be passed
+    /// an immutable reference to the inner value.
+    ///
+    /// `mut_func` - A closure that will run once write access is gained. It iwll be passed a mutable reference
+    /// to the inner value.
+    ///
+    pub fn try_writeable<U, P: FnOnce(&T), F: FnOnce(&mut T) -> U>(
+        &mut self,
+        prep_func: P,
+        mut_func: F,
+    ) -> Option<U> {
+        // First tell everyone that we want to write now, this will prevent any new reader from starting until we are done.
+        {
+            let &(ref lock, cvar) = &self.wants_write;
+            let mut wants_write = lock.lock();
 
-impl<'a, T: ?Sized> UpgradableReadGuard<'a, T> {
-    /// Acquire a write lock
-    pub fn write(&mut self) -> LockWriteGuard<T> {
-        while self.lock.load(Ordering::SeqCst) != (MSB_MASK + 1) {
-            // Because we already hold the read lock, wait until count drops to 1, this is essentially a spin lock
-            std::sync::atomic::spin_loop_hint()
+            RwLockReadGuard::unlocked(&mut self.inner, move || {
+                while *wants_write {
+                    // We have a writer and we want to wait for it to go away
+                    cvar.wait(&mut wants_write);
+                }
+
+                *wants_write = true;
+            });
         }
-        LockWriteGuard {
-            lock: self.lock,
-            data: self.data,
-        }
+
+        // Second stage is to run the prep function
+        prep_func(&*self.inner);
+
+        let lock = RwLockReadGuard::rwlock(&self.inner);
+
+        // Third stage is to perform our op under a write lock
+        let ret = Some(RwLockReadGuard::unlocked(&mut self.inner, move || {
+            // There is no race here because wants_write blocks other threads
+            let mut write_access = lock.write();
+            mut_func(&mut *write_access)
+        }));
+
+        // Finally signal other threads
+        let &(ref lock, ref cvar) = &self.wants_write;
+        let mut wants_write = lock.lock();
+        *wants_write = false;
+        cvar.notify_all();
+
+        ret
     }
 }
 
@@ -107,40 +103,6 @@ impl<'a, T: ?Sized> Deref for LockReadGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        self.data
-    }
-}
-
-impl<'a, T: ?Sized> Deref for UpgradableReadGuard<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        self.data
-    }
-}
-
-impl<'a, T: ?Sized> Deref for LockWriteGuard<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        self.data
-    }
-}
-
-impl<'a, T: ?Sized> DerefMut for LockWriteGuard<'a, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        self.data
-    }
-}
-
-impl<'a, T: ?Sized> Drop for LockReadGuard<'a, T> {
-    fn drop(&mut self) {
-        self.lock.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-impl<'a, T: ?Sized> Drop for UpgradableReadGuard<'a, T> {
-    fn drop(&mut self) {
-        self.lock.fetch_and(!MSB_MASK, Ordering::SeqCst);
+        &*self.inner
     }
 }

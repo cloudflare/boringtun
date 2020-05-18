@@ -5,6 +5,7 @@ use super::PacketData;
 #[cfg(target_arch = "arm")]
 use crate::crypto::chacha20poly1305::*;
 use crate::noise::errors::WireGuardError;
+use parking_lot::Mutex;
 #[cfg(not(target_arch = "arm"))]
 use ring::aead::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -21,7 +22,7 @@ pub struct Session {
     #[cfg(target_arch = "arm")]
     sender: ChaCha20Poly1305,
     sending_key_counter: AtomicUsize,
-    receiving_key_counter: spin::Mutex<ReceivingKeyCounterValidator>,
+    receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
 }
 
 impl std::fmt::Debug for Session {
@@ -173,7 +174,7 @@ impl Session {
             #[cfg(target_arch = "arm")]
             sender: ChaCha20Poly1305::new_aead(&sending_key[..]),
             sending_key_counter: AtomicUsize::new(0),
-            receiving_key_counter: spin::Mutex::new(Default::default()),
+            receiving_key_counter: Mutex::new(Default::default()),
         }
     }
 

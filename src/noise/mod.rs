@@ -21,6 +21,8 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use parking_lot::{Mutex, RwLock};
+
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10; // The default value to use for rate limiting, when no other rate limiter is defined
 
 const IPV4_MIN_HEADER_SIZE: usize = 20;
@@ -80,17 +82,17 @@ type LogFunction = Box<dyn Fn(&str) + Send>;
 
 /// Tunnel represents a point-to-point WireGuard connection
 pub struct Tunn {
-    handshake: spin::Mutex<handshake::Handshake>, // The handshake currently in progress
-    sessions: [Arc<spin::RwLock<Option<session::Session>>>; N_SESSIONS], // The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
+    handshake: Mutex<handshake::Handshake>, // The handshake currently in progress
+    sessions: [Arc<RwLock<Option<session::Session>>>; N_SESSIONS], // The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
     current: AtomicUsize, // Index of most recently used session
-    packet_queue: spin::Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
+    packet_queue: Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
     timers: timers::Timers, // Keeps tabs on the expiring timers
     tx_bytes: AtomicUsize,
     rx_bytes: AtomicUsize,
 
     rate_limiter: Arc<RateLimiter>,
 
-    logger: Option<spin::Mutex<LogFunction>>,
+    logger: Option<Mutex<LogFunction>>,
     verbosity: Verbosity,
 }
 
@@ -157,7 +159,7 @@ impl Tunn {
         let static_public = Arc::new(static_private.public_key());
 
         let tunn = Tunn {
-            handshake: spin::Mutex::new(
+            handshake: Mutex::new(
                 Handshake::new(
                     static_private,
                     Arc::clone(&static_public),
@@ -172,7 +174,7 @@ impl Tunn {
             tx_bytes: Default::default(),
             rx_bytes: Default::default(),
 
-            packet_queue: spin::Mutex::new(VecDeque::new()),
+            packet_queue: Mutex::new(VecDeque::new()),
             timers: Timers::new(persistent_keepalive, rate_limiter.is_none()),
 
             logger: None,
@@ -188,7 +190,7 @@ impl Tunn {
 
     /// Set the log function and logging level for the tunnel
     pub fn set_logger(&mut self, logger: LogFunction, verbosity: Verbosity) {
-        self.logger = Some(spin::Mutex::new(logger));
+        self.logger = Some(Mutex::new(logger));
         self.verbosity = verbosity;
     }
 

@@ -3,7 +3,7 @@
 
 use super::{errno_str, Error};
 use libc::*;
-use spin::Mutex;
+use parking_lot::Mutex;
 use std::ops::Deref;
 use std::os::unix::io::RawFd;
 use std::ptr::{null, null_mut};
