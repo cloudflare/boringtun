@@ -11,9 +11,9 @@ pub mod noise;
 
 use crate::device::drop_privileges::*;
 use crate::device::*;
-use crate::noise::Verbosity;
 use clap::{value_t, App, Arg};
 use daemonize::Daemonize;
+use slog::{error, info, o, Drain, Logger};
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
 use std::process::exit;
@@ -59,9 +59,9 @@ fn main() {
                 .long("verbosity")
                 .short("-v")
                 .env("WG_LOG_LEVEL")
-                .possible_values(&["silent", "info", "debug"])
+                .possible_values(&["error", "info", "debug", "trace"])
                 .help("Log verbosity")
-                .default_value("silent"),
+                .default_value("error"),
             Arg::with_name("log")
                 .takes_value(true)
                 .long("log")
@@ -69,13 +69,6 @@ fn main() {
                 .env("WG_LOG_FILE")
                 .help("Log file")
                 .default_value("/tmp/boringtun.out"),
-            Arg::with_name("err")
-                .takes_value(true)
-                .long("err")
-                .short("-e")
-                .env("WG_ERR_LOG_FILE")
-                .help("Critical errors log file")
-                .default_value("/tmp/boringtun.err"),
             Arg::with_name("disable-drop-privileges")
                 .long("disable-drop-privileges")
                 .env("WG_SUDO")
@@ -93,25 +86,30 @@ fn main() {
     let background = !matches.is_present("foreground");
     let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
     let n_threads = value_t!(matches.value_of("threads"), usize).unwrap_or_else(|e| e.exit());
-    let log_level = value_t!(matches.value_of("verbosity"), Verbosity).unwrap_or_else(|e| e.exit());
+    let log_level =
+        value_t!(matches.value_of("verbosity"), slog::Level).unwrap_or_else(|e| e.exit());
 
     // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
     let _ = sock1.set_nonblocking(true);
 
+    let logger;
+
     if background {
         let log = matches.value_of("log").unwrap();
-        let err_log = matches.value_of("err").unwrap();
 
-        let stdout =
+        let log_file =
             File::create(&log).unwrap_or_else(|_| panic!("Could not create log file {}", log));
-        let stderr = File::create(&err_log)
-            .unwrap_or_else(|_| panic!("Could not create error log file {}", err_log));
+
+        let plain = slog_term::PlainSyncDecorator::new(log_file);
+        let drain = slog_term::CompactFormat::new(plain)
+            .build()
+            .filter_level(log_level);
+        let drain = std::sync::Mutex::new(drain).fuse();
+        logger = Logger::root(drain, o!());
 
         let daemonize = Daemonize::new()
             .working_directory("/tmp")
-            .stdout(stdout)
-            .stderr(stderr)
             .exit_action(move || {
                 let mut b = [0u8; 1];
                 if sock2.recv(&mut b).is_ok() && b[0] == 1 {
@@ -123,17 +121,24 @@ fn main() {
             });
 
         match daemonize.start() {
-            Ok(_) => println!("Success, daemonized"),
+            Ok(_) => info!(logger, "BoringTun started successfully"),
             Err(e) => {
-                eprintln!("Error, {}", e);
+                error!(logger, "Error, {}", e);
                 exit(1);
             }
         }
+    } else {
+        let plain = slog_term::TermDecorator::new().stdout().build();
+        let drain = slog_term::FullFormat::new(plain)
+            .build()
+            .filter_level(log_level);
+        let drain = std::sync::Mutex::new(drain).fuse();
+        logger = Logger::root(drain, o!());
     }
 
     let config = DeviceConfig {
         n_threads,
-        log_level,
+        logger: logger.clone(),
         use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),
@@ -143,7 +148,7 @@ fn main() {
         Ok(d) => d,
         Err(e) => {
             // Notify parent that tunnel initialization failed
-            eprintln!("Failed to initialize tunnel: {:?}", e);
+            error!(logger, "Failed to initialize tunnel: {:?}", e);
             sock1.send(&[0]).unwrap();
             exit(1);
         }
@@ -151,7 +156,7 @@ fn main() {
 
     if !matches.is_present("disable-drop-privileges") {
         if let Err(e) = drop_privileges() {
-            eprintln!("Failed to drop privileges: {:?}", e);
+            error!(logger, "Failed to drop privileges: {:?}", e);
             sock1.send(&[0]).unwrap();
             exit(1);
         }
@@ -160,6 +165,8 @@ fn main() {
     // Notify parent that tunnel initialization succeeded
     sock1.send(&[1]).unwrap();
     drop(sock1);
+
+    info!(logger, "BoringTun started successfully");
 
     device_handle.wait();
 }

@@ -76,7 +76,7 @@ impl Peer {
 
     pub fn shutdown_endpoint(&self) {
         if let Some(conn) = self.endpoint.write().conn.take() {
-            self.log(Verbosity::Info, "Disconnecting from endpoint");
+            info!(self.tunnel.logger, "Disconnecting from endpoint");
             conn.shutdown();
         }
     }
@@ -125,9 +125,11 @@ impl Peer {
             udp_conn.set_fwmark(fwmark)?;
         }
 
-        self.log(
-            Verbosity::Info,
-            &format!("Connected endpoint :{}->{}", port, endpoint.addr.unwrap()),
+        info!(
+            self.tunnel.logger,
+            "Connected endpoint :{}->{}",
+            port,
+            endpoint.addr.unwrap()
         );
 
         endpoint.conn = Some(Arc::clone(&udp_conn));
@@ -157,9 +159,5 @@ impl Peer {
 
     pub fn index(&self) -> u32 {
         self.index
-    }
-
-    pub fn log(&self, level: Verbosity, e: &str) {
-        self.tunnel.log(level, e)
     }
 }

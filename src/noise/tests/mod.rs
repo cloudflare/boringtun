@@ -6,6 +6,7 @@ mod tests {
     use super::super::*;
     use crate::crypto::x25519::*;
     use base64::encode;
+    use slog::*;
     use std::fs;
     use std::fs::File;
     use std::io::prelude::Write;
@@ -168,7 +169,7 @@ mod tests {
         network_socket: UdpSocket,
         static_private: &str,
         peer_static_public: &str,
-        logger: Box<dyn Fn(&str) + Send>,
+        logger: Logger,
         close: Arc<AtomicBool>,
     ) -> UdpSocket {
         let static_private = static_private.parse().unwrap();
@@ -183,7 +184,8 @@ mod tests {
             None,
         )
         .unwrap();
-        peer.set_logger(logger, Verbosity::Debug);
+
+        peer.set_logger(logger);
 
         let peer: Arc<Box<Tunn>> = Arc::from(peer);
 
@@ -318,11 +320,18 @@ mod tests {
         let server_pair = key_pair();
         let client_pair = key_pair();
 
+        let logger = Logger::root(
+            slog_term::FullFormat::new(slog_term::PlainSyncDecorator::new(std::io::stdout()))
+                .build()
+                .fuse(),
+            slog::o!(),
+        );
+
         let s_iface = wireguard_test_peer(
             s_sock,
             &server_pair.0,
             &client_pair.1,
-            Box::new(|e: &str| eprintln!("server: {}", e)),
+            logger.new(o!("server" => "")),
             close.clone(),
         );
 
@@ -330,7 +339,7 @@ mod tests {
             c_sock,
             &client_pair.0,
             &server_pair.1,
-            Box::new(|e: &str| eprintln!("client: {}", e)),
+            logger.new(o!("client" => "")),
             close.clone(),
         );
 
@@ -454,11 +463,18 @@ mod tests {
 
         let close = Arc::new(AtomicBool::new(false));
 
+        let logger = Logger::root(
+            slog_term::FullFormat::new(slog_term::PlainSyncDecorator::new(std::io::stdout()))
+                .build()
+                .fuse(),
+            slog::o!(),
+        );
+
         let c_iface = wireguard_test_peer(
             client_socket,
             &c_key_pair.0,
             &wg.public_key,
-            Box::new(|e: &str| eprintln!("client: {}", e)),
+            logger.new(o!()),
             close.clone(),
         );
 
@@ -492,11 +508,18 @@ mod tests {
 
         let close = Arc::new(AtomicBool::new(false));
 
+        let logger = Logger::root(
+            slog_term::FullFormat::new(slog_term::PlainSyncDecorator::new(std::io::stdout()))
+                .build()
+                .fuse(),
+            slog::o!(),
+        );
+
         let c_iface = wireguard_test_peer(
             client_socket,
             &c_key_pair.0,
             &wg.public_key,
-            Box::new(|e: &str| eprintln!("client: {}", e)),
+            logger,
             close.clone(),
         );
 

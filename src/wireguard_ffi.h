@@ -23,10 +23,10 @@ enum result_type
 
 enum log_level
 {
-    NONE = 0,
+    ERR = 0,
     INFO = 1,
-    DEB = 2,
-    ALL = 3,
+    DBG = 2,
+    TRACE = 3,
 };
 
 struct wireguard_result
@@ -67,7 +67,8 @@ int check_base64_encoded_x25519_key(const char *key);
 // Allocate a new tunnel
 struct wireguard_tunnel *new_tunnel(const char *static_private,
                                     const char *server_static_public,
-                                    uint16_t keep_alive,
+                                    uint16_t keep_alive, // Keep alive interval in seconds
+                                    uint32_t index,      // The 24bit index prefix to be used for session indexes
                                     void (*log_printer)(const char *),
                                     enum log_level log_level);
 

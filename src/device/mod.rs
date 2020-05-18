@@ -50,6 +50,7 @@ use tun::*;
 use udp::*;
 
 use dev_lock::{Lock, LockReadGuard};
+use slog::{error, info, o, Discard, Logger};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 
@@ -94,8 +95,8 @@ pub struct DeviceHandle {
 
 pub struct DeviceConfig {
     pub n_threads: usize,
-    pub log_level: Verbosity,
     pub use_connected_socket: bool,
+    pub logger: Logger,
     #[cfg(target_os = "linux")]
     pub use_multi_queue: bool,
 }
@@ -104,8 +105,8 @@ impl Default for DeviceConfig {
     fn default() -> Self {
         DeviceConfig {
             n_threads: 4,
-            log_level: Verbosity::None,
             use_connected_socket: true,
+            logger: Logger::root(Discard, o!()),
             #[cfg(target_os = "linux")]
             use_multi_queue: true,
         }
@@ -236,7 +237,7 @@ impl DeviceHandle {
                     WaitResult::EoF(handler) => {
                         handler.cancel();
                     }
-                    WaitResult::Error(e) => eprintln!("Poll error {:}", e),
+                    WaitResult::Error(e) => error!(device_lock.config.logger, "Poll error {:}", e),
                 }
             }
         }
@@ -266,7 +267,7 @@ impl Device {
             self.peers_by_ip
                 .remove(&|p: &Arc<Peer>| Arc::ptr_eq(&peer, p)); // peers_by_ip
 
-            peer.log(Verbosity::Info, "Peer removed");
+            info!(peer.tunnel.logger, "Peer removed");
         }
     }
 
@@ -310,13 +311,11 @@ impl Device {
         )
         .unwrap();
 
-        if self.config.log_level > Verbosity::None {
+        {
             let pub_key = base64::encode(pub_key.as_bytes());
-            let peer_name = format!("peer({}…{})", &pub_key[0..4], &pub_key[pub_key.len() - 4..]);
-            tunn.set_logger(
-                Box::new(move |e: &str| println!("{:?} {} {}", chrono::Utc::now(), peer_name, e)),
-                self.config.log_level,
-            );
+            let peer_name = format!("{}…{}", &pub_key[0..4], &pub_key[pub_key.len() - 4..]);
+            let peer_logger = self.config.logger.new(o!("peer" => peer_name));
+            tunn.set_logger(peer_logger);
         }
 
         let peer = Peer::new(tunn, next_index, endpoint, &allowed_ips, preshared_key);
@@ -329,7 +328,7 @@ impl Device {
             self.peers_by_ip.insert(addr, cidr as _, Arc::clone(&peer));
         }
 
-        peer.log(Verbosity::Info, "Peer added");
+        info!(peer.tunnel.logger, "Peer added");
     }
 
     pub fn new(name: &str, config: DeviceConfig) -> Result<Device, Error> {
@@ -539,7 +538,7 @@ impl Device {
                         TunnResult::Err(WireGuardError::ConnectionExpired) => {
                             peer.shutdown_endpoint(); // close open udp socket
                         }
-                        TunnResult::Err(e) => eprintln!("Timer error {:?}", e),
+                        TunnResult::Err(e) => error!(d.config.logger, "Timer error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {
                             match endpoint_addr {
                                 SocketAddr::V4(_) => udp4.sendto(packet, endpoint_addr),
@@ -771,7 +770,7 @@ impl Device {
 
                     match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
                         TunnResult::Done => {}
-                        TunnResult::Err(e) => eprintln!("Encapsulate error {:?}", e),
+                        TunnResult::Err(e) => error!(d.config.logger, "Encapsulate error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {
                             let endpoint = peer.endpoint();
                             if let Some(ref conn) = endpoint.conn {
@@ -782,7 +781,7 @@ impl Device {
                             } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
                                 udp6.sendto(packet, addr);
                             } else {
-                                eprintln!("No endpoint for peer");
+                                error!(d.config.logger, "No endpoint");
                             }
                         }
                         _ => panic!("Unexpected result from encapsulate"),

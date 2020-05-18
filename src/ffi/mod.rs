@@ -9,6 +9,8 @@ use super::noise::*;
 use base64::{decode, encode};
 use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
+use slog::{o, Drain, Level, Logger};
+
 use std::ffi::{CStr, CString};
 use std::mem;
 use std::os::raw::c_char;
@@ -81,14 +83,19 @@ impl<'a> From<TunnResult<'a>> for wireguard_result {
     }
 }
 
-impl From<u32> for Verbosity {
-    fn from(num: u32) -> Self {
-        match num {
-            0 => Verbosity::None,
-            1 => Verbosity::Info,
-            2 => Verbosity::Debug,
-            _ => Verbosity::Trace,
-        }
+/// Custom slog Drain logic
+struct FFIDrain {
+    logger: unsafe extern "C" fn(*const c_char),
+}
+
+impl Drain for FFIDrain {
+    type Ok = ();
+    type Err = ();
+
+    fn log(&self, record: &slog::Record, _: &slog::OwnedKVList) -> Result<Self::Ok, Self::Err> {
+        let cstr = CString::new(format!("{}", record.msg())).unwrap();
+        unsafe { (self.logger)(cstr.as_ptr()) };
+        Ok(())
     }
 }
 
@@ -166,6 +173,7 @@ pub unsafe extern "C" fn new_tunnel(
     static_private: *const c_char,
     server_static_public: *const c_char,
     keep_alive: u16,
+    index: u32,
     log_printer: Option<unsafe extern "C" fn(*const c_char)>,
     log_level: u32,
 ) -> *mut Tunn {
@@ -202,7 +210,7 @@ pub unsafe extern "C" fn new_tunnel(
         Arc::new(public_key),
         None,
         keep_alive,
-        0,
+        index,
         None,
     ) {
         Ok(t) => t,
@@ -210,13 +218,17 @@ pub unsafe extern "C" fn new_tunnel(
     };
 
     if let Some(logger) = log_printer {
-        tunnel.set_logger(
-            Box::new(move |e: &str| {
-                let cstr = CString::new(e).unwrap();
-                logger(cstr.as_ptr())
-            }),
-            Verbosity::from(log_level),
-        );
+        let level = match log_level {
+            0 => Level::Error,
+            1 => Level::Info,
+            2 => Level::Debug,
+            _ => Level::Trace,
+        };
+
+        let drain = FFIDrain { logger };
+        let logger = Logger::root(drain.filter_level(level).fuse(), o!());
+
+        tunnel.set_logger(logger);
     }
 
     PANIC_HOOK.call_once(|| {
