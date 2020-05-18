@@ -11,6 +11,7 @@ mod tests {
     use hex::encode;
     #[cfg(not(target_arch = "arm"))]
     use ring::rand::*;
+    use slog::*;
     use std::io::prelude::*;
     use std::io::{BufReader, Read, Write};
     use std::net::*;
@@ -246,12 +247,19 @@ mod tests {
     impl WGHandle {
         /// Create a new interface for the tunnel with the given address
         fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
+            let logger = Logger::root(
+                slog_term::FullFormat::new(slog_term::PlainSyncDecorator::new(std::io::stdout()))
+                    .build()
+                    .fuse(),
+                slog::o!(),
+            );
+
             WGHandle::init_with_config(
                 addr_v4,
                 addr_v6,
                 DeviceConfig {
                     n_threads: 2,
-                    log_level: Verbosity::None,
+                    logger,
                     use_connected_socket: true,
                     #[cfg(target_os = "linux")]
                     use_multi_queue: true,
@@ -529,12 +537,19 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
+        let logger = Logger::root(
+            slog_term::FullFormat::new(slog_term::PlainSyncDecorator::new(std::io::stdout()))
+                .build()
+                .fuse(),
+            slog::o!(),
+        );
+
         let mut wg = WGHandle::init_with_config(
             addr_v4,
             addr_v6,
             DeviceConfig {
                 n_threads: 2,
-                log_level: Verbosity::None,
+                logger,
                 use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
@@ -645,6 +660,61 @@ mod tests {
         let addr_v6 = next_ip_v6();
 
         let mut wg = WGHandle::init(addr_v4, addr_v6);
+
+        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(&private_key), "errno=0\n\n");
+
+        let mut peer = Peer::new(
+            SocketAddr::new(
+                IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+                next_port(),
+            ),
+            vec![AllowedIp {
+                ip: next_ip_v6(),
+                cidr: 128,
+            }],
+        );
+
+        peer.start_in_container(&public_key, &addr_v6, port);
+
+        let peer = Arc::new(peer);
+
+        wg.add_peer(Arc::clone(&peer));
+        wg.start();
+
+        let response = peer.get_request();
+
+        assert_eq!(response, encode(peer.key.public_key().as_bytes()));
+    }
+
+    /// Test if wireguard can handle connection with an ipv6 endpoint
+    #[test]
+    #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
+    fn test_wg_start_ipv6_endpoint_not_connected() {
+        let port = next_port();
+        let private_key = X25519SecretKey::new();
+        let public_key = private_key.public_key();
+        let addr_v4 = next_ip();
+        let addr_v6 = next_ip_v6();
+
+        let logger = Logger::root(
+            slog_term::FullFormat::new(slog_term::PlainSyncDecorator::new(std::io::stdout()))
+                .build()
+                .fuse(),
+            slog::o!(),
+        );
+
+        let mut wg = WGHandle::init_with_config(
+            addr_v4,
+            addr_v6,
+            DeviceConfig {
+                n_threads: 2,
+                logger,
+                use_connected_socket: false,
+                #[cfg(target_os = "linux")]
+                use_multi_queue: true,
+            },
+        );
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(&private_key), "errno=0\n\n");

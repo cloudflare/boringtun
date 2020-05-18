@@ -11,7 +11,7 @@ use ring::aead::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct Session {
-    receiving_index: u32,
+    pub(crate) receiving_index: u32,
     sending_index: u32,
     #[cfg(not(target_arch = "arm"))]
     receiver: LessSafeKey,

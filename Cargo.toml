@@ -14,6 +14,8 @@ hex = "0.4"
 untrusted = "0.7"
 libc = "0.2"
 parking_lot = "0.10"
+slog = "2.5"
+slog-term = "2.5"
 
 [target.'cfg(not(target_arch="arm"))'.dependencies]
 ring = "0.16"

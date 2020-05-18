@@ -17,11 +17,11 @@ use crate::noise::timers::{TimerName, Timers};
 
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
+use slog::{debug, trace, Logger};
 
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10; // The default value to use for rate limiting, when no other rate limiter is defined
 
@@ -51,34 +51,11 @@ pub enum TunnResult<'a> {
     WriteToTunnelV6(&'a mut [u8], Ipv6Addr),
 }
 
-#[derive(Eq, PartialEq, PartialOrd, Debug, Clone, Copy)]
-pub enum Verbosity {
-    None,
-    Info,
-    Debug,
-    Trace,
-}
-
-impl FromStr for Verbosity {
-    type Err = ();
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "silent" => Ok(Verbosity::None),
-            "info" => Ok(Verbosity::Info),
-            "debug" => Ok(Verbosity::Debug),
-            "max" => Ok(Verbosity::Trace),
-            _ => Err(()),
-        }
-    }
-}
-
 impl<'a> From<WireGuardError> for TunnResult<'a> {
     fn from(err: WireGuardError) -> TunnResult<'a> {
         TunnResult::Err(err)
     }
 }
-
-type LogFunction = Box<dyn Fn(&str) + Send>;
 
 /// Tunnel represents a point-to-point WireGuard connection
 pub struct Tunn {
@@ -92,8 +69,7 @@ pub struct Tunn {
 
     rate_limiter: Arc<RateLimiter>,
 
-    logger: Option<Mutex<LogFunction>>,
-    verbosity: Verbosity,
+    pub logger: Logger,
 }
 
 type MessageType = u32;
@@ -177,8 +153,7 @@ impl Tunn {
             packet_queue: Mutex::new(VecDeque::new()),
             timers: Timers::new(persistent_keepalive, rate_limiter.is_none()),
 
-            logger: None,
-            verbosity: Verbosity::None,
+            logger: slog::Logger::root(slog::Discard, slog::o!()),
 
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
@@ -189,9 +164,8 @@ impl Tunn {
     }
 
     /// Set the log function and logging level for the tunnel
-    pub fn set_logger(&mut self, logger: LogFunction, verbosity: Verbosity) {
-        self.logger = Some(Mutex::new(logger));
-        self.verbosity = verbosity;
+    pub fn set_logger(&mut self, logger: Logger) {
+        self.logger = logger
     }
 
     /// Update the private key and clear existing sessions
@@ -324,7 +298,7 @@ impl Tunn {
         p: HandshakeInit,
         dst: &'a mut [u8],
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        self.log(Verbosity::Debug, "Received handshake_initiation");
+        debug!(self.logger, "Received handshake_initiation"; "remote_idx" => p.sender_idx);
 
         let (packet, session) = {
             let mut handshake = self.handshake.lock();
@@ -332,14 +306,15 @@ impl Tunn {
         };
 
         // Store new session in ring buffer
-        let index = session.local_index() % N_SESSIONS;
-        *self.sessions[index].write() = Some(session);
+        let index = session.local_index();
+        *self.sessions[index % N_SESSIONS].write() = Some(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeLastPacketSent);
         self.timer_tick_session_established(false, index); // New session established, we are not the initiator
 
-        self.log(Verbosity::Debug, "Sending handshake_response");
+        debug!(self.logger, "Sending handshake_response"; "local_idx" => index);
+
         Ok(TunnResult::WriteToNetwork(packet))
     }
 
@@ -348,7 +323,7 @@ impl Tunn {
         p: HandshakeResponse,
         dst: &'a mut [u8],
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        self.log(Verbosity::Debug, "Received handshake_response");
+        debug!(self.logger, "Received handshake_response"; "local_idx" => p.receiver_idx, "remote_idx" => p.sender_idx);
 
         let session = {
             let mut handshake = self.handshake.lock();
@@ -357,15 +332,16 @@ impl Tunn {
 
         let keepalive_packet = session.format_packet_data(&[], dst);
         // Store new session in ring buffer
-        let index = session.local_index() % N_SESSIONS;
+        let l_idx = session.local_index();
+        let index = l_idx % N_SESSIONS;
         *self.sessions[index].write() = Some(session);
-        // The new session becomes the currently used session
-        self.current.store(index, Ordering::SeqCst);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick_session_established(true, index); // New session established, we are the initiator
+        self.set_current_session(l_idx);
 
-        self.log(Verbosity::Debug, "Sending keepalive");
+        debug!(self.logger, "Sending keepalive");
+
         Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
     }
 
@@ -373,7 +349,7 @@ impl Tunn {
         &self,
         p: PacketCookieReply,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        self.log(Verbosity::Debug, "Received cookie_reply");
+        debug!(self.logger, "Received cookie_reply"; "local_idx" => p.receiver_idx);
         {
             let mut handshake = self.handshake.lock();
             handshake.receive_cookie_reply(p)?;
@@ -381,7 +357,8 @@ impl Tunn {
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeCookieReceived);
 
-        self.log(Verbosity::Debug, "Did set cookie");
+        debug!(self.logger, "Did set cookie");
+
         Ok(TunnResult::Done)
     }
 
@@ -392,11 +369,12 @@ impl Tunn {
             // There is nothing to do, already using this session, this is the common case
             return;
         }
-        if self.sessions[cur_idx].read().is_none()
-            || self.timers.session_timers[new_idx].time()
-                >= self.timers.session_timers[cur_idx].time()
+        if self.sessions[cur_idx % N_SESSIONS].read().is_none()
+            || self.timers.session_timers[new_idx % N_SESSIONS].time()
+                >= self.timers.session_timers[cur_idx % N_SESSIONS].time()
         {
-            self.current.store(new_idx, Ordering::Relaxed);
+            self.current.store(new_idx, Ordering::SeqCst);
+            debug!(self.logger, "New session"; "session" => new_idx);
         }
     }
 
@@ -406,15 +384,20 @@ impl Tunn {
         packet: PacketData,
         dst: &'a mut [u8],
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        let idx = packet.receiver_idx as usize % N_SESSIONS;
+        let r_idx = packet.receiver_idx as usize;
+        let idx = r_idx % N_SESSIONS;
+
         // Get the (probably) right session
         let decapsulated_packet = {
             let lock = self.sessions[idx].read();
-            let session = (*lock).as_ref().ok_or(WireGuardError::NoCurrentSession)?;
+            let session = (*lock).as_ref().ok_or_else(|| {
+                trace!(self.logger, "No current session available"; "remote_idx" => r_idx);
+                WireGuardError::NoCurrentSession
+            })?;
             session.receive_packet_data(packet, dst)?
         };
 
-        self.set_current_session(idx);
+        self.set_current_session(r_idx);
 
         self.timer_tick(TimerName::TimeLastDataPacketReceived);
         self.timer_tick(TimerName::TimeLastPacketReceived);
@@ -442,7 +425,8 @@ impl Tunn {
 
         match handshake.format_handshake_initiation(dst) {
             Ok(packet) => {
-                self.log(Verbosity::Debug, "Sending handshake_initiation");
+                debug!(self.logger, "Sending handshake_initiation");
+
                 if starting_new_handshake {
                     self.timer_tick(TimerName::TimeLastHandshakeStarted);
                 }
@@ -573,14 +557,6 @@ impl Tunn {
             0.0
         } else {
             cur_avg / total_weight
-        }
-    }
-
-    pub fn log(&self, lvl: Verbosity, entry: &str) {
-        if let Some(ref logger) = self.logger {
-            if self.verbosity >= lvl {
-                logger.lock()(&format!("[{:?}] {}", lvl, entry));
-            }
         }
     }
 
