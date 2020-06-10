@@ -222,8 +222,10 @@ impl<H: Sync + Send> EventPoll<H> {
     /// handler.
     pub fn wait(&self) -> WaitResult<'_, H> {
         let mut event = epoll_event { events: 0, u64: 0 };
-        if unsafe { epoll_wait(self.epoll, &mut event, 1, -1) } == -1 {
-            return WaitResult::Error(errno_str());
+        match unsafe { epoll_wait(self.epoll, &mut event, 1, -1) } {
+            -1 => return WaitResult::Error(errno_str()),
+            1 => {}
+            _ => return WaitResult::Error("unexpected number of events returned".to_string()),
         }
 
         let event_data = unsafe { (event.u64 as *mut Event<H>).as_mut().unwrap() };
