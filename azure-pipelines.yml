@@ -44,11 +44,10 @@ jobs:
 - job: Linux_x86_64
   displayName: 'Linux x86-64'
   pool:
-    vmImage: 'ubuntu-16.04'
+    vmImage: 'ubuntu-20.04'
   continueOnError: true
   steps:
   - script: |
-      sudo add-apt-repository ppa:wireguard/wireguard
       sudo apt-get update
       sudo apt-get install wireguard -y
     displayName: 'Install wireguard'
