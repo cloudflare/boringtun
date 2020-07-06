@@ -38,13 +38,13 @@ use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
-use allowed_ips::*;
 use crate::crypto::x25519::*;
-use dev_lock::*;
 use crate::noise::errors::*;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::*;
+use allowed_ips::*;
+use dev_lock::*;
 use peer::*;
 use poll::*;
 use tun::*;
