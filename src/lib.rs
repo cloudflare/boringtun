@@ -6,6 +6,7 @@
 //! <code>git clone https://github.com/cloudflare/boringtun.git</code>
 
 pub mod crypto;
+pub mod device;
 pub mod ffi;
 pub mod noise;
 

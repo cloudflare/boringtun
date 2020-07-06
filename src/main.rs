@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub mod crypto;
-mod device;
+pub mod device;
 pub mod ffi;
 pub mod noise;
 
