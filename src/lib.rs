@@ -6,6 +6,10 @@
 //! <code>git clone https://github.com/cloudflare/boringtun.git</code>
 
 pub mod crypto;
+
+#[cfg(not(target_os = "windows"))]
+pub mod device;
+
 pub mod ffi;
 pub mod noise;
 

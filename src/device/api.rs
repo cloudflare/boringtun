@@ -1,9 +1,9 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use super::dev_lock::LockReadGuard;
+use super::drop_privileges::*;
 use super::{make_array, AllowedIP, Device, Error, SocketAddr, X25519PublicKey, X25519SecretKey};
-use crate::dev_lock::LockReadGuard;
-use crate::device::drop_privileges::*;
 use crate::device::Action;
 use hex::encode as encode_hex;
 use libc::*;
