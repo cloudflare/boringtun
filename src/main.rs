@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub mod crypto;
+
+#[cfg(not(target_os = "windows"))]
 pub mod device;
+
 pub mod ffi;
 pub mod noise;
 

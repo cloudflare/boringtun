@@ -38,17 +38,17 @@ use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
-use crate::device::allowed_ips::*;
+use allowed_ips::*;
 use crate::crypto::x25519::*;
-use crate::device::dev_lock::*;
+use dev_lock::*;
 use crate::noise::errors::*;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::*;
-use crate::device::peer::*;
-use crate::device::poll::*;
-use crate::device::tun::*;
-use crate::device::udp::*;
+use peer::*;
+use poll::*;
+use tun::*;
+use udp::*;
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 
