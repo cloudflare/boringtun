@@ -143,7 +143,7 @@ pub unsafe extern "C" fn create_new_tunnel(
         Err(_) => return 0,
     };
 
-    let tunnel = new_tunnel(secret_key, public_key, Some(log_print), 3);
+    let tunnel = new_tunnel(secret_key, public_key, 0, Some(log_print), 3);
 
     if tunnel.is_null() {
         return 0;
