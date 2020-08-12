@@ -65,7 +65,7 @@ impl UDPSocket {
                 #[cfg(not(target_os = "linux"))]
                 SO_REUSEPORT,
                 &1u32 as *const u32 as *const c_void,
-                std::mem::size_of::<u32>() as u32,
+                std::mem::size_of::<u32>() as socklen_t,
             )
         } {
             -1 => Err(Error::SetSockOpt(errno_str())),
@@ -134,7 +134,7 @@ impl UDPSocket {
             bind(
                 self.fd,
                 &addr as *const sockaddr_in as *const sockaddr,
-                std::mem::size_of::<sockaddr_in>() as u32,
+                std::mem::size_of::<sockaddr_in>() as socklen_t,
             )
         } {
             -1 => Err(Error::Bind(errno_str())),
@@ -151,7 +151,7 @@ impl UDPSocket {
             bind(
                 self.fd,
                 &addr as *const sockaddr_in6 as *const sockaddr,
-                std::mem::size_of::<sockaddr_in6>() as u32,
+                std::mem::size_of::<sockaddr_in6>() as socklen_t,
             )
         } {
             -1 => Err(Error::Bind(errno_str())),
@@ -186,7 +186,7 @@ impl UDPSocket {
             connect(
                 self.fd,
                 &addr as *const sockaddr_in as *const sockaddr,
-                std::mem::size_of::<sockaddr_in>() as u32,
+                std::mem::size_of::<sockaddr_in>() as socklen_t,
             )
         } {
             -1 => Err(Error::Connect(errno_str())),
@@ -205,7 +205,7 @@ impl UDPSocket {
             connect(
                 self.fd,
                 &addr as *const sockaddr_in6 as *const sockaddr,
-                std::mem::size_of::<sockaddr_in6>() as u32,
+                std::mem::size_of::<sockaddr_in6>() as socklen_t,
             )
         } {
             -1 => Err(Error::Connect(errno_str())),
