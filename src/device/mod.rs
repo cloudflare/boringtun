@@ -666,7 +666,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
                         while let TunnResult::WriteToNetwork(packet) =
                             peer.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            udp.write(packet);
+                            udp.sendto(packet, addr);
                         }
                     }
 
