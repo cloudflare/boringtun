@@ -60,10 +60,10 @@ impl<'a> From<WireGuardError> for TunnResult<'a> {
 /// Tunnel represents a point-to-point WireGuard connection
 pub struct Tunn {
     handshake: Mutex<handshake::Handshake>, // The handshake currently in progress
-    sessions: [Arc<RwLock<Option<session::Session>>>; N_SESSIONS], // The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
-    current: AtomicUsize, // Index of most recently used session
-    packet_queue: Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
-    timers: timers::Timers, // Keeps tabs on the expiring timers
+    sessions: [RwLock<Option<session::Session>>; N_SESSIONS], // The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
+    current: AtomicUsize,                                     // Index of most recently used session
+    packet_queue: Mutex<VecDeque<Vec<u8>>>,                   // Queue to store blocked packets
+    timers: timers::Timers,                                   // Keeps tabs on the expiring timers
     tx_bytes: AtomicUsize,
     rx_bytes: AtomicUsize,
 
