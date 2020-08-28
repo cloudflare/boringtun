@@ -581,6 +581,10 @@ impl Tunn {
     pub fn is_expired(&self) -> bool {
         self.handshake.lock().is_expired()
     }
+
+    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+        self.handshake.lock().preshared_key()
+    }
 }
 
 #[inline(always)]

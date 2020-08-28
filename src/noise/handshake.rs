@@ -321,6 +321,10 @@ impl Handshake {
         self.cookies.write_cookie.is_some()
     }
 
+    pub(crate) fn preshared_key(&self) -> Option<[u8; 32]> {
+        self.params.preshared_key
+    }
+
     pub(crate) fn clear_cookie(&mut self) {
         self.cookies.write_cookie = None;
     }

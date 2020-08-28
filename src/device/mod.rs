@@ -451,39 +451,32 @@ impl<T: Tun, S: Sock> Device<T, S> {
     }
 
     fn set_key(&mut self, private_key: X25519SecretKey) {
-        let mut bad_peers = vec![];
-
         let private_key = Arc::new(private_key);
         let public_key = Arc::new(private_key.public_key());
 
         let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
 
-        for peer in self.peers.values_mut() {
-            // Taking a pointer should be Ok as long as all other threads are stopped
-            let mut_ptr = Arc::into_raw(Arc::clone(peer)) as *mut Peer<S>;
-
-            if unsafe {
-                mut_ptr.as_mut().unwrap().tunnel.set_static_private(
-                    Arc::clone(&private_key),
-                    Arc::clone(&public_key),
-                    Some(Arc::clone(&rate_limiter)),
-                )
-            }
-            .is_err()
-            {
-                // In case we encounter an error, we will remove that peer
-                // An error will be a result of bad public key/secret key combination
-                bad_peers.push(peer);
-            }
+        let peers = self.peers.clone();
+        self.clear_peers();
+        for (pubkey, peer) in peers.iter() {
+            self.update_peer(
+                X25519PublicKey::from(pubkey.as_bytes()),
+                false,
+                false,
+                peer.endpoint().addr,
+                peer.allowed_ips()
+                    .map(|t| AllowedIP {
+                        addr: t.1,
+                        cidr: t.2 as u8,
+                    })
+                    .collect(),
+                peer.tunnel.persistent_keepalive(),
+                peer.tunnel.preshared_key(),
+            );
         }
 
         self.key_pair = Some((private_key, public_key));
         self.rate_limiter = Some(rate_limiter);
-
-        // Remove all the bad peers
-        for _ in bad_peers {
-            unimplemented!();
-        }
     }
 
     fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
