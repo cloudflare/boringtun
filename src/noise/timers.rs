@@ -139,8 +139,8 @@ impl Tunn {
         }
 
         {
-            let mut queued = self.packet_queue.lock();
-            queued.clear();
+            let mut hs_data = self.handshake.lock();
+            hs_data.packet_queue.clear();
         }
 
         self.timers.clear();
@@ -187,32 +187,32 @@ impl Tunn {
         let persistent_keepalive = timers.persistent_keepalive.load(Ordering::Relaxed);
 
         {
-            let mut handshake = match self.handshake.try_lock() {
-                Some(handshake) => handshake,
+            let mut hs_data = match self.handshake.try_lock() {
+                Some(hs_data) => hs_data,
                 None => return TunnResult::Done,
             };
 
-            if handshake.is_expired() {
+            if hs_data.handshake.is_expired() {
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
             }
 
             // Clear cookie after COOKIE_EXPIRATION_TIME
-            if handshake.has_cookie()
+            if hs_data.handshake.has_cookie()
                 && now - timers[TimeCookieReceived].time() >= COOKIE_EXPIRATION_TIME
             {
-                handshake.clear_cookie();
+                hs_data.handshake.clear_cookie();
             }
 
             // All ephemeral private keys and symmetric session keys are zeroed out after
             // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
             if now - session_established >= REJECT_AFTER_TIME * 3 {
                 debug!(self.logger, "CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
-                handshake.set_expired();
+                hs_data.handshake.set_expired();
                 self.clear_all();
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
             }
 
-            if let Some(time_init_sent) = handshake.timer() {
+            if let Some(time_init_sent) = hs_data.handshake.timer() {
                 // Handshake Initiation Retransmission
                 if now - handshake_started >= REKEY_ATTEMPT_TIME {
                     // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
@@ -220,7 +220,7 @@ impl Tunn {
                     // up to be sent. If a packet is explicitly queued up to be sent, then
                     // this timer is reset.
                     debug!(self.logger, "CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
-                    handshake.set_expired();
+                    hs_data.handshake.set_expired();
                     self.clear_all();
                     return TunnResult::Err(WireGuardError::ConnectionExpired);
                 }
