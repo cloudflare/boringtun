@@ -221,7 +221,7 @@ impl Tunn {
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
     pub fn encapsulate<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.encapsulate_with_guard(None, src, dst)
+        self.encapsulate_with_guard(None, src, dst, true)
     }
 
     fn encapsulate_with_guard<'a>(
@@ -229,6 +229,7 @@ impl Tunn {
         hs_data: Option<&mut MutexGuard<HandshakeData>>,
         src: &[u8],
         dst: &'a mut [u8],
+        queue_dropped: bool,
     ) -> TunnResult<'a> {
         let current = self.current.load(Ordering::SeqCst);
         if let Some(ref session) = *self.sessions[current % N_SESSIONS].read() {
@@ -243,9 +244,12 @@ impl Tunn {
         match hs_data {
             None => {
                 let mut hs_data = self.handshake.lock();
-                self.encapsulate_with_guard(Some(&mut hs_data), src, dst)
+                self.encapsulate_with_guard(Some(&mut hs_data), src, dst, queue_dropped)
             }
             Some(hs_data) => {
+                if !queue_dropped {
+                    return TunnResult::Err(WireGuardError::NoCurrentSession);
+                }
                 // If there is no session, queue the packet for future retry
                 hs_data.queue_packet(src);
                 // Initiate a new handshake if none is in progress
@@ -555,7 +559,7 @@ impl Tunn {
     fn send_queued_packet<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
         let mut hs_data = self.handshake.lock();
         if let Some(packet) = hs_data.dequeue_packet() {
-            match self.encapsulate_with_guard(Some(&mut hs_data), &packet, dst) {
+            match self.encapsulate_with_guard(Some(&mut hs_data), &packet, dst, false) {
                 TunnResult::Err(_) => {
                     // On error, return packet to the queue
                     hs_data.requeue_packet(packet);

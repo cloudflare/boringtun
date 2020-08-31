@@ -297,7 +297,7 @@ impl Tunn {
         if handshake_initiation_required {
             self.format_handshake_initiation_with_guard(&mut hs_data, dst, true)
         } else if keepalive_required {
-            self.encapsulate(Some(&mut hs_data), &[], dst)
+            self.encapsulate_with_guard(Some(&mut hs_data), &[], dst, false)
         } else {
             TunnResult::Done
         }
