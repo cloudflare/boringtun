@@ -371,8 +371,6 @@ impl Blake2s {
 
 /// Checks if both MACs are equal in constant time.
 pub fn constant_time_mac_check(mac1: &[u8], mac2: &[u8]) -> Result<(), WireGuardError> {
-    assert!(mac1.len() == 16);
-    assert!(mac2.len() == 16);
     if mac1.len() != 16 || mac2.len() != 16 {
         return Err(WireGuardError::InvalidMac);
     }
