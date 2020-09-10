@@ -27,6 +27,8 @@ jobs:
   - script: |
       brew install wireguard-go wireguard-tools
     displayName: 'Install wireguard-go'
+  - script: ./mac.docker.sh
+    displayName: 'Install Docker'
   - template: ci/azure-build.yml
     parameters:
       runBinaryTests: 'false'
