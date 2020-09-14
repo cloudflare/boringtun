@@ -4,9 +4,11 @@
 use super::{errno_str, Error};
 use libc::*;
 use spin::Mutex;
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::os::unix::io::RawFd;
 use std::ptr::{null, null_mut};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// A return type for the EventPoll::wait() function
@@ -19,12 +21,16 @@ pub enum WaitResult<'a, H> {
     Error(String),
 }
 
+struct Registry<H: Sized> {
+    counter: u64,
+    registry: HashMap<u64, Arc<Event<H>>>,
+    by_fd: HashMap<RawFd, u64>,
+}
+
 /// Implements a registry of pollable events
 pub struct EventPoll<H: Sized> {
-    events: Mutex<Vec<Option<Box<Event<H>>>>>, // Events with a file descriptor
-    custom: Mutex<Vec<Option<Box<Event<H>>>>>, // Other events (i.e. timers & notifiers)
-    signals: Mutex<Vec<Option<Box<Event<H>>>>>, // Signal handlers
-    kqueue: RawFd,                             // The OS kqueue
+    events: Mutex<Registry<H>>,
+    kqueue: RawFd, // The OS kqueue
 }
 
 /// A type that hold a reference to a triggered Event
@@ -32,16 +38,17 @@ pub struct EventPoll<H: Sized> {
 /// Once the EventGuard goes out of scope, the underlying Event will be re-enabled
 pub struct EventGuard<'a, H> {
     kqueue: RawFd,
-    event: &'a Event<H>,
+    id: u64,
+    event: Arc<Event<H>>,
     poll: &'a EventPoll<H>,
 }
 
 /// A reference to a single event in an EventPoll
 pub struct EventRef {
-    trigger: RawFd,
+    trigger: u64,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 enum EventKind {
     FD,
     Notifier,
@@ -74,9 +81,11 @@ impl<H: Send + Sync> EventPoll<H> {
         };
 
         Ok(EventPoll {
-            events: Mutex::new(vec![]),
-            custom: Mutex::new(vec![]),
-            signals: Mutex::new(vec![]),
+            events: Mutex::new(Registry {
+                counter: 0,
+                registry: HashMap::new(),
+                by_fd: HashMap::new(),
+            }),
             kqueue,
         })
     }
@@ -189,12 +198,22 @@ impl<H: Send + Sync> EventPoll<H> {
         if unsafe { kevent(self.kqueue, null(), 0, &mut event, 1, null()) } == -1 {
             return WaitResult::Error(errno_str());
         }
+        let id = event.udata as u64;
 
-        let event_data = unsafe { (event.udata as *mut Event<H>).as_ref().unwrap() };
+        let event_data = {
+            let events = self.events.lock();
+            let event_data = events.registry.get(&id);
+            if event_data.is_none() {
+                return self.wait();
+            }
+
+            event_data.unwrap().clone()
+        };
 
         let guard = EventGuard {
             kqueue: self.kqueue,
-            event: &event_data,
+            id: id,
+            event: event_data,
             poll: self,
         };
 
@@ -206,103 +225,94 @@ impl<H: Send + Sync> EventPoll<H> {
     }
 
     // Register an event with this poll.
-    fn register_event(&self, ev: Event<H>) -> Result<EventRef, Error> {
-        let mut events = match ev.kind {
-            EventKind::FD => self.events.lock(),
-            EventKind::Timer | EventKind::Notifier => self.custom.lock(),
-            EventKind::Signal => self.signals.lock(),
+    fn register_event(&self, mut ev: Event<H>) -> Result<EventRef, Error> {
+        let (kind, mut event) = {
+            let mut events = self.events.lock();
+
+            if ev.kind == EventKind::FD {
+                // Check if there's already another event with this FD. Usually this means the FD was
+                // closed and we weren't told about it.
+                let fd = ev.event.ident as RawFd;
+                if let Some(id) = events.by_fd.get(&fd) {
+                    // Remove this event from the registry.
+                    let id = *id;
+                    events.registry.remove(&id);
+                    events.by_fd.remove(&fd);
+                }
+            }
+
+            // Get a unique id for this event and add it to the registry.
+            let id = events.counter;
+            events.counter += 1;
+
+            ev.event.udata = id as _;
+            if ev.kind == EventKind::Timer || ev.kind == EventKind::Notifier {
+                ev.event.ident = id as usize;
+            }
+
+            let kind = ev.kind.clone();
+            let event = ev.event.clone();
+
+            if ev.kind == EventKind::FD {
+                events.by_fd.insert(ev.event.ident as RawFd, id);
+            }
+            events.registry.insert(id, Arc::new(ev));
+
+            (kind, event)
         };
 
-        let (trigger, index) = match ev.kind {
-            EventKind::FD | EventKind::Signal => (ev.event.ident as RawFd, ev.event.ident as usize),
-            EventKind::Timer | EventKind::Notifier => (-(events.len() as RawFd) - 1, events.len()), // Custom events get negative identifiers, hopefully we will never have more than 2^31 events of each type
-        };
+        event.flags |= EV_ADD;
 
-        // Expand events vector if needed
-        while events.len() <= index {
-            // Resize the vector to be able to fit the new index
-            // We trust the OS to allocate file descriptors in a sane order
-            events.push(None); // resize doesn't work because Clone is not satisfied
-        }
-
-        let mut ev = Box::new(ev);
-        // The inner event points back to the wrapper
-        ev.event.ident = trigger as _;
-        ev.event.udata = ev.as_mut() as *mut Event<H> as _;
-
-        let mut kev = ev.event;
-        kev.flags |= EV_ADD;
-
-        if unsafe { kevent(self.kqueue, &kev, 1, null_mut(), 0, null()) } == -1 {
+        if unsafe { kevent(self.kqueue, &event, 1, null_mut(), 0, null()) } == -1 {
             return Err(Error::EventQueue(errno_str()));
         }
-
-        if let Some(mut event) = events[index].take() {
-            // Properly remove any previous event first
-            event.event.flags = EV_DELETE;
-            unsafe { kevent(self.kqueue, &event.event, 1, null_mut(), 0, null()) };
-        }
-
-        if ev.kind == EventKind::Signal {
+        if kind == EventKind::Signal {
             // Mask the signal if successfully added to kqueue
-            unsafe { signal(trigger, SIG_IGN) };
+            unsafe { signal(event.ident as RawFd, SIG_IGN) };
         }
 
-        events[index] = Some(ev);
-
-        Ok(EventRef { trigger })
+        Ok(EventRef {
+            trigger: event.udata as u64,
+        })
     }
 
     pub fn trigger_notification(&self, notification_event: &EventRef) {
-        let events = self.custom.lock();
-        let ev_index = -notification_event.trigger - 1; // Custom events have negative index from -1
+        let mut event = {
+            let events = self.events.lock();
+            let event_data = events
+                .registry
+                .get(&notification_event.trigger)
+                .expect("Expected an event");
+            if event_data.kind != EventKind::Notifier {
+                panic!("Can only trigger a notification event");
+            }
 
-        let event_ref = &(*events)[ev_index as usize];
-        let event_data = event_ref.as_ref().expect("Expected an event");
+            event_data.event
+        };
 
-        if event_data.kind != EventKind::Notifier {
-            panic!("Can only trigger a notification event");
-        }
+        event.fflags = NOTE_TRIGGER;
 
-        let mut kev = event_data.event;
-        kev.fflags = NOTE_TRIGGER;
-
-        unsafe { kevent(self.kqueue, &kev, 1, null_mut(), 0, null()) };
+        unsafe { kevent(self.kqueue, &event, 1, null_mut(), 0, null()) };
     }
 
     pub fn stop_notification(&self, notification_event: &EventRef) {
-        let events = self.custom.lock();
-        let ev_index = -notification_event.trigger - 1; // Custom events have negative index from -1
+        let mut event = {
+            let events = self.events.lock();
+            let event_data = events
+                .registry
+                .get(&notification_event.trigger)
+                .expect("Expected an event");
+            if event_data.kind != EventKind::Notifier {
+                panic!("Can only stop a notification event");
+            }
 
-        let event_ref = &(*events)[ev_index as usize];
-        let event_data = event_ref.as_ref().expect("Expected an event");
-
-        if event_data.kind != EventKind::Notifier {
-            panic!("Can only stop a notification event");
-        }
-
-        let mut kev = event_data.event;
-        kev.flags = EV_DISABLE;
-        kev.fflags = 0;
-
-        unsafe { kevent(self.kqueue, &kev, 1, null_mut(), 0, null()) };
-    }
-}
-
-impl<H> EventPoll<H> {
-    // This function is only safe to call when the event loop is not running
-    pub unsafe fn clear_event_by_fd(&self, index: RawFd) {
-        let (mut events, index) = if index >= 0 {
-            (self.events.lock(), index as usize)
-        } else {
-            (self.custom.lock(), (-index - 1) as usize)
+            event_data.event
         };
 
-        if let Some(mut event) = events[index].take() {
-            // Properly remove any previous event first
-            event.event.flags = EV_DELETE;
-            kevent(self.kqueue, &event.event, 1, null_mut(), 0, null());
-        }
+        event.flags = EV_DISABLE;
+        event.fflags = 0;
+
+        unsafe { kevent(self.kqueue, &event, 1, null_mut(), 0, null()) };
     }
 }
 
@@ -325,7 +335,19 @@ impl<'a, H> Drop for EventGuard<'a, H> {
 impl<'a, H> EventGuard<'a, H> {
     /// Cancel and remove the event represented by this guard
     pub fn cancel(self) {
-        unsafe { self.poll.clear_event_by_fd(self.event.event.ident as RawFd) };
+        {
+            let mut events = self.poll.events.lock();
+
+            events.registry.remove(&self.id);
+            if self.event.kind == EventKind::FD {
+                let fd = self.event.event.ident as RawFd;
+                if let Some(id) = events.by_fd.get(&fd) {
+                    if *id == self.id {
+                        events.by_fd.remove(&fd);
+                    }
+                }
+            }
+        };
         std::mem::forget(self); // Don't call the regular drop that would enable the event
     }
 }
