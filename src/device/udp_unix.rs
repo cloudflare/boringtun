@@ -106,7 +106,7 @@ impl UDPSocket {
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "linux"))]
     pub fn set_fwmark(&self, _: u32) -> Result<(), Error> {
         Ok(())
     }
@@ -122,12 +122,15 @@ impl UDPSocket {
 
     fn bind4(self, port: u16) -> Result<UDPSocket, Error> {
         let addr = sockaddr_in {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "haiku"))]
             sin_len: std::mem::size_of::<sockaddr_in>() as u8,
             sin_family: AF_INET as _,
             sin_port: port.to_be(),
             sin_addr: in_addr { s_addr: INADDR_ANY },
+            #[cfg(not(target_os = "haiku"))]
             sin_zero: [0; 8],
+            #[cfg(target_os = "haiku")]
+            sin_zero: [0; 24],
         };
 
         match unsafe {
@@ -172,14 +175,17 @@ impl UDPSocket {
     fn connect4(self, dst: &SocketAddrV4) -> Result<UDPSocket, Error> {
         assert_eq!(self.version, 4);
         let addr = sockaddr_in {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "haiku"))]
             sin_len: std::mem::size_of::<sockaddr_in>() as u8,
             sin_family: AF_INET as _,
             sin_port: dst.port().to_be(),
             sin_addr: in_addr {
                 s_addr: u32::from(*dst.ip()).to_be(),
             },
+            #[cfg(not(target_os = "haiku"))]
             sin_zero: [0; 8],
+            #[cfg(target_os = "haiku")]
+            sin_zero: [0; 24],
         };
 
         match unsafe {
@@ -226,14 +232,17 @@ impl UDPSocket {
     fn sendto4(&self, buf: &[u8], dst: SocketAddrV4) -> usize {
         assert_eq!(self.version, 4);
         let addr = sockaddr_in {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "haiku"))]
             sin_len: std::mem::size_of::<sockaddr_in>() as _,
             sin_family: AF_INET as _,
             sin_port: dst.port().to_be(),
             sin_addr: in_addr {
                 s_addr: u32::from(*dst.ip()).to_be(),
             },
+            #[cfg(not(target_os = "haiku"))]
             sin_zero: [0; 8],
+            #[cfg(target_os = "haiku")]
+            sin_zero: [0; 24],
         };
 
         match unsafe {
@@ -313,12 +322,15 @@ impl UDPSocket {
 
     fn recvfrom4<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
         let mut addr = sockaddr_in {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "haiku"))]
             sin_len: 0,
             sin_family: 0,
             sin_port: 0,
             sin_addr: in_addr { s_addr: 0 },
+            #[cfg(not(target_os = "haiku"))]
             sin_zero: [0; 8],
+            #[cfg(target_os = "haiku")]
+            sin_zero: [0; 24],
         };
         let mut addr_len: socklen_t = std::mem::size_of::<sockaddr_in>() as socklen_t;
 
