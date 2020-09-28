@@ -382,7 +382,7 @@ impl Tunn {
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick_session_established(true, index); // New session established, we are the initiator
-        self.set_current_session(l_idx);
+        self.set_current_session(Some(hs_data), l_idx);
 
         debug!(self.logger, "Sending keepalive");
 
@@ -407,7 +407,7 @@ impl Tunn {
     }
 
     // Update the index of the currently used session, if needed
-    fn set_current_session(&self, new_idx: usize) {
+    fn set_current_session(&self, guard: Option<MutexGuard<HandshakeData>>, new_idx: usize) {
         let cur_idx = self.current.load(Ordering::SeqCst);
         if cur_idx == new_idx {
             // There is nothing to do, already using this session, this is the common case
@@ -416,7 +416,7 @@ impl Tunn {
 
         // Acquire the handshake lock to serialize these reads with any other threads, even though
         // we're not working on the handshake.
-        let guard = self.handshake.lock();
+        let guard = guard.unwrap_or_else(|| self.handshake.lock());
         let cur_idx = self.current.load(Ordering::SeqCst);
 
         if cur_idx == new_idx {
@@ -452,7 +452,7 @@ impl Tunn {
             session.receive_packet_data(packet, dst)?
         };
 
-        self.set_current_session(r_idx);
+        self.set_current_session(None, r_idx);
 
         self.timer_tick(TimerName::TimeLastDataPacketReceived);
         self.timer_tick(TimerName::TimeLastPacketReceived);
