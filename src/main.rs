@@ -19,7 +19,7 @@ use std::os::unix::net::UnixDatagram;
 use std::process::exit;
 
 fn check_tun_name(_v: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         if device::tun::parse_utun_name(&_v).is_ok() {
             Ok(())
