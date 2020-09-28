@@ -186,125 +186,121 @@ impl Tunn {
         let data_packet_sent = timers[TimeLastDataPacketSent].time();
         let persistent_keepalive = timers.persistent_keepalive.load(Ordering::Relaxed);
 
+        let mut hs_data = match self.handshake.try_lock() {
+            Some(hs_data) => hs_data,
+            None => return TunnResult::Done,
+        };
+
+        if hs_data.handshake.is_expired() {
+            return TunnResult::Err(WireGuardError::ConnectionExpired);
+        }
+
+        // Clear cookie after COOKIE_EXPIRATION_TIME
+        if hs_data.handshake.has_cookie()
+            && now - timers[TimeCookieReceived].time() >= COOKIE_EXPIRATION_TIME
         {
-            let mut hs_data = match self.handshake.try_lock() {
-                Some(hs_data) => hs_data,
-                None => return TunnResult::Done,
-            };
+            hs_data.handshake.clear_cookie();
+        }
 
-            if hs_data.handshake.is_expired() {
-                return TunnResult::Err(WireGuardError::ConnectionExpired);
-            }
+        // All ephemeral private keys and symmetric session keys are zeroed out after
+        // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
+        if now - session_established >= REJECT_AFTER_TIME * 3 {
+            debug!(self.logger, "CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
+            hs_data.handshake.set_expired();
+            self.clear_all();
+            return TunnResult::Err(WireGuardError::ConnectionExpired);
+        }
 
-            // Clear cookie after COOKIE_EXPIRATION_TIME
-            if hs_data.handshake.has_cookie()
-                && now - timers[TimeCookieReceived].time() >= COOKIE_EXPIRATION_TIME
-            {
-                hs_data.handshake.clear_cookie();
-            }
-
-            // All ephemeral private keys and symmetric session keys are zeroed out after
-            // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
-            if now - session_established >= REJECT_AFTER_TIME * 3 {
-                debug!(self.logger, "CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
+        if let Some(time_init_sent) = hs_data.handshake.timer() {
+            // Handshake Initiation Retransmission
+            if now - handshake_started >= REKEY_ATTEMPT_TIME {
+                // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
+                // the retries give up and cease, and clear all existing packets queued
+                // up to be sent. If a packet is explicitly queued up to be sent, then
+                // this timer is reset.
+                debug!(self.logger, "CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                 hs_data.handshake.set_expired();
                 self.clear_all();
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
             }
 
-            if let Some(time_init_sent) = hs_data.handshake.timer() {
-                // Handshake Initiation Retransmission
-                if now - handshake_started >= REKEY_ATTEMPT_TIME {
-                    // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
-                    // the retries give up and cease, and clear all existing packets queued
-                    // up to be sent. If a packet is explicitly queued up to be sent, then
-                    // this timer is reset.
-                    debug!(self.logger, "CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
-                    hs_data.handshake.set_expired();
-                    self.clear_all();
-                    return TunnResult::Err(WireGuardError::ConnectionExpired);
-                }
-
-                if time_init_sent.elapsed() >= REKEY_TIMEOUT {
-                    // We avoid using `time` here, because it can be earlier than `time_init_sent`.
-                    // Once `checked_duration_since` is stable we can use that.
-                    // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
-                    // if a response has not been received, where jitter is some random
-                    // value between 0 and 333 ms.
-                    debug!(self.logger, "HANDSHAKE(REKEY_TIMEOUT)");
-                    handshake_initiation_required = true;
-                }
-            } else {
-                if timers.is_initiator() {
-                    // After sending a packet, if the sender was the original initiator
-                    // of the handshake and if the current session key is REKEY_AFTER_TIME
-                    // ms old, we initiate a new handshake. If the sender was the original
-                    // responder of the handshake, it does not re-initiate a new handshake
-                    // after REKEY_AFTER_TIME ms like the original initiator does.
-                    if session_established < data_packet_sent
-                        && now - session_established >= REKEY_AFTER_TIME
-                    {
-                        debug!(self.logger, "HANDSHAKE(REKEY_AFTER_TIME (on send))");
-                        handshake_initiation_required = true;
-                    }
-
-                    // After receiving a packet, if the receiver was the original initiator
-                    // of the handshake and if the current session key is REJECT_AFTER_TIME
-                    // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
-                    // handshake.
-                    if session_established < data_packet_received
-                        && now - session_established
-                            >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
-                    {
-                        debug!(self.logger, "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))");
-                        handshake_initiation_required = true;
-                    }
-                }
-
-                // If we have sent a packet to a given peer but have not received a
-                // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
-                // we initiate a new handshake.
-                if aut_packet_sent > aut_packet_received
-                    && now - aut_packet_sent >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
-                    && timers.want_handshake.swap(false, Ordering::Relaxed)
+            if time_init_sent.elapsed() >= REKEY_TIMEOUT {
+                // We avoid using `time` here, because it can be earlier than `time_init_sent`.
+                // Once `checked_duration_since` is stable we can use that.
+                // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
+                // if a response has not been received, where jitter is some random
+                // value between 0 and 333 ms.
+                debug!(self.logger, "HANDSHAKE(REKEY_TIMEOUT)");
+                handshake_initiation_required = true;
+            }
+        } else {
+            if timers.is_initiator() {
+                // After sending a packet, if the sender was the original initiator
+                // of the handshake and if the current session key is REKEY_AFTER_TIME
+                // ms old, we initiate a new handshake. If the sender was the original
+                // responder of the handshake, it does not re-initiate a new handshake
+                // after REKEY_AFTER_TIME ms like the original initiator does.
+                if session_established < data_packet_sent
+                    && now - session_established >= REKEY_AFTER_TIME
                 {
-                    debug!(self.logger, "HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
+                    debug!(self.logger, "HANDSHAKE(REKEY_AFTER_TIME (on send))");
                     handshake_initiation_required = true;
                 }
 
-                if !handshake_initiation_required {
-                    // If a packet has been received from a given peer, but we have not sent one back
-                    // to the given peer in KEEPALIVE ms, we send an empty packet.
-                    if aut_packet_received > aut_packet_sent
-                        && now - aut_packet_received >= KEEPALIVE_TIMEOUT
-                        && timers.want_keepalive.swap(false, Ordering::Relaxed)
-                    {
-                        debug!(self.logger, "KEEPALIVE(KEEPALIVE_TIMEOUT)");
-                        keepalive_required = true;
-                    }
+                // After receiving a packet, if the receiver was the original initiator
+                // of the handshake and if the current session key is REJECT_AFTER_TIME
+                // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
+                // handshake.
+                if session_established < data_packet_received
+                    && now - session_established
+                        >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
+                {
+                    debug!(self.logger, "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))");
+                    handshake_initiation_required = true;
+                }
+            }
 
-                    // Persistent KEEPALIVE
-                    if persistent_keepalive > 0
-                        && (now - timers[TimePersistentKeepalive].time()
-                            >= Duration::from_secs(persistent_keepalive as _))
-                    {
-                        debug!(self.logger, "KEEPALIVE(PERSISTENT_KEEPALIVE)");
-                        self.timer_tick(TimePersistentKeepalive);
-                        keepalive_required = true;
-                    }
+            // If we have sent a packet to a given peer but have not received a
+            // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
+            // we initiate a new handshake.
+            if aut_packet_sent > aut_packet_received
+                && now - aut_packet_sent >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
+                && timers.want_handshake.swap(false, Ordering::Relaxed)
+            {
+                debug!(self.logger, "HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
+                handshake_initiation_required = true;
+            }
+
+            if !handshake_initiation_required {
+                // If a packet has been received from a given peer, but we have not sent one back
+                // to the given peer in KEEPALIVE ms, we send an empty packet.
+                if aut_packet_received > aut_packet_sent
+                    && now - aut_packet_received >= KEEPALIVE_TIMEOUT
+                    && timers.want_keepalive.swap(false, Ordering::Relaxed)
+                {
+                    debug!(self.logger, "KEEPALIVE(KEEPALIVE_TIMEOUT)");
+                    keepalive_required = true;
+                }
+
+                // Persistent KEEPALIVE
+                if persistent_keepalive > 0
+                    && (now - timers[TimePersistentKeepalive].time()
+                        >= Duration::from_secs(persistent_keepalive as _))
+                {
+                    debug!(self.logger, "KEEPALIVE(PERSISTENT_KEEPALIVE)");
+                    self.timer_tick(TimePersistentKeepalive);
+                    keepalive_required = true;
                 }
             }
         }
 
         if handshake_initiation_required {
-            return self.format_handshake_initiation(dst, true);
+            self.format_handshake_initiation_with_guard(&mut hs_data, dst, true)
+        } else if keepalive_required {
+            self.encapsulate(Some(&mut hs_data), &[], dst)
+        } else {
+            TunnResult::Done
         }
-
-        if keepalive_required {
-            return self.encapsulate(&[], dst);
-        }
-
-        TunnResult::Done
     }
 
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
