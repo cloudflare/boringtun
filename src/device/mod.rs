@@ -67,7 +67,7 @@ pub enum Error {
     Connect(String),
     SetSockOpt(String),
     InvalidTunnelName,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     GetSockOpt(String),
     GetSockName(String),
     UDPRead(i32),
