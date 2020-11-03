@@ -34,6 +34,33 @@ mod tests {
     }
 
     #[test]
+    fn x25519_mod_final_test() {
+        let max = Felem([
+            0xffff_ffff_ffff_ffec,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0x7fff_ffff_ffff_ffff,
+        ]);
+
+        let zero = Felem([
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+        ]);
+
+        let one = Felem([
+            0x0000_0000_0000_0001,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+        ]);
+
+        assert_eq!(mod_final_25519(max).0, max.0);
+        assert_eq!(mod_final_25519(max + one).0, zero.0);
+    }
+
+    #[test]
     fn x25519_test_vectors() {
         let base: [u8; 32] = [
             9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
