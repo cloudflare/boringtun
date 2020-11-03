@@ -4,7 +4,7 @@
 use super::dev_lock::LockReadGuard;
 use super::drop_privileges::*;
 use super::{make_array, AllowedIP, Device, Error, SocketAddr, X25519PublicKey, X25519SecretKey};
-use crate::device::Action;
+use crate::device::{Action, Sock, Tun};
 use hex::encode as encode_hex;
 use libc::*;
 use std::fs::{create_dir, remove_file};
@@ -32,7 +32,7 @@ fn create_sock_dir() {
     }
 }
 
-impl Device {
+impl<T: Tun, S: Sock> Device<T, S> {
     /// Register the api handler for this Device. The api handler receives stream connections on a Unix socket
     /// with a known path: /var/run/wireguard/{tun_name}.sock.
     pub fn register_api_handler(&mut self) -> Result<(), Error> {
@@ -118,7 +118,7 @@ impl Device {
 }
 
 #[allow(unused_must_use)]
-fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
+fn api_get<T: Tun, S: Sock>(writer: &mut BufWriter<&UnixStream>, d: &Device<T, S>) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
         writeln!(writer, "private_key={}", encode_hex(k.0.as_bytes()));
@@ -164,7 +164,10 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
     0
 }
 
-fn api_set<'a>(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -> i32 {
+fn api_set<'a, T: Tun, S: Sock>(
+    reader: &mut BufReader<&UnixStream>,
+    d: &mut LockReadGuard<Device<T, S>>,
+) -> i32 {
     d.try_writeable(
         |device| device.trigger_yield(),
         |device| {
@@ -226,9 +229,9 @@ fn api_set<'a>(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device
     .unwrap_or(EIO)
 }
 
-fn api_set_peer(
+fn api_set_peer<T: Tun, S: Sock>(
     reader: &mut BufReader<&UnixStream>,
-    d: &mut Device,
+    d: &mut Device<T, S>,
     pub_key: X25519PublicKey,
 ) -> i32 {
     let mut cmd = String::new();
@@ -301,7 +304,7 @@ fn api_set_peer(
                         preshared_key,
                     );
                     match val.parse::<X25519PublicKey>() {
-                        Ok(key) => return api_set_peer(reader, d, key),
+                        Ok(key) => return api_set_peer::<T, S>(reader, d, key),
                         Err(_) => return EINVAL,
                     }
                 }

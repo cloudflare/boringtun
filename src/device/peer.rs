@@ -1,7 +1,6 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::device::udp::UDPSocket;
 use crate::device::*;
 use parking_lot::RwLock;
 use std::net::IpAddr;
@@ -9,15 +8,15 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 #[derive(Default, Debug)]
-pub struct Endpoint {
+pub struct Endpoint<S: Sock> {
     pub addr: Option<SocketAddr>,
-    pub conn: Option<Arc<UDPSocket>>,
+    pub conn: Option<Arc<S>>,
 }
 
-pub struct Peer {
+pub struct Peer<S: Sock> {
     pub(crate) tunnel: Box<Tunn>, // The associated tunnel struct
     index: u32,                   // The index the tunnel uses
-    endpoint: RwLock<Endpoint>,
+    endpoint: RwLock<Endpoint<S>>,
     allowed_ips: AllowedIps<()>,
     preshared_key: Option<[u8; 32]>,
 }
@@ -46,14 +45,14 @@ impl FromStr for AllowedIP {
     }
 }
 
-impl Peer {
+impl<S: Sock> Peer<S> {
     pub fn new(
         tunnel: Box<Tunn>,
         index: u32,
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
         preshared_key: Option<[u8; 32]>,
-    ) -> Peer {
+    ) -> Peer<S> {
         Peer {
             tunnel,
             index,
@@ -70,7 +69,7 @@ impl Peer {
         self.tunnel.update_timers(dst)
     }
 
-    pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
+    pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint<S>> {
         self.endpoint.read()
     }
 
@@ -96,11 +95,7 @@ impl Peer {
         };
     }
 
-    pub fn connect_endpoint(
-        &self,
-        port: u16,
-        fwmark: Option<u32>,
-    ) -> Result<Arc<UDPSocket>, Error> {
+    pub fn connect_endpoint(&self, port: u16, fwmark: Option<u32>) -> Result<Arc<S>, Error> {
         let mut endpoint = self.endpoint.write();
 
         if endpoint.conn.is_some() {
@@ -108,12 +103,12 @@ impl Peer {
         }
 
         let udp_conn = Arc::new(match endpoint.addr {
-            Some(addr @ SocketAddr::V4(_)) => UDPSocket::new()?
+            Some(addr @ SocketAddr::V4(_)) => S::new()?
                 .set_non_blocking()?
                 .set_reuse()?
                 .bind(port)?
                 .connect(&addr)?,
-            Some(addr @ SocketAddr::V6(_)) => UDPSocket::new6()?
+            Some(addr @ SocketAddr::V6(_)) => S::new6()?
                 .set_non_blocking()?
                 .set_reuse()?
                 .bind(port)?
