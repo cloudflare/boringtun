@@ -100,7 +100,7 @@ The project is licensed under the [3-Clause BSD License](https://opensource.org/
 
 ### Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the 3-Clause BSD License, shall licensed as above, without any additional terms or conditions.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the 3-Clause BSD License, shall be licensed as above, without any additional terms or conditions.
 
 If you want to contribute to this project, please read our [`CONTRIBUTING.md`].
 
