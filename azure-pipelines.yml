@@ -18,17 +18,40 @@ jobs:
       cargo test --lib
     displayName: 'Test library'
 
-- job: macOS
-  displayName: 'macOS'
+- job: macOS_x86_64
+  displayName: 'macOS x86-64'
   pool:
-    vmImage: 'macOS-10.15'
+    name: Self Hosted ARM
+    demands: agent.name -equals intelmac
   continueOnError: true
   steps:
   - script: |
       brew install wireguard-go wireguard-tools
     displayName: 'Install wireguard-go'
-  - script: ./mac.docker.sh
-    displayName: 'Install Docker'
+  - template: ci/azure-build.yml
+    parameters:
+      runBinaryTests: 'false'
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      rustup target add aarch64-apple-ios
+      cargo build --lib --target aarch64-apple-ios
+    displayName: 'Build library for iOS'
+  - script: |
+      export PATH=$PATH:$HOME/.cargo/bin
+      rustup component add rustfmt
+      cargo fmt --all -- --check
+    displayName: 'Cargo fmt'
+
+- job: macOS_arm64
+  displayName: 'macOS arm64'
+  pool:
+    name: Self Hosted ARM
+    demands: agent.name -equals m1mac
+  continueOnError: true
+  steps:
+  - script: |
+      brew install wireguard-go wireguard-tools
+    displayName: 'Install wireguard-go'
   - template: ci/azure-build.yml
     parameters:
       runBinaryTests: 'false'
@@ -63,7 +86,7 @@ jobs:
 - job: Linux_aarch64
   displayName: 'Linux aarch64'
   pool:
-    name: default
+    name: Self Hosted ARM
     demands: agent.name -equals aarch64
   continueOnError: true
   steps:
@@ -71,8 +94,8 @@ jobs:
 
 - job: Linux_armv7
   displayName: 'Linux armv7'
-  pool: 
-    name: default
+  pool:
+    name: Self Hosted ARM
     demands: agent.name -equals armv7
   continueOnError: true
   steps:
