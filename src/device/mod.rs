@@ -346,7 +346,11 @@ impl<T: Tun, S: Sock> Device<T, S> {
             if replace_ips {
                 self.peers_by_ip
                     .remove(&|p: &Arc<Peer<S>>| Arc::ptr_eq(&peer, p)); // peers_by_ip
+
+                peer.clear_allowed_ips();
             }
+
+            peer.add_allowed_ips(&allowed_ips);
         } else {
             // Create a new peer
             peer = self.new_peer(pub_key, endpoint, &allowed_ips, keepalive, preshared_key);

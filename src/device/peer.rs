@@ -17,7 +17,7 @@ pub struct Peer<S: Sock> {
     pub(crate) tunnel: Box<Tunn>, // The associated tunnel struct
     index: u32,                   // The index the tunnel uses
     endpoint: RwLock<Endpoint<S>>,
-    allowed_ips: AllowedIps<()>,
+    allowed_ips: RwLock<AllowedIps<()>>,
     preshared_key: Option<[u8; 32]>,
 }
 
@@ -45,6 +45,25 @@ impl FromStr for AllowedIP {
     }
 }
 
+pub struct IterGuard<'a> {
+    guard: parking_lot::RwLockReadGuard<'a, AllowedIps<()>>,
+}
+
+impl<'a, 'b> IntoIterator for &'b IterGuard<'a> {
+    type IntoIter = Iter<'b, ()>;
+    type Item = (&'b (), IpAddr, usize);
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.guard.iter()
+    }
+}
+
+impl<'a> IterGuard<'a> {
+    pub fn iter(&self) -> Iter<()> {
+        self.guard.iter()
+    }
+}
+
 impl<S: Sock> Peer<S> {
     pub fn new(
         tunnel: Box<Tunn>,
@@ -60,7 +79,7 @@ impl<S: Sock> Peer<S> {
                 addr: endpoint,
                 conn: None,
             }),
-            allowed_ips: allowed_ips.iter().collect(),
+            allowed_ips: RwLock::new(allowed_ips.iter().collect()),
             preshared_key,
         }
     }
@@ -133,11 +152,21 @@ impl<S: Sock> Peer<S> {
     }
 
     pub fn is_allowed_ip<I: Into<IpAddr>>(&self, addr: I) -> bool {
-        self.allowed_ips.find(addr.into()).is_some()
+        self.allowed_ips.read().find(addr.into()).is_some()
     }
 
-    pub fn allowed_ips(&self) -> Iter<()> {
-        self.allowed_ips.iter()
+    pub fn allowed_ips(&self) -> IterGuard {
+        IterGuard{ guard: self.allowed_ips.read() }
+    }
+
+    pub fn clear_allowed_ips(&self) {
+        let mut allowed_ips = self.allowed_ips.write();
+        allowed_ips.clear();
+    }
+
+    pub fn add_allowed_ips(&self, allowed_ips: &[AllowedIP]) {
+        let mut rw_allowed_ips = self.allowed_ips.write();
+        rw_allowed_ips.insert_iter(allowed_ips.iter(), &||());
     }
 
     pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
