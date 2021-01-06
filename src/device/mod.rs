@@ -311,7 +311,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
         &mut self,
         pub_key: X25519PublicKey,
         remove: bool,
-        _replace_ips: bool,
+        replace_ips: bool,
         endpoint: Option<SocketAddr>,
         allowed_ips: Vec<AllowedIP>,
         keepalive: Option<u16>,
@@ -324,12 +324,47 @@ impl<T: Tun, S: Sock> Device<T, S> {
             return self.remove_peer(&pub_key);
         }
 
-        // Update an existing peer
-        if self.peers.get(&pub_key).is_some() {
-            // We already have a peer, we need to merge the existing config into the newly created one
-            panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
+        let existing_peer = self.peers.get(&pub_key);
+        let peer;
+
+        if existing_peer.is_some() {
+            // Update an existing peer
+            peer = Arc::clone(existing_peer.unwrap());
+
+            // Update endpoint
+            if endpoint.is_some() {
+                peer.set_endpoint(endpoint.unwrap());
+            }
+
+            if keepalive.is_some() || preshared_key.is_some() {
+                panic!("Modifying the persistent keepalive and preshared key of existing peers is not yet supported. Remove and add again instead.");
+            }
+
+            // TODO update keepalive
+            // TODO update preshared_key
+
+            if replace_ips {
+                self.peers_by_ip
+                    .remove(&|p: &Arc<Peer<S>>| Arc::ptr_eq(&peer, p)); // peers_by_ip
+            }
+        } else {
+            // Create a new peer
+            peer = self.new_peer(pub_key, endpoint, &allowed_ips, keepalive, preshared_key);
         }
 
+        for AllowedIP { addr, cidr } in allowed_ips {
+            self.peers_by_ip.insert(addr, cidr as _, Arc::clone(&peer));
+        }
+    }
+
+    fn new_peer(
+        &mut self,
+        pub_key: Arc<X25519PublicKey>,
+        endpoint: Option<SocketAddr>,
+        allowed_ips: &[AllowedIP],
+        keepalive: Option<u16>,
+        preshared_key: Option<[u8; 32]>,
+    ) -> Arc<Peer<S>> {
         let next_index = self.next_index();
         let device_key_pair = self
             .key_pair
@@ -353,17 +388,15 @@ impl<T: Tun, S: Sock> Device<T, S> {
             tunn.set_logger(peer_logger);
         }
 
-        let peer = Peer::new(tunn, next_index, endpoint, &allowed_ips, preshared_key);
+        let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);
 
         let peer = Arc::new(peer);
         self.peers.insert(pub_key, Arc::clone(&peer));
         self.peers_by_idx.insert(next_index, Arc::clone(&peer));
 
-        for AllowedIP { addr, cidr } in allowed_ips {
-            self.peers_by_ip.insert(addr, cidr as _, Arc::clone(&peer));
-        }
-
         info!(peer.tunnel.logger, "Peer added");
+
+        peer
     }
 
     pub fn new(name: &str, config: DeviceConfig) -> Result<Device<T, S>, Error> {
