@@ -156,7 +156,9 @@ impl<S: Sock> Peer<S> {
     }
 
     pub fn allowed_ips(&self) -> IterGuard {
-        IterGuard{ guard: self.allowed_ips.read() }
+        IterGuard {
+            guard: self.allowed_ips.read(),
+        }
     }
 
     pub fn clear_allowed_ips(&self) {
@@ -166,7 +168,7 @@ impl<S: Sock> Peer<S> {
 
     pub fn add_allowed_ips(&self, allowed_ips: &[AllowedIP]) {
         let mut rw_allowed_ips = self.allowed_ips.write();
-        rw_allowed_ips.insert_iter(allowed_ips.iter(), &||());
+        rw_allowed_ips.insert_iter(allowed_ips.iter(), &|| ());
     }
 
     pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {

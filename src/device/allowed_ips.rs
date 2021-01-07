@@ -50,7 +50,11 @@ impl<D> AllowedIps<D> {
         }
     }
 
-    pub fn insert_iter<'a>(&mut self, iter: impl Iterator<Item = &'a AllowedIP>, data_fn: &dyn Fn() -> D) {
+    pub fn insert_iter<'a>(
+        &mut self,
+        iter: impl Iterator<Item = &'a AllowedIP>,
+        data_fn: &dyn Fn() -> D,
+    ) {
         for ip in iter {
             self.insert(ip.addr, ip.cidr as usize, data_fn());
         }
