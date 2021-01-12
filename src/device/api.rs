@@ -16,7 +16,6 @@ use std::sync::atomic::Ordering;
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
 fn create_sock_dir() {
-    println!("Create sock dir");  // mrjb
     let _ = create_dir(SOCK_DIR); // Create the directory if it does not exist
 
     if let Ok((saved_uid, saved_gid)) = get_saved_ids() {
@@ -37,7 +36,6 @@ impl<T: Tun, S: Sock> Device<T, S> {
     /// Register the api handler for this Device. The api handler receives stream connections on a Unix socket
     /// with a known path: /var/run/wireguard/{tun_name}.sock.
     pub fn register_api_handler(&mut self) -> Result<(), Error> {
-        println!("Register api handler");  // mrjb
         let path = format!("{}/{}.sock", SOCK_DIR, self.iface.name()?);
 
         create_sock_dir();
