@@ -128,6 +128,10 @@ fn api_get<T: Tun, S: Sock>(writer: &mut BufWriter<&UnixStream>, d: &Device<T, S
         writeln!(writer, "listen_port={}", d.listen_port);
     }
 
+    if let Some(fwmark) = d.fwmark {
+        writeln!(writer, "fwmark={}", fwmark);
+    }
+
     for (k, p) in d.peers.iter() {
         writeln!(writer, "public_key={}", encode_hex(k.as_bytes()));
 
@@ -137,10 +141,6 @@ fn api_get<T: Tun, S: Sock>(writer: &mut BufWriter<&UnixStream>, d: &Device<T, S
 
         if let Some(keepalive) = p.persistent_keepalive() {
             writeln!(writer, "persistent_keepalive_interval={}", keepalive);
-        }
-
-        if let Some(fwmark) = d.fwmark {
-            writeln!(writer, "fwmark={}", fwmark);
         }
 
         if let Some(ref addr) = p.endpoint().addr {
