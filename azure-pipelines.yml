@@ -29,8 +29,6 @@ jobs:
       brew install wireguard-go wireguard-tools
     displayName: 'Install wireguard-go'
   - template: ci/azure-build.yml
-    parameters:
-      runBinaryTests: 'false'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       rustup target add aarch64-apple-ios
@@ -53,8 +51,6 @@ jobs:
       brew install wireguard-go wireguard-tools
     displayName: 'Install wireguard-go'
   - template: ci/azure-build.yml
-    parameters:
-      runBinaryTests: 'false'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       rustup target add aarch64-apple-ios
