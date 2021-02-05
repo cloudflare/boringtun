@@ -265,7 +265,7 @@ impl Tunn {
                 // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
                 // we initiate a new handshake.
                 if aut_packet_sent > aut_packet_received
-                    && now - aut_packet_sent >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
+                    && aut_packet_sent - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                     && timers.want_handshake.swap(false, Ordering::Relaxed)
                 {
                     debug!(self.logger, "HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
