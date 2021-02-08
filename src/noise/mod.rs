@@ -199,7 +199,10 @@ impl Tunn {
             // Send the packet using an established session
             let packet = session.format_packet_data(src, dst);
             self.timer_tick(TimerName::TimeLastPacketSent);
-            self.timer_tick(TimerName::TimeLastDataPacketSent);
+            // Exclude Keepalive packets from timer update.
+            if src.len() != 0 {
+                self.timer_tick(TimerName::TimeLastDataPacketSent);
+            }
             self.tx_bytes.fetch_add(src.len(), Ordering::Relaxed);
             return TunnResult::WriteToNetwork(packet);
         }
@@ -399,7 +402,10 @@ impl Tunn {
 
         self.set_current_session(r_idx);
 
-        self.timer_tick(TimerName::TimeLastDataPacketReceived);
+        // Exclude Keepalive packets from timer update.
+        if decapsulated_packet.len() != 0 {
+            self.timer_tick(TimerName::TimeLastDataPacketReceived);
+        }
         self.timer_tick(TimerName::TimeLastPacketReceived);
 
         Ok(self.validate_decapsulated_packet(decapsulated_packet))
