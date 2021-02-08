@@ -402,10 +402,6 @@ impl Tunn {
 
         self.set_current_session(r_idx);
 
-        // Exclude Keepalive packets from timer update.
-        if decapsulated_packet.len() != 0 {
-            self.timer_tick(TimerName::TimeLastDataPacketReceived);
-        }
         self.timer_tick(TimerName::TimeLastPacketReceived);
 
         Ok(self.validate_decapsulated_packet(decapsulated_packet))
@@ -489,6 +485,7 @@ impl Tunn {
             return TunnResult::Err(WireGuardError::InvalidPacket);
         }
 
+        self.timer_tick(TimerName::TimeLastDataPacketReceived);
         self.rx_bytes.fetch_add(computed_len, Ordering::Relaxed);
 
         match src_ip_address {
