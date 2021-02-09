@@ -264,8 +264,8 @@ impl Tunn {
                 // If we have sent a packet to a given peer but have not received a
                 // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
                 // we initiate a new handshake.
-                if aut_packet_sent > aut_packet_received
-                    && now - aut_packet_sent >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
+                if data_packet_sent > aut_packet_received
+                    && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                     && timers.want_handshake.swap(false, Ordering::Relaxed)
                 {
                     debug!(self.logger, "HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
@@ -275,8 +275,8 @@ impl Tunn {
                 if !handshake_initiation_required {
                     // If a packet has been received from a given peer, but we have not sent one back
                     // to the given peer in KEEPALIVE ms, we send an empty packet.
-                    if aut_packet_received > aut_packet_sent
-                        && now - aut_packet_received >= KEEPALIVE_TIMEOUT
+                    if data_packet_received > aut_packet_sent
+                        && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
                         && timers.want_keepalive.swap(false, Ordering::Relaxed)
                     {
                         debug!(self.logger, "KEEPALIVE(KEEPALIVE_TIMEOUT)");
