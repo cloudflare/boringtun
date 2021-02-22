@@ -25,9 +25,6 @@ jobs:
     demands: agent.name -equals intelmac
   continueOnError: true
   steps:
-  - script: |
-      brew install wireguard-go wireguard-tools
-    displayName: 'Install wireguard-go'
   - template: ci/azure-build.yml
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
@@ -47,9 +44,6 @@ jobs:
     demands: agent.name -equals m1mac
   continueOnError: true
   steps:
-  - script: |
-      brew install wireguard-go wireguard-tools
-    displayName: 'Install wireguard-go'
   - template: ci/azure-build.yml
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
@@ -72,6 +66,12 @@ jobs:
       sudo apt-get update
       sudo apt-get install wireguard -y
     displayName: 'Install wireguard'
+  - script: |
+      sudo apt-get install jq -y
+      sudo sh -c "cat /etc/docker/daemon.json | jq --arg cidr \"2001:db8:1::/64\" '. + {ipv6: true, \"fixed-cidr-v6\": \$cidr}' > temp.txt"
+      sudo mv temp.txt /etc/docker/daemon.json
+      sudo systemctl restart docker
+    displayName: 'Fix docker'
   - template: ci/azure-build.yml
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
