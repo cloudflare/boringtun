@@ -7,7 +7,7 @@
 
 pub mod crypto;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "android")))]
 pub mod device;
 
 pub mod ffi;
