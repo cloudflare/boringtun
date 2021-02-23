@@ -37,7 +37,10 @@ mod tests {
     impl SpinLock {
         pub fn lock(&self) {
             loop {
-                if self.lock.compare_and_swap(true, false, Ordering::Relaxed) {
+                if let Ok(true) =
+                    self.lock
+                        .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                {
                     break;
                 }
             }
