@@ -62,6 +62,16 @@ fn main() {
                 .possible_values(&["error", "info", "debug", "trace"])
                 .help("Log verbosity")
                 .default_value("error"),
+            Arg::with_name("uapi-fd")
+                .long("uapi-fd")
+                .env("WG_UAPI_FD")
+                .help("File descriptor for the user API")
+                .default_value("-1"),
+            Arg::with_name("tun-fd")
+                .long("tun-fd")
+                .env("WG_TUN_FD")
+                .help("File descriptor for an already-existing TUN device")
+                .default_value("-1"),
             Arg::with_name("log")
                 .takes_value(true)
                 .long("log")
@@ -84,7 +94,12 @@ fn main() {
         .get_matches();
 
     let background = !matches.is_present("foreground");
-    let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
+    let uapi_fd = value_t!(matches.value_of("uapi-fd"), i32).unwrap_or_else(|e| e.exit());
+    let tun_fd = value_t!(matches.value_of("tun-fd"), isize).unwrap_or_else(|e| e.exit());
+    let mut tun_name = matches.value_of("INTERFACE_NAME").unwrap();
+    if tun_fd >= 0 {
+        tun_name = matches.value_of("tun-fd").unwrap();
+    }
     let n_threads = value_t!(matches.value_of("threads"), usize).unwrap_or_else(|e| e.exit());
     let log_level =
         value_t!(matches.value_of("verbosity"), slog::Level).unwrap_or_else(|e| e.exit());
@@ -139,6 +154,7 @@ fn main() {
     let config = DeviceConfig {
         n_threads,
         logger: logger.clone(),
+        uapi_fd: uapi_fd,
         use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),

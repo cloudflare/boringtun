@@ -12,6 +12,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::Ordering;
+use std::os::unix::io::FromRawFd;
 
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
@@ -75,6 +76,41 @@ impl<T: Tun, S: Sock> Device<T, S> {
 
         self.register_monitor(path)?;
         self.register_api_signal_handlers()
+    }
+
+    pub fn register_api_fd(&mut self, fd: i32) -> Result<(), Error> {
+
+        let io_file = unsafe {UnixStream::from_raw_fd(fd)};
+
+        self.queue.new_event(
+            io_file.as_raw_fd(),
+            Box::new(move |d, _| {
+                // This is the closure that listens on the api file descriptor
+
+                let mut reader = BufReader::new(&io_file);
+                let mut writer = BufWriter::new(&io_file);
+                let mut cmd = String::new();
+                if reader.read_line(&mut cmd).is_ok() {
+                    cmd.pop(); // pop the new line character
+                    let status = match cmd.as_ref() {
+                        // Only two commands are legal according to the protocol, get=1 and set=1.
+                        "get=1" => api_get(&mut writer, d),
+                        "set=1" => api_set(&mut reader, d),
+                        _ => EIO,
+                    };
+                    // The protocol requires to return an error code as the response, or zero on success
+                    writeln!(writer, "errno={}\n", status).ok();
+                } else {
+                    // The remote side is likely closed; we should trigger an exit.
+                    d.trigger_exit();
+                    return Action::Exit;
+                }
+
+                Action::Continue // Indicates the worker thread should continue as normal
+            }),
+        )?;
+
+        Ok(())
     }
 
     fn register_monitor(&self, path: String) -> Result<(), Error> {
