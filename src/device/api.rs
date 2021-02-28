@@ -9,10 +9,9 @@ use hex::encode as encode_hex;
 use libc::*;
 use std::fs::{create_dir, remove_file};
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::Ordering;
-use std::os::unix::io::FromRawFd;
 
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
@@ -79,8 +78,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
     }
 
     pub fn register_api_fd(&mut self, fd: i32) -> Result<(), Error> {
-
-        let io_file = unsafe {UnixStream::from_raw_fd(fd)};
+        let io_file = unsafe { UnixStream::from_raw_fd(fd) };
 
         self.queue.new_event(
             io_file.as_raw_fd(),
