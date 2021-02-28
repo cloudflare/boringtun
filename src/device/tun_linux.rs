@@ -76,11 +76,17 @@ impl TunSocket {
 
 impl Tun for TunSocket {
     fn new(name: &str) -> Result<TunSocket, Error> {
+
+        // If the provided name appears to be a FD, use that.
+        let provided_fd = name.parse::<i32>();
+        if provided_fd.is_ok() {
+            return Ok(TunSocket { fd: provided_fd.unwrap(), name: name.to_string() });
+        }
+
         let fd = match unsafe { open(b"/dev/net/tun\0".as_ptr() as _, O_RDWR) } {
             -1 => return Err(Error::Socket(errno_str())),
             fd => fd,
         };
-
         let iface_name = name.as_bytes();
         let mut ifr = ifreq {
             ifr_name: [0; IFNAMSIZ],
@@ -119,6 +125,12 @@ impl Tun for TunSocket {
 
     /// Get the current MTU value
     fn mtu(&self) -> Result<usize, Error> {
+
+        let provided_fd = self.name.parse::<i32>();
+        if provided_fd.is_ok() {
+            return Ok(1500);
+        }
+
         let fd = match unsafe { socket(AF_INET, SOCK_STREAM, IPPROTO_IP) } {
             -1 => return Err(Error::Socket(errno_str())),
             fd => fd,

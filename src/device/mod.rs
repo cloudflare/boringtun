@@ -134,6 +134,7 @@ pub struct DeviceConfig {
     pub logger: Logger,
     #[cfg(target_os = "linux")]
     pub use_multi_queue: bool,
+    pub uapi_fd: i32,
 }
 
 impl Default for DeviceConfig {
@@ -144,6 +145,7 @@ impl Default for DeviceConfig {
             logger: Logger::root(Discard, o!()),
             #[cfg(target_os = "linux")]
             use_multi_queue: true,
+            uapi_fd: -1,
         }
     }
 }
@@ -174,6 +176,8 @@ pub struct Device<T: Tun, S: Sock> {
     mtu: AtomicUsize,
 
     rate_limiter: Option<Arc<RateLimiter>>,
+
+    uapi_fd: i32,
 }
 
 struct ThreadData<T: Tun> {
@@ -251,6 +255,8 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
             iface: Arc::clone(&device.read().iface),
         };
 
+        let uapi_fd = device.read().uapi_fd;
+
         loop {
             // The event loop keeps a read lock on the device, because we assume write access is rarely needed
             let mut device_lock = device.read();
@@ -270,6 +276,10 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
                         }
                     }
                     WaitResult::EoF(handler) => {
+                        if uapi_fd >= 0 && uapi_fd == handler.fd() {
+                            device_lock.trigger_exit();
+                            return;
+                        }
                         handler.cancel();
                     }
                     WaitResult::Error(e) => error!(device_lock.config.logger, "Poll error {:}", e),
@@ -373,6 +383,8 @@ impl<T: Tun, S: Sock> Device<T, S> {
         let iface = Arc::new(T::new(name)?.set_non_blocking()?);
         let mtu = iface.mtu()?;
 
+        let uapi_fd = config.uapi_fd;
+
         let mut device = Device {
             queue: Arc::new(poll),
             iface,
@@ -391,9 +403,14 @@ impl<T: Tun, S: Sock> Device<T, S> {
             cleanup_paths: Default::default(),
             mtu: AtomicUsize::new(mtu),
             rate_limiter: None,
+            uapi_fd
         };
 
-        device.register_api_handler()?;
+        if uapi_fd >= 0 {
+            device.register_api_fd(uapi_fd)?;
+        } else {
+            device.register_api_handler()?;
+        }
         device.register_iface_handler(Arc::clone(&device.iface))?;
         device.register_notifiers()?;
         device.register_timers()?;
