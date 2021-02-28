@@ -295,6 +295,7 @@ mod tests {
                 addr_v6,
                 started: false,
                 peers: vec![],
+                uapi_fd: -1,
             }
         }
 
@@ -569,6 +570,7 @@ mod tests {
                 use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
+                uapi_fd: -1,
             },
         );
 
@@ -729,6 +731,7 @@ mod tests {
                 use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
+                uapi_fd: -1,
             },
         );
 
