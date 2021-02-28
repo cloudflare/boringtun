@@ -134,6 +134,7 @@ pub struct DeviceConfig {
     pub logger: Logger,
     #[cfg(target_os = "linux")]
     pub use_multi_queue: bool,
+    #[cfg(target_os = "linux")]
     pub uapi_fd: i32,
 }
 
@@ -145,6 +146,7 @@ impl Default for DeviceConfig {
             logger: Logger::root(Discard, o!()),
             #[cfg(target_os = "linux")]
             use_multi_queue: true,
+            #[cfg(target_os = "linux")]
             uapi_fd: -1,
         }
     }
@@ -255,6 +257,9 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
             iface: Arc::clone(&device.read().iface),
         };
 
+        #[cfg(not(target_os = "linux"))]
+        let uapi_fd = -1;
+        #[cfg(target_os = "linux")]
         let uapi_fd = device.read().uapi_fd;
 
         loop {
@@ -383,6 +388,9 @@ impl<T: Tun, S: Sock> Device<T, S> {
         let iface = Arc::new(T::new(name)?.set_non_blocking()?);
         let mtu = iface.mtu()?;
 
+        #[cfg(not(target_os = "linux"))]
+        let uapi_fd = -1;
+        #[cfg(target_os = "linux")]
         let uapi_fd = config.uapi_fd;
 
         let mut device = Device {
