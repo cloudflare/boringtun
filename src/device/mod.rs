@@ -411,7 +411,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
             cleanup_paths: Default::default(),
             mtu: AtomicUsize::new(mtu),
             rate_limiter: None,
-            uapi_fd
+            uapi_fd,
         };
 
         if uapi_fd >= 0 {

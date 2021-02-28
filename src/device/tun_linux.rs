@@ -76,11 +76,13 @@ impl TunSocket {
 
 impl Tun for TunSocket {
     fn new(name: &str) -> Result<TunSocket, Error> {
-
         // If the provided name appears to be a FD, use that.
         let provided_fd = name.parse::<i32>();
         if provided_fd.is_ok() {
-            return Ok(TunSocket { fd: provided_fd.unwrap(), name: name.to_string() });
+            return Ok(TunSocket {
+                fd: provided_fd.unwrap(),
+                name: name.to_string()
+            });
         }
 
         let fd = match unsafe { open(b"/dev/net/tun\0".as_ptr() as _, O_RDWR) } {
@@ -125,7 +127,6 @@ impl Tun for TunSocket {
 
     /// Get the current MTU value
     fn mtu(&self) -> Result<usize, Error> {
-
         let provided_fd = self.name.parse::<i32>();
         if provided_fd.is_ok() {
             return Ok(1500);
