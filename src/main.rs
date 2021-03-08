@@ -94,6 +94,7 @@ fn main() {
         .get_matches();
 
     let background = !matches.is_present("foreground");
+    #[cfg(target_os = "linux")]
     let uapi_fd = value_t!(matches.value_of("uapi-fd"), i32).unwrap_or_else(|e| e.exit());
     let tun_fd = value_t!(matches.value_of("tun-fd"), isize).unwrap_or_else(|e| e.exit());
     let mut tun_name = matches.value_of("INTERFACE_NAME").unwrap();
@@ -154,6 +155,7 @@ fn main() {
     let config = DeviceConfig {
         n_threads,
         logger: logger.clone(),
+        #[cfg(target_os = "linux")]
         uapi_fd: uapi_fd,
         use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]

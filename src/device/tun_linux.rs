@@ -81,7 +81,7 @@ impl Tun for TunSocket {
         if provided_fd.is_ok() {
             return Ok(TunSocket {
                 fd: provided_fd.unwrap(),
-                name: name.to_string()
+                name: name.to_string(),
             });
         }
 

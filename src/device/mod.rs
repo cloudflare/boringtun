@@ -179,6 +179,7 @@ pub struct Device<T: Tun, S: Sock> {
 
     rate_limiter: Option<Arc<RateLimiter>>,
 
+    #[cfg(target_os = "linux")]
     uapi_fd: i32,
 }
 
@@ -411,6 +412,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
             cleanup_paths: Default::default(),
             mtu: AtomicUsize::new(mtu),
             rate_limiter: None,
+            #[cfg(target_os = "linux")]
             uapi_fd,
         };
 
