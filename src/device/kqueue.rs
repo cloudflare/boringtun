@@ -328,4 +328,9 @@ impl<'a, H> EventGuard<'a, H> {
         unsafe { self.poll.clear_event_by_fd(self.event.event.ident as RawFd) };
         std::mem::forget(self); // Don't call the regular drop that would enable the event
     }
+
+    /// Stub: only used for Linux-specific features.
+    pub fn fd(&self) -> i32 {
+        return -1;
+    }
 }
