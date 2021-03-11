@@ -101,7 +101,11 @@ fn main() {
         let log_file =
             File::create(&log).unwrap_or_else(|_| panic!("Could not create log file {}", log));
 
-        let plain = slog_term::PlainSyncDecorator::new(log_file);
+        let plain = slog_term::PlainSyncDecorator::new(
+            log_file
+                .try_clone()
+                .unwrap_or_else(|_| panic!("Could not set log file {}", log)),
+        );
         let drain = slog_term::CompactFormat::new(plain)
             .build()
             .filter_level(log_level);
@@ -110,6 +114,16 @@ fn main() {
 
         let daemonize = Daemonize::new()
             .working_directory("/tmp")
+            .stdout(
+                log_file
+                    .try_clone()
+                    .unwrap_or_else(|_| panic!("Could not redirect stdout {}", log)),
+            )
+            .stderr(
+                log_file
+                    .try_clone()
+                    .unwrap_or_else(|_| panic!("Could not redirect stderr {}", log)),
+            )
             .exit_action(move || {
                 let mut b = [0u8; 1];
                 if sock2.recv(&mut b).is_ok() && b[0] == 1 {
