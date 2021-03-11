@@ -4,7 +4,6 @@ description = "an implementation of the WireGuard® protocol designed for portab
 version = "0.3.0"
 authors = ["Vlad Krasnov <vlad@cloudflare.com>"]
 license = "BSD-3-Clause"
-readme = "README.md"
 repository = "https://github.com/cloudflare/boringtun"
 edition = "2018"
 
