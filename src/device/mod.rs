@@ -50,7 +50,7 @@ use tun::{errno_str, TunSocket};
 use udp::UDPSocket;
 
 use dev_lock::{Lock, LockReadGuard};
-use slog::{error, info, o, Discard, Logger};
+use slog::{error, info, o, warn, Discard, Logger};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 
@@ -76,6 +76,12 @@ pub enum Error {
     IfaceRead(i32),
     DropPrivileges(String),
     ApiSocket(std::io::Error),
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Error::ApiSocket(err)
+    }
 }
 
 // What the event loop should do after a handler returns
@@ -539,12 +545,14 @@ impl Device {
                             peer.shutdown_endpoint(); // close open udp socket
                         }
                         TunnResult::Err(e) => error!(d.config.logger, "Timer error {:?}", e),
-                        TunnResult::WriteToNetwork(packet) => {
-                            match endpoint_addr {
-                                SocketAddr::V4(_) => udp4.sendto(packet, endpoint_addr),
-                                SocketAddr::V6(_) => udp6.sendto(packet, endpoint_addr),
-                            };
+                        TunnResult::WriteToNetwork(packet) => match endpoint_addr {
+                            SocketAddr::V4(_) => udp4.sendto(packet, endpoint_addr),
+                            SocketAddr::V6(_) => udp6.sendto(packet, endpoint_addr),
                         }
+                        .map(|_| ())
+                        .unwrap_or_else(|e| {
+                            warn!(peer.tunnel.logger, "WriteToNetwork failed: {:?}", e)
+                        }),
                         _ => panic!("Unexpected result from update_timers"),
                     };
                 }
@@ -587,7 +595,9 @@ impl Device {
                         match rate_limiter.verify_packet(Some(addr.ip()), packet, &mut t.dst_buf) {
                             Ok(packet) => packet,
                             Err(TunnResult::WriteToNetwork(cookie)) => {
-                                udp.sendto(cookie, addr);
+                                udp.sendto(cookie, addr).map(|_| ()).unwrap_or_else(|e| {
+                                    warn!(d.config.logger, "WriteToNetwork failed: {:?}", e)
+                                });
                                 continue;
                             }
                             Err(_) => continue,
@@ -622,7 +632,9 @@ impl Device {
                         TunnResult::Err(_) => continue,
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
-                            udp.sendto(packet, addr);
+                            udp.sendto(packet, addr).map(|_| ()).unwrap_or_else(|e| {
+                                warn!(peer.tunnel.logger, "WriteToNetwork failed: {:?}", e)
+                            });
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if peer.is_allowed_ip(addr) {
@@ -641,7 +653,9 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             peer.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            udp.sendto(packet, addr);
+                            udp.sendto(packet, addr).map(|_| ()).unwrap_or_else(|e| {
+                                warn!(peer.tunnel.logger, "WriteToNetwork failed: {:?}", e)
+                            });
                         }
                     }
 
@@ -691,7 +705,10 @@ impl Device {
                         TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
-                            udp.write(packet);
+                            udp.write(packet).unwrap_or_else(|e| {
+                                warn!(peer.tunnel.logger, "WriteToNetwork failed: {:?}", e);
+                                0
+                            });
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if peer.is_allowed_ip(addr) {
@@ -710,7 +727,10 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             peer.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            udp.write(packet);
+                            udp.write(packet).unwrap_or_else(|e| {
+                                warn!(peer.tunnel.logger, "WriteToNetwork failed: {:?}", e);
+                                0
+                            });
                         }
                     }
 
@@ -773,18 +793,27 @@ impl Device {
                         TunnResult::Err(e) => error!(d.config.logger, "Encapsulate error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {
                             let endpoint = peer.endpoint();
-                            if let Some(ref conn) = endpoint.conn {
-                                // Prefer to send using the connected socket
-                                conn.write(packet);
-                            } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
-                                udp4.sendto(packet, addr);
-                            } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
-                                udp6.sendto(packet, addr);
-                            } else {
-                                error!(d.config.logger, "No endpoint");
+
+                            match &endpoint.conn {
+                                Some(conn) => {
+                                    // Prefer to send using the connected socket
+                                    conn.write(packet)
+                                }
+                                None => match endpoint.addr {
+                                    Some(SocketAddr::V4(addr)) => udp4.sendto(packet, addr.into()),
+                                    Some(SocketAddr::V6(addr)) => udp6.sendto(packet, addr.into()),
+                                    None => {
+                                        error!(d.config.logger, "No endpoint");
+                                        Ok(0)
+                                    }
+                                },
                             }
+                            .unwrap_or_else(|e| {
+                                warn!(peer.tunnel.logger, "WriteToNetwork failed: {:?}", e);
+                                0
+                            });
                         }
-                        _ => panic!("Unexpected result from encapsulate"),
+                        e => panic!("Unexpected result from encapsulate: {:?}", e),
                     };
                 }
                 Action::Continue

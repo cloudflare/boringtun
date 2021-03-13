@@ -9,7 +9,6 @@ mod tests {
     use crate::device::{DeviceConfig, DeviceHandle};
     use base64::encode as base64encode;
     use hex::encode;
-    #[cfg(not(target_arch = "arm"))]
     use ring::rand::{SecureRandom, SystemRandom};
     use slog::{Drain, Logger};
     use std::io::{BufRead, BufReader, Read, Write};

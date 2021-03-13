@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use parking_lot::RwLock;
-use slog::info;
+use slog::{info, warn};
 
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -10,8 +10,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::device::udp::UDPSocket;
-
-use crate::device::udp::UDPSocket;
+use crate::device::{allowed_ips::Iter, AllowedIps, Error};
+use crate::noise::{Tunn, TunnResult};
 
 #[derive(Default, Debug)]
 pub struct Endpoint {
@@ -82,17 +82,18 @@ impl Peer {
     pub fn shutdown_endpoint(&self) {
         if let Some(conn) = self.endpoint.write().conn.take() {
             info!(self.tunnel.logger, "Disconnecting from endpoint");
-            conn.shutdown();
+            conn.shutdown().unwrap_or_else(|e| {
+                warn!(self.tunnel.logger, "endpoint shutdown failed: {:?}", e);
+            });
         }
     }
 
     pub fn set_endpoint(&self, addr: SocketAddr) {
         let mut endpoint = self.endpoint.write();
+
+        // We only need to update the endpoint if it differs from the current one
         if endpoint.addr != Some(addr) {
-            // We only need to update the endpoint if it differs from the current one
-            if let Some(conn) = endpoint.conn.take() {
-                conn.shutdown();
-            }
+            self.shutdown_endpoint();
 
             *endpoint = Endpoint {
                 addr: Some(addr),
@@ -117,12 +118,12 @@ impl Peer {
                 .set_non_blocking()?
                 .set_reuse()?
                 .bind(port)?
-                .connect(&addr)?,
+                .connect(addr)?,
             Some(addr @ SocketAddr::V6(_)) => UDPSocket::new6()?
                 .set_non_blocking()?
                 .set_reuse()?
                 .bind(port)?
-                .connect(&addr)?,
+                .connect(addr)?,
             None => panic!("Attempt to connect to undefined endpoint"),
         });
 
