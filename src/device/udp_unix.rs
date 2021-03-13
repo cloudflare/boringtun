@@ -122,13 +122,13 @@ impl UDPSocket {
     }
 
     /// Receives a message on a connected UDP socket and returns its contents
-    pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
+    pub fn recv<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         let len = self.socket.recv(dst)?;
         Ok(&mut dst[..len])
     }
 
     /// Sends a message on a connected UDP socket. Returns number of bytes successfully sent.
-    pub fn write(&self, src: &[u8]) -> Result<usize, Error> {
+    pub fn send(&self, src: &[u8]) -> Result<usize, Error> {
         Ok(self.socket.send(src)?)
     }
 

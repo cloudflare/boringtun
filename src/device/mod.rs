@@ -695,7 +695,7 @@ impl Device {
                 let iface = &t.iface;
                 let mut iter = MAX_ITR;
 
-                while let Ok(src) = udp.read(&mut t.src_buf[..]) {
+                while let Ok(src) = udp.recv(&mut t.src_buf[..]) {
                     let mut flush = false;
                     match peer
                         .tunnel
@@ -705,7 +705,7 @@ impl Device {
                         TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
-                            udp.write(packet).unwrap_or_else(|e| {
+                            udp.send(packet).unwrap_or_else(|e| {
                                 warn!(peer.tunnel.logger, "WriteToNetwork failed: {:?}", e);
                                 0
                             });
@@ -727,7 +727,7 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             peer.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            udp.write(packet).unwrap_or_else(|e| {
+                            udp.send(packet).unwrap_or_else(|e| {
                                 warn!(peer.tunnel.logger, "WriteToNetwork failed: {:?}", e);
                                 0
                             });
@@ -797,7 +797,7 @@ impl Device {
                             match &endpoint.conn {
                                 Some(conn) => {
                                     // Prefer to send using the connected socket
-                                    conn.write(packet)
+                                    conn.send(packet)
                                 }
                                 None => match endpoint.addr {
                                     Some(SocketAddr::V4(addr)) => udp4.sendto(packet, addr.into()),
