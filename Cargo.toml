@@ -16,6 +16,8 @@ libc = "0.2"
 parking_lot = "0.10"
 slog = "2.5"
 slog-term = "2.5"
+ip_network = "0.3.4"
+ip_network_table = "0.1.2"
 
 [target.'cfg(not(target_arch="arm"))'.dependencies]
 ring = "0.16"
