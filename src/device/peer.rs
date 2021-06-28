@@ -1,14 +1,15 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::device::*;
 use parking_lot::RwLock;
+use slog::info;
+
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::device::{AllowedIps, Error};
+use crate::device::{AllowedIps, Error, Sock};
 use crate::noise::{Tunn, TunnResult};
 
 #[derive(Default, Debug)]

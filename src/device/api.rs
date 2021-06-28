@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::dev_lock::LockReadGuard;
-use super::drop_privileges::*;
+use super::drop_privileges::get_saved_ids;
 use super::{make_array, AllowedIP, Device, Error, SocketAddr, X25519PublicKey, X25519SecretKey};
 use crate::device::{Action, Sock, Tun};
 use hex::encode as encode_hex;

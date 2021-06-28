@@ -3,11 +3,11 @@
 
 use super::PacketData;
 #[cfg(target_arch = "arm")]
-use crate::crypto::chacha20poly1305::*;
+use crate::crypto::ChaCha20Poly1305;
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
 #[cfg(not(target_arch = "arm"))]
-use ring::aead::*;
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct Session {

@@ -1,9 +1,9 @@
 use super::make_array;
-use crate::crypto::blake2s::{constant_time_mac_check, Blake2s};
-use crate::crypto::chacha20poly1305::ChaCha20Poly1305;
-use crate::crypto::x25519::X25519SecretKey;
+use crate::crypto::{
+    constant_time_mac_check, Blake2s, ChaCha20Poly1305, X25519PublicKey, X25519SecretKey,
+};
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
-use crate::noise::*;
+use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};

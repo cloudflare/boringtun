@@ -38,16 +38,16 @@ use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
-use crate::crypto::x25519::*;
-use crate::noise::errors::*;
+use crate::crypto::{X25519PublicKey, X25519SecretKey};
+use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
-use crate::noise::*;
-use allowed_ips::*;
-use peer::*;
-use poll::*;
-use tun::*;
-use udp::*;
+use crate::noise::{make_array, Packet, Tunn, TunnResult};
+use allowed_ips::AllowedIps;
+use peer::{AllowedIP, Peer};
+use poll::{EventPoll, EventRef, WaitResult};
+use tun::{errno, errno_str, TunSocket};
+use udp::UDPSocket;
 
 use dev_lock::{Lock, LockReadGuard};
 use slog::{error, info, o, Discard, Logger};
