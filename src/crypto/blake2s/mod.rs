@@ -6,7 +6,7 @@
 //! ## Example Usage
 //!
 //! ```
-//! use boringtun::crypto::blake2s::{constant_time_mac_check, Blake2s};
+//! use boringtun::crypto::{constant_time_mac_check, Blake2s};
 //!
 //! // validate_mac returns true if the MAC of `msg` under `key` equals `expected`. It checks this
 //! // in constant time.

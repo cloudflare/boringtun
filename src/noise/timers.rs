@@ -1,7 +1,6 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use self::TimerName::*;
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
 use slog::debug;
@@ -37,6 +36,7 @@ pub enum TimerName {
     TimePersistentKeepalive,    // Time we last sent persistent keepalive
     Top,
 }
+use self::TimerName::*;
 
 // Although technically there are data races in play, but in practice
 // * Timers are only checked periodically so it is safe to assume all (Relaxed) atomic access will be serialized anyway

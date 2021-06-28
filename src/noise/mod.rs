@@ -9,7 +9,7 @@ mod session;
 mod tests;
 mod timers;
 
-use crate::crypto::x25519::*;
+use crate::crypto::{X25519PublicKey, X25519SecretKey};
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
