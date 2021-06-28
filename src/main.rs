@@ -9,8 +9,8 @@ pub mod device;
 pub mod ffi;
 pub mod noise;
 
-use crate::device::drop_privileges::*;
-use crate::device::*;
+use crate::device::drop_privileges::drop_privileges;
+use crate::device::{DeviceConfig, DeviceHandle};
 use clap::{value_t, App, Arg};
 use daemonize::Daemonize;
 use slog::{error, info, o, Drain, Logger};

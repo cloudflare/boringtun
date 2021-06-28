@@ -6,9 +6,9 @@ extern crate test;
 
 #[cfg(test)]
 mod tests {
-    use boringtun::crypto::blake2s::Blake2s;
-    use boringtun::crypto::chacha20poly1305::*;
-    use boringtun::crypto::x25519::*;
+    use boringtun::crypto::Blake2s;
+    use boringtun::crypto::ChaCha20Poly1305;
+    use boringtun::crypto::X25519SecretKey;
     use test::{black_box, Bencher};
 
     #[bench]

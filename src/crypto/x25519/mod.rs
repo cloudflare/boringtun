@@ -14,7 +14,7 @@ use std::ops::Sub;
 use std::str::FromStr;
 
 #[cfg(not(target_arch = "arm"))]
-use ring::rand::*;
+use ring::rand::{SecureRandom, SystemRandom};
 
 const MASK_63BITS: u128 = 0x7fff_ffff_ffff_ffff;
 const MASK_64BITS: u128 = 0xffff_ffff_ffff_ffff;
