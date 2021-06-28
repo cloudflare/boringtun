@@ -8,8 +8,8 @@
 /// C bindings for the BoringTun library
 pub mod benchmark;
 use self::benchmark::do_benchmark;
-use super::crypto::x25519::*;
-use super::noise::*;
+use super::noise::{Tunn, TunnResult};
+use crate::crypto::{X25519PublicKey, X25519SecretKey};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
