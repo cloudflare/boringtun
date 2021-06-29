@@ -12,10 +12,10 @@ jobs:
       echo "##vso[task.setvariable variable=PATH;]%PATH%;%USERPROFILE%\.cargo\bin"
     displayName: 'Install Rust'
   - script: |
-      cargo build --lib
+      cargo build --lib --no-default-features
     displayName: 'Build library'
   - script: |
-      cargo test --lib
+      cargo test --lib --no-default-features
     displayName: 'Test library'
 
 - job: macOS_x86_64
@@ -29,7 +29,7 @@ jobs:
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       rustup target add aarch64-apple-ios
-      cargo build --lib --target aarch64-apple-ios
+      cargo build --lib --no-default-features --target aarch64-apple-ios
     displayName: 'Build library for iOS'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
@@ -48,7 +48,7 @@ jobs:
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
       rustup target add aarch64-apple-ios
-      cargo build --lib --target aarch64-apple-ios
+      cargo build --lib --no-default-features --target aarch64-apple-ios
     displayName: 'Build library for iOS'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin

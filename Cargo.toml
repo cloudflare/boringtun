@@ -9,26 +9,30 @@ repository = "https://github.com/cloudflare/boringtun"
 edition = "2018"
 
 [dependencies]
-base64 = "0.12"
+base64 = "0.13"
 hex = "0.4"
 untrusted = "0.7"
 libc = "0.2"
-parking_lot = "0.10"
-slog = "2.5"
-slog-term = "2.5"
+parking_lot = "0.11"
+slog = "2.7"
+slog-term = { version = "2.7", optional = true }
 ip_network = "0.3.4"
 ip_network_table = "0.1.2"
+clap = { version = "2.33", default-features = false, features = ["suggestions"], optional = true }
+daemonize = { version = "0.4.1", optional = true }
+
+[dev-dependencies]
+slog-term = { version = "2.7" }
 
 [target.'cfg(not(target_arch="arm"))'.dependencies]
 ring = "0.16"
 
-[target.'cfg(not(any(target_os="windows", target_os="ios", target_os="android")))'.dependencies]
-chrono = "0.4"
-daemonize = "0.4.1"
-clap = { version = "2.33", default-features=false, features = ["suggestions"] }
-
 [target.'cfg(target_os="android")'.dependencies]
 jni = "0.10"
+
+[features]
+default = ["build-binary"]
+build-binary = ["slog-term", "clap", "daemonize"]
 
 [lib]
 crate-type = ["lib", "staticlib", "dylib"]
@@ -36,6 +40,7 @@ crate-type = ["lib", "staticlib", "dylib"]
 [[bin]]
 name = "boringtun"
 path = "src/main.rs"
+required-features = ["build-binary"]
 
 [[example]]
 name = "benchmarks"
