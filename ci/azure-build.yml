@@ -9,15 +9,15 @@ steps:
     displayName: 'Install cargo'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
-      cargo build --lib
+      cargo build --lib --no-default-features
     displayName: 'Build library'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
-      cargo test --lib -- --test-threads=1
+      cargo test --lib --no-default-features -- --test-threads=1
     displayName: 'Test library'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
-      cargo test --lib -- --ignored --test-threads=1
+      cargo test --lib --no-default-features -- --ignored --test-threads=1
     displayName: 'Library integration tests'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
