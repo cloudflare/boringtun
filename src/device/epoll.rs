@@ -329,10 +329,13 @@ impl<H: Sync + Send> EventPoll<H> {
 }
 
 impl<H> EventPoll<H> {
-    /// Disable and remove the event and associated handler, using the fd that was used
-    /// to register it.
-    /// This function is only safe to call when the event loop is not running, otherwise the
-    /// memory of the handler may get freed while in use.
+    /// Disable and remove the event and associated handler, using the fd that
+    /// was used to register it.
+    ///
+    /// # Safety
+    ///
+    /// This function is only safe to call when the event loop is not running,
+    /// otherwise the memory of the handler may get freed while in use.
     pub unsafe fn clear_event_by_fd(&self, index: RawFd) {
         let mut events = self.events.lock();
         assert!(index >= 0);

@@ -357,8 +357,9 @@ impl Blake2s {
 
         // Convert the internal state from a [u32; 8] to a [u8; 32].
         let mut s = [0u8; 32];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..self.outlen {
-            s[i] = (self.state[i / 4] >> 8 * (i % 4)) as u8;
+            s[i] = (self.state[i / 4] >> (8 * (i % 4))) as u8;
         }
 
         // Return the final output.

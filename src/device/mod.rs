@@ -415,16 +415,16 @@ impl<T: Tun, S: Sock> Device<T, S> {
     fn open_listen_socket(&mut self, mut port: u16) -> Result<(), Error> {
         // Binds the network facing interfaces
         // First close any existing open socket, and remove them from the event loop
-        self.udp4.take().and_then(|s| unsafe {
-            // This is safe because the event loop is not running yet
-            self.queue.clear_event_by_fd(s.as_raw_fd());
-            Some(())
-        });
+        if let Some(s) = self.udp4.take() {
+            unsafe {
+                // This is safe because the event loop is not running yet
+                self.queue.clear_event_by_fd(s.as_raw_fd())
+            }
+        };
 
-        self.udp6.take().and_then(|s| unsafe {
-            self.queue.clear_event_by_fd(s.as_raw_fd());
-            Some(())
-        });
+        if let Some(s) = self.udp6.take() {
+            unsafe { self.queue.clear_event_by_fd(s.as_raw_fd()) };
+        }
 
         for peer in self.peers.values() {
             peer.shutdown_endpoint();
