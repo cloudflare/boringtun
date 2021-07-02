@@ -1,6 +1,10 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+// Requiring explicit per-fn "Safety" docs not worth it. Just pass in valid
+// pointers and buffers/lengths to these, ok?
+#![allow(clippy::missing_safety_doc)]
+
 /// C bindings for the BoringTun library
 pub mod benchmark;
 use self::benchmark::do_benchmark;

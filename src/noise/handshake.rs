@@ -292,10 +292,7 @@ impl Handshake {
     }
 
     pub(crate) fn is_in_progress(&self) -> bool {
-        match self.state {
-            HandshakeState::None | HandshakeState::Expired => false,
-            _ => true,
-        }
+        !matches!(self.state, HandshakeState::None | HandshakeState::Expired)
     }
 
     pub(crate) fn timer(&self) -> Option<Instant> {
@@ -311,10 +308,7 @@ impl Handshake {
     }
 
     pub(crate) fn is_expired(&self) -> bool {
-        match self.state {
-            HandshakeState::Expired => true,
-            _ => false,
-        }
+        matches!(self.state, HandshakeState::Expired)
     }
 
     pub(crate) fn has_cookie(&self) -> bool {

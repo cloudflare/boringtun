@@ -164,7 +164,7 @@ fn api_get<T: Tun, S: Sock>(writer: &mut BufWriter<&UnixStream>, d: &Device<T, S
     0
 }
 
-fn api_set<'a, T: Tun, S: Sock>(
+fn api_set<T: Tun, S: Sock>(
     reader: &mut BufReader<&UnixStream>,
     d: &mut LockReadGuard<Device<T, S>>,
 ) -> i32 {
@@ -175,7 +175,7 @@ fn api_set<'a, T: Tun, S: Sock>(
 
             let mut cmd = String::new();
 
-            while let Ok(_) = reader.read_line(&mut cmd) {
+            while reader.read_line(&mut cmd).is_ok() {
                 cmd.pop(); // remove newline if any
                 if cmd.is_empty() {
                     return 0; // Done
@@ -243,7 +243,7 @@ fn api_set_peer<T: Tun, S: Sock>(
     let mut preshared_key = None;
     let mut allowed_ips: Vec<AllowedIP> = vec![];
 
-    while let Ok(_) = reader.read_line(&mut cmd) {
+    while reader.read_line(&mut cmd).is_ok() {
         cmd.pop(); // remove newline if any
         if cmd.is_empty() {
             d.update_peer(
