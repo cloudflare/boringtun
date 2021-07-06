@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 /// This module implements benchmarking code for use with the FFI bindings
-use crate::crypto::blake2s::Blake2s;
-use crate::crypto::chacha20poly1305::*;
-use crate::crypto::x25519::*;
+use crate::crypto::{Blake2s, ChaCha20Poly1305, X25519SecretKey};
 #[cfg(not(target_arch = "arm"))]
-use ring::aead::*;
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 #[cfg(not(target_arch = "arm"))]
 use ring::{agreement, rand};
 

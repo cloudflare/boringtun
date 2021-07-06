@@ -1,22 +1,28 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::device::*;
 use parking_lot::RwLock;
+use slog::{info, warn};
+
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::Arc;
+
+use crate::device::udp::UDPSocket;
+use crate::device::{allowed_ips::Iter, AllowedIps, Error};
+use crate::noise::{Tunn, TunnResult};
 
 #[derive(Default, Debug)]
-pub struct Endpoint<S: Sock> {
+pub struct Endpoint {
     pub addr: Option<SocketAddr>,
-    pub conn: Option<Arc<S>>,
+    pub conn: Option<Arc<UDPSocket>>,
 }
 
-pub struct Peer<S: Sock> {
+pub struct Peer {
     pub(crate) tunnel: Box<Tunn>, // The associated tunnel struct
     index: u32,                   // The index the tunnel uses
-    endpoint: RwLock<Endpoint<S>>,
+    endpoint: RwLock<Endpoint>,
     allowed_ips: AllowedIps<()>,
     preshared_key: Option<[u8; 32]>,
 }
@@ -45,14 +51,14 @@ impl FromStr for AllowedIP {
     }
 }
 
-impl<S: Sock> Peer<S> {
+impl Peer {
     pub fn new(
         tunnel: Box<Tunn>,
         index: u32,
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
         preshared_key: Option<[u8; 32]>,
-    ) -> Peer<S> {
+    ) -> Peer {
         Peer {
             tunnel,
             index,
@@ -69,24 +75,25 @@ impl<S: Sock> Peer<S> {
         self.tunnel.update_timers(dst)
     }
 
-    pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint<S>> {
+    pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
         self.endpoint.read()
     }
 
     pub fn shutdown_endpoint(&self) {
         if let Some(conn) = self.endpoint.write().conn.take() {
             info!(self.tunnel.logger, "Disconnecting from endpoint");
-            conn.shutdown();
+            conn.shutdown().unwrap_or_else(|e| {
+                warn!(self.tunnel.logger, "endpoint shutdown failed: {:?}", e);
+            });
         }
     }
 
     pub fn set_endpoint(&self, addr: SocketAddr) {
         let mut endpoint = self.endpoint.write();
+
+        // We only need to update the endpoint if it differs from the current one
         if endpoint.addr != Some(addr) {
-            // We only need to update the endpoint if it differs from the current one
-            if let Some(conn) = endpoint.conn.take() {
-                conn.shutdown();
-            }
+            self.shutdown_endpoint();
 
             *endpoint = Endpoint {
                 addr: Some(addr),
@@ -95,7 +102,11 @@ impl<S: Sock> Peer<S> {
         };
     }
 
-    pub fn connect_endpoint(&self, port: u16, fwmark: Option<u32>) -> Result<Arc<S>, Error> {
+    pub fn connect_endpoint(
+        &self,
+        port: u16,
+        fwmark: Option<u32>,
+    ) -> Result<Arc<UDPSocket>, Error> {
         let mut endpoint = self.endpoint.write();
 
         if endpoint.conn.is_some() {
@@ -103,16 +114,16 @@ impl<S: Sock> Peer<S> {
         }
 
         let udp_conn = Arc::new(match endpoint.addr {
-            Some(addr @ SocketAddr::V4(_)) => S::new()?
+            Some(addr @ SocketAddr::V4(_)) => UDPSocket::new()?
                 .set_non_blocking()?
                 .set_reuse()?
                 .bind(port)?
-                .connect(&addr)?,
-            Some(addr @ SocketAddr::V6(_)) => S::new6()?
+                .connect(addr)?,
+            Some(addr @ SocketAddr::V6(_)) => UDPSocket::new6()?
                 .set_non_blocking()?
                 .set_reuse()?
                 .bind(port)?
-                .connect(&addr)?,
+                .connect(addr)?,
             None => panic!("Attempt to connect to undefined endpoint"),
         });
 

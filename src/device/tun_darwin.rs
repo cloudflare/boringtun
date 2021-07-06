@@ -8,8 +8,6 @@ use std::mem::size_of_val;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::null_mut;
 
-use crate::device::Tun;
-
 pub fn errno() -> i32 {
     unsafe { *__error() }
 }
@@ -125,10 +123,8 @@ impl TunSocket {
             n => n as usize,
         }
     }
-}
 
-impl Tun for TunSocket {
-    fn new(name: &str) -> Result<TunSocket, Error> {
+    pub fn new(name: &str) -> Result<TunSocket, Error> {
         let idx = parse_utun_name(name)?;
 
         let fd = match unsafe { socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL) } {
@@ -173,7 +169,7 @@ impl Tun for TunSocket {
         Ok(TunSocket { fd })
     }
 
-    fn set_non_blocking(self) -> Result<TunSocket, Error> {
+    pub fn set_non_blocking(self) -> Result<TunSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
             -1 => Err(Error::FCntl(errno_str())),
             flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
@@ -183,7 +179,7 @@ impl Tun for TunSocket {
         }
     }
 
-    fn name(&self) -> Result<String, Error> {
+    pub fn name(&self) -> Result<String, Error> {
         let mut tunnel_name = [0u8; 256];
         let mut tunnel_name_len: socklen_t = tunnel_name.len() as u32;
         if unsafe {
@@ -204,7 +200,7 @@ impl Tun for TunSocket {
     }
 
     /// Get the current MTU value
-    fn mtu(&self) -> Result<usize, Error> {
+    pub fn mtu(&self) -> Result<usize, Error> {
         let fd = match unsafe { socket(AF_INET, SOCK_STREAM, IPPROTO_IP) } {
             -1 => return Err(Error::Socket(errno_str())),
             fd => fd,
@@ -228,15 +224,15 @@ impl Tun for TunSocket {
         Ok(unsafe { ifr.ifr_ifru.ifru_mtu } as _)
     }
 
-    fn write4(&self, src: &[u8]) -> usize {
+    pub fn write4(&self, src: &[u8]) -> usize {
         self.write(src, AF_INET as u8)
     }
 
-    fn write6(&self, src: &[u8]) -> usize {
+    pub fn write6(&self, src: &[u8]) -> usize {
         self.write(src, AF_INET6 as u8)
     }
 
-    fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
+    pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         let mut hdr = [0u8; 4];
 
         let mut iov = [

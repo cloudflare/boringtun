@@ -5,19 +5,19 @@
 // Those tests require docker and sudo privileges to run
 #[cfg(test)]
 mod tests {
-    use crate::crypto::x25519::*;
-    use crate::device::*;
+    use crate::crypto::{X25519PublicKey, X25519SecretKey};
+    use crate::device::{DeviceConfig, DeviceHandle};
     use base64::encode as base64encode;
     use hex::encode;
-    #[cfg(not(target_arch = "arm"))]
-    use ring::rand::*;
-    use slog::*;
-    use std::io::prelude::*;
-    use std::io::{BufReader, Read, Write};
-    use std::net::*;
+    use ring::rand::{SecureRandom, SystemRandom};
+    use slog::{Drain, Logger};
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::net::UnixStream;
     use std::process::Command;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::thread;
 
     static NEXT_IFACE_IDX: AtomicUsize = AtomicUsize::new(100); // utun 100+ should be vacant during testing on CI
     static NEXT_PORT: AtomicUsize = AtomicUsize::new(61111); // Use ports starting with 61111, hoping we don't run into a taken port 🤷
