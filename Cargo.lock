@@ -102,6 +102,8 @@ dependencies = [
  "clap",
  "daemonize",
  "hex",
+ "ip_network",
+ "ip_network_table",
  "jni",
  "libc",
  "parking_lot",
@@ -295,6 +297,28 @@ name = "hex"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "644f9158b2f133fd50f5fb3242878846d9eb792e445c893805ff0e3824006e35"
+
+[[package]]
+name = "ip_network"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee15951c035f79eddbef745611ec962f63f4558f1dadf98ab723cc603487c6f"
+
+[[package]]
+name = "ip_network_table"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa59c26e61245c366c7d615b56524cdc7c9104ba15c0ebfc0f09ddb8cdf728be"
+dependencies = [
+ "ip_network",
+ "ip_network_table-deps-treebitmap",
+]
+
+[[package]]
+name = "ip_network_table-deps-treebitmap"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e537132deb99c0eb4b752f0346b6a836200eaaa3516dd7e5514b63930a09e5d"
 
 [[package]]
 name = "jni"

@@ -3,28 +3,25 @@
 
 use crate::device::peer::AllowedIP;
 
-use std::cmp::min;
+use ip_network::IpNetwork;
+use ip_network_table::IpNetworkTable;
+
+use std::collections::VecDeque;
 use std::iter::FromIterator;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 
 /// A trie of IP/cidr addresses
+#[derive(Default)]
 pub struct AllowedIps<D> {
-    v4: Option<Node32<D>>,
-    v6: Option<Node128<D>>,
+    ips: IpNetworkTable<D>,
 }
 
-impl<D> Default for AllowedIps<D> {
-    fn default() -> Self {
-        Self { v4: None, v6: None }
-    }
-}
+impl<'a, D> FromIterator<(&'a AllowedIP, D)> for AllowedIps<D> {
+    fn from_iter<I: IntoIterator<Item = (&'a AllowedIP, D)>>(iter: I) -> Self {
+        let mut allowed_ips = AllowedIps::new();
 
-impl<'a> FromIterator<&'a AllowedIP> for AllowedIps<()> {
-    fn from_iter<I: IntoIterator<Item = &'a AllowedIP>>(iter: I) -> Self {
-        let mut allowed_ips: AllowedIps<()> = Default::default();
-
-        for ip in iter {
-            allowed_ips.insert(ip.addr, ip.cidr as usize, ());
+        for (ip, data) in iter {
+            allowed_ips.insert(ip.addr, ip.cidr as u32, data);
         }
 
         allowed_ips
@@ -32,464 +29,51 @@ impl<'a> FromIterator<&'a AllowedIP> for AllowedIps<()> {
 }
 
 impl<D> AllowedIps<D> {
-    pub fn clear(&mut self) {
-        self.v4 = None;
-        self.v6 = None;
+    pub fn new() -> Self {
+        Self {
+            ips: IpNetworkTable::new(),
+        }
     }
 
-    pub fn insert(&mut self, key: IpAddr, cidr: usize, data: D) -> Option<D> {
-        match key {
-            IpAddr::V4(addr) => {
-                assert!(cidr <= 32);
-                insert32(&mut self.v4, u32::from(addr), cidr, data)
-            }
-            IpAddr::V6(addr) => {
-                assert!(cidr <= 128);
-                insert128(&mut self.v6, u128::from(addr), cidr, data)
-            }
-        }
+    pub fn clear(&mut self) {
+        self.ips = IpNetworkTable::new();
+    }
+
+    pub fn insert(&mut self, key: IpAddr, cidr: u32, data: D) -> Option<D> {
+        // These are networks, it doesn't make sense for host bits to be set, so
+        // use new_truncate().
+        self.ips.insert(
+            IpNetwork::new_truncate(key, cidr as u8).expect("cidr is valid length"),
+            data,
+        )
     }
 
     pub fn find(&self, key: IpAddr) -> Option<&D> {
-        match key {
-            IpAddr::V4(addr) => find32(&self.v4, u32::from(addr)),
-            IpAddr::V6(addr) => find128(&self.v6, u128::from(addr)),
-        }
+        self.ips.longest_match(key).map(|(_net, data)| data)
     }
 
     pub fn remove(&mut self, predicate: &dyn Fn(&D) -> bool) {
-        remove32(&mut self.v4, predicate);
-        remove128(&mut self.v6, predicate);
+        self.ips.retain(|_, v| !predicate(v));
     }
 
     pub fn iter(&self) -> Iter<D> {
-        Iter::new(&self.v4, &self.v6)
+        Iter(
+            self.ips
+                .iter()
+                .map(|(ipa, d)| (d, ipa.network_address(), ipa.netmask()))
+                .collect(),
+        )
     }
 }
 
-/// This is a iterator that progresses through an in-order traversal.
-pub struct Iter<'a, D: 'a> {
-    iter_v4: Iter32<'a, D>,
-    iter_v6: Iter128<'a, D>,
-}
-
-impl<'a, D> Iter<'a, D> {
-    fn new(v4: &'a Option<Node32<D>>, v6: &'a Option<Node128<D>>) -> Self {
-        Iter {
-            iter_v4: Iter32::new(v4),
-            iter_v6: Iter128::new(v6),
-        }
-    }
-}
+pub struct Iter<'a, D: 'a>(VecDeque<(&'a D, IpAddr, u8)>);
 
 impl<'a, D> Iterator for Iter<'a, D> {
-    type Item = (&'a D, IpAddr, usize);
+    type Item = (&'a D, IpAddr, u8);
     fn next(&mut self) -> Option<Self::Item> {
-        let try_v4 = self.iter_v4.next();
-
-        if let Some((data, addr, cidr)) = try_v4 {
-            return Some((data, IpAddr::V4(Ipv4Addr::from(addr)), cidr));
-        }
-
-        let try_v6 = self.iter_v6.next();
-        if let Some((data, addr, cidr)) = try_v6 {
-            return Some((data, IpAddr::V6(Ipv6Addr::from(addr)), cidr));
-        }
-        None
+        self.0.pop_front()
     }
 }
-
-macro_rules! mask_key {
-    ($key: expr, $bits: expr, $size: expr, $mask: expr) => {
-        if $bits > 0 {
-            $key & ($mask << ($size - $bits))
-        } else {
-            0
-        };
-    };
-}
-
-macro_rules! build_node {
-    ($name: ident, $find: ident, $remove: ident, $insert: ident, $keyt: ty) => {
-        #[derive(Debug)]
-        enum $name<D> {
-            Node {
-                cur_key: $keyt,               // The part of the key stored in this node
-                cur_bits: usize,              // How many bits of the key to store
-                data: Option<D>,              // Optional data for this node
-                left: Box<Option<$name<D>>>,  // Left subtree, go there if next bit of key is 0
-                right: Box<Option<$name<D>>>, // Right subtree, go there if next bit of key is 1
-            },
-            Leaf($keyt, usize, D), // Leaf node, keyt: part of the key to match, usize: how much to match, D: data on match
-        }
-
-        fn $find<D>(node: &Option<$name<D>>, key: $keyt) -> Option<&D> {
-            const BM1: usize = std::mem::size_of::<$keyt>() * 8 - 1; // Bits in key minus one
-
-            match node {
-                None => None,
-                Some($name::Leaf(cur_key, cur_bits, cur_data)) => {
-                    let shared_bits = (cur_key ^ key).leading_zeros() as usize;
-                    if shared_bits >= *cur_bits {
-                        Some(cur_data)
-                    } else {
-                        None
-                    }
-                }
-                Some($name::Node {
-                    cur_key,
-                    cur_bits,
-                    data,
-                    left,
-                    right,
-                }) => {
-                    let ret = if *cur_bits == 0 {
-                        if key >> BM1 == 0 {
-                            $find(left, key << 1)
-                        } else {
-                            $find(right, key << 1)
-                        }
-                    } else {
-                        let shared_bits = (cur_key ^ key).leading_zeros() as usize;
-                        if shared_bits >= *cur_bits {
-                            if (key >> (BM1 - *cur_bits)) & 1 == 0 {
-                                $find(left, key.checked_shl((*cur_bits + 1) as _).unwrap_or(0))
-                            } else {
-                                $find(right, key.checked_shl((*cur_bits + 1) as _).unwrap_or(0))
-                            }
-                        } else {
-                            return None;
-                        }
-                    };
-                    ret.or(data.as_ref())
-                }
-            }
-        }
-
-        fn $remove<D>(node: &mut Option<$name<D>>, predicate: &dyn Fn(&D) -> bool) {
-            match node {
-                None => return,
-                Some($name::Node {
-                    ref mut left,
-                    ref mut right,
-                    ref mut data,
-                    ..
-                }) => {
-                    $remove(left, predicate);
-                    $remove(right, predicate);
-
-                    if let Some(cur_data) = data {
-                        if !predicate(cur_data) {
-                            return;
-                        }
-                    }
-                    // If we got here the Node contains the data we want to remove
-                    *data = None;
-                    return;
-                }
-                Some($name::Leaf(_, _, ref cur_data)) => {
-                    if !predicate(cur_data) {
-                        return;
-                    }
-                }
-            }
-            // If we got here the Leaf contains the data we want to remove
-            *node = None
-        }
-
-        /// Attempt to insert data with a given key and mask
-        /// If a key already exists, we replace it and return the old data
-        fn $insert<D>(node: &mut Option<$name<D>>, key: $keyt, bits: usize, data: D) -> Option<D> {
-            const BITS: usize = std::mem::size_of::<$keyt>() * 8; // Bits in key
-            const BM1: usize = BITS - 1; // Bits in key minus one
-            const ZERO: $keyt = 0;
-            let mask: $keyt = ZERO.wrapping_sub(1);
-
-            let cur_node = node.take();
-            match cur_node {
-                None => {
-                    // We reached a vacant spot, this is easy, just create a new Leaf in place
-                    let masked_key = mask_key!(key, bits, BITS, mask);
-                    *node = Some($name::Leaf(masked_key, bits, data));
-                    return None;
-                }
-                Some($name::Leaf(cur_key, cur_bits, cur_data)) => {
-                    // We got to a Leaf, this is still pretty simple
-
-                    // First find out the number of equal bits between cur_key (the key stored in the node) and key (the key we want to insert)
-                    let shared_bits =
-                        min((cur_key ^ key).leading_zeros() as _, min(bits, cur_bits));
-
-                    if shared_bits == cur_bits && bits == cur_bits {
-                        // The new key matches this Leaf exactly, so we replace it
-                        *node = Some($name::Leaf(cur_key, cur_bits, data)); // Keep current key and bits, but store the new data instead
-                        return Some(cur_data);
-                    }
-
-                    let shared_key = mask_key!(cur_key, shared_bits, BITS, mask); // Mask the correct bits of the key
-
-                    if shared_bits == bits {
-                        // The new key is shorter than the current Leaf, we create a Node
-                        // The Node will contain the new data, and will fork to the existing Leaf as needed
-                        let diff_bit = ((cur_key >> (BM1 - shared_bits)) & 1) == 1; // The next bit
-
-                        // Create new Leaf from old Leaf
-                        let old_bits = cur_bits - shared_bits - 1;
-                        let old_key = mask_key!(cur_key << (shared_bits + 1), old_bits, BITS, mask);
-                        let old_node = Some($name::Leaf(old_key, old_bits, cur_data));
-                        // Decide if the previous Leaf will go left or right
-                        let (left, right) = if diff_bit {
-                            (None, old_node)
-                        } else {
-                            (old_node, None)
-                        };
-                        // Create new Node
-                        *node = Some($name::Node {
-                            cur_key: shared_key,
-                            cur_bits: shared_bits,
-                            data: Some(data),
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        });
-                        return None;
-                    }
-
-                    if shared_bits == cur_bits {
-                        // The new key is longer than the current Leaf, we create a Node
-                        // The Node will hold the current Leaf data as its data, and will fork to a new Leaf
-                        let diff_bit = (key >> (BM1 - shared_bits)) & 1 == 1; // The next bit
-
-                        // Create new Leaf with new key and data
-                        let new_bits = bits - shared_bits - 1;
-                        let new_key = mask_key!(key << (shared_bits + 1), new_bits, BITS, mask);
-                        let new_node = Some($name::Leaf(new_key, new_bits, data));
-                        // Decide if the new Leaf will go left or right
-                        let (left, right) = if diff_bit {
-                            (None, new_node)
-                        } else {
-                            (new_node, None)
-                        };
-
-                        *node = Some($name::Node {
-                            cur_key: shared_key,
-                            cur_bits: shared_bits,
-                            data: Some(cur_data),
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        });
-                        return None;
-                    }
-
-                    // The new entry and the old entry diverge in the middle, we need to split at a new Node
-                    let diff_bit = (key >> (BM1 - shared_bits)) & 1 == 1; // The next bit of the new key
-
-                    // Create new Leaf with new key and data
-                    let new_bits = bits - shared_bits - 1;
-                    let new_key = mask_key!(key << (shared_bits + 1), new_bits, BITS, mask);
-                    let new_node = $name::Leaf(new_key, new_bits, data);
-                    // Create new Leaf from old Leaf
-                    let old_bits = cur_bits - shared_bits - 1;
-                    let old_key = mask_key!(cur_key << (shared_bits + 1), old_bits, BITS, mask);
-                    let old_node = $name::Leaf(old_key, old_bits, cur_data);
-                    // Decide if the Leaf with new key/data will go left or right
-                    let (left, right) = if diff_bit {
-                        (old_node, new_node)
-                    } else {
-                        (new_node, old_node)
-                    };
-
-                    *node = Some($name::Node {
-                        cur_key: shared_key,
-                        cur_bits: shared_bits,
-                        data: None,
-                        left: Box::new(Some(left)),
-                        right: Box::new(Some(right)),
-                    });
-                    return None;
-                }
-                Some($name::Node {
-                    cur_key,
-                    cur_bits,
-                    data: cur_data,
-                    mut left,
-                    mut right,
-                }) => {
-                    // We are at an existing Node, there are a few scenarios that can happen:
-                    let shared_bits =
-                        min((cur_key ^ key).leading_zeros() as _, min(bits, cur_bits));
-
-                    if shared_bits == bits && shared_bits == cur_bits {
-                        // The new key matches this Node exactly, so we replace it
-                        *node = Some($name::Node {
-                            cur_key,
-                            cur_bits,
-                            data: Some(data),
-                            left,
-                            right,
-                        });
-                        return cur_data;
-                    }
-
-                    let shared_key = mask_key!(cur_key, shared_bits, BITS, mask); // Mask the correct bits of the key
-
-                    if shared_bits == bits {
-                        // The new key is shorter than the current Node, we create a split Node
-                        // The split Node will contain the new data, and will fork to the existing Node as needed
-                        let diff_bit = ((cur_key >> (BM1 - shared_bits)) & 1) == 1; // The next bit
-
-                        // Create new Leaf from old Leaf
-                        let old_bits = cur_bits - shared_bits - 1;
-                        let old_key = mask_key!(cur_key << (shared_bits + 1), old_bits, BITS, mask);
-                        let old_node = Some($name::Node {
-                            cur_key: old_key,
-                            cur_bits: old_bits,
-                            data: cur_data,
-                            left,
-                            right,
-                        });
-                        // Decide if the previous Leaf will go left or right
-                        let (left, right) = if diff_bit {
-                            (None, old_node)
-                        } else {
-                            (old_node, None)
-                        };
-                        // Create new Node
-                        *node = Some($name::Node {
-                            cur_key: shared_key,
-                            cur_bits: shared_bits,
-                            data: Some(data),
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        });
-                        return None;
-                    }
-
-                    if shared_bits == cur_bits {
-                        // We matched all the bits, but still have some left, insert into a subtree
-                        let next_bit = (key >> (BM1 - shared_bits)) & 1 == 1; // Decide if traverse left or right
-                        {
-                            let dir = if next_bit { &mut right } else { &mut left };
-                            $insert(dir, key << (shared_bits + 1), bits - shared_bits - 1, data);
-                        }
-                        // The node is unchanged
-                        *node = Some($name::Node {
-                            cur_key,
-                            cur_bits,
-                            data: cur_data,
-                            left,
-                            right,
-                        });
-                        return None;
-                    }
-
-                    // The new entry and the old entry diverge in the middle, we need to split at a new Node   let shared_key = mask_key!(cur_key, shared_bits, BITS, mask);
-                    let diff_bit = (key >> (BM1 - shared_bits)) & 1 == 1; // The next bit of the new key
-
-                    let new_bits = bits - shared_bits - 1;
-                    let old_bits = cur_bits - shared_bits - 1;
-                    let new_key = mask_key!(key << (shared_bits + 1), new_bits, BITS, mask);
-                    let old_key = mask_key!(cur_key << (shared_bits + 1), old_bits, BITS, mask);
-
-                    let new_node = $name::Leaf(new_key, new_bits, data);
-                    let old_node = $name::Node {
-                        cur_key: old_key,
-                        cur_bits: old_bits,
-                        data: cur_data,
-                        left,
-                        right,
-                    };
-
-                    let (left, right) = if diff_bit {
-                        (old_node, new_node)
-                    } else {
-                        (new_node, old_node)
-                    };
-
-                    *node = Some($name::Node {
-                        cur_key: shared_key,
-                        cur_bits: shared_bits,
-                        data: None,
-                        left: Box::new(Some(left)),
-                        right: Box::new(Some(right)),
-                    });
-
-                    return None;
-                }
-            }
-        }
-    };
-}
-
-macro_rules! build_iter {
-    ($name: ident, $node: ident, $keyt: ty) => {
-        /// This is a iterator that progresses through a DFS traversal.
-        pub struct $name<'a, D: 'a> {
-            stack: Vec<&'a Option<$node<D>>>,
-            key_hlp: Vec<($keyt, usize)>,
-        }
-
-        impl<'a, D> $name<'a, D> {
-            fn new(root: &'a Option<$node<D>>) -> Self {
-                $name {
-                    stack: vec![root],
-                    key_hlp: vec![(0, 0)],
-                }
-            }
-        }
-
-        impl<'a, D> Iterator for $name<'a, D> {
-            type Item = (&'a D, $keyt, usize);
-            fn next(&mut self) -> Option<Self::Item> {
-                const BITS: usize = std::mem::size_of::<$keyt>() * 8; // Bits in key
-                const BM1: usize = BITS - 1; // Bits in key minus one
-
-                while !self.stack.is_empty() {
-                    let node = self.stack.pop().unwrap();
-                    match node {
-                        None => {
-                            self.key_hlp.pop();
-                        }
-                        Some($node::Leaf(key, bits, data)) => {
-                            let (cur_key, cur_bits) = self.key_hlp.pop().unwrap();
-                            if cur_bits == BITS && *bits == 0 {
-                                return Some((data, cur_key, cur_bits));
-                            }
-                            return Some((data, cur_key ^ (key >> cur_bits), cur_bits + bits));
-                        }
-                        Some($node::Node {
-                            cur_key,
-                            cur_bits,
-                            data,
-                            ref left,
-                            ref right,
-                        }) => {
-                            let (key, mut bits) = self.key_hlp.pop().unwrap();
-                            let cur_key = key ^ (cur_key >> bits);
-                            bits += cur_bits;
-
-                            self.stack.push(right);
-                            self.stack.push(left);
-
-                            self.key_hlp.push((cur_key ^ (1 << (BM1 - bits)), bits + 1));
-                            self.key_hlp.push((cur_key, bits + 1));
-
-                            if let Some(ref data) = data {
-                                return Some((data, cur_key, bits));
-                            }
-                        }
-                    }
-                }
-                None
-            }
-        }
-    };
-}
-
-build_node!(Node32, find32, remove32, insert32, u32);
-build_node!(Node128, find128, remove128, insert128, u128);
-
-build_iter!(Iter32, Node32, u32);
-build_iter!(Iter128, Node128, u128);
 
 #[cfg(test)]
 mod tests {

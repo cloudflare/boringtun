@@ -147,7 +147,7 @@ fn api_get<T: Tun, S: Sock>(writer: &mut BufWriter<&UnixStream>, d: &Device<T, S
             writeln!(writer, "endpoint={}", addr);
         }
 
-        for (_, ip, cidr) in p.allowed_ips() {
+        for (ip, cidr) in p.allowed_ips() {
             writeln!(writer, "allowed_ip={}/{}", ip, cidr);
         }
 

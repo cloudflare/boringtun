@@ -385,7 +385,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
             next_index: Default::default(),
             peers: Default::default(),
             peers_by_idx: Default::default(),
-            peers_by_ip: Default::default(),
+            peers_by_ip: AllowedIps::new(),
             udp4: Default::default(),
             udp6: Default::default(),
             cleanup_paths: Default::default(),
