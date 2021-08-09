@@ -18,14 +18,16 @@ slog = "2.7"
 slog-term = { version = "2.7", optional = true }
 ip_network = "0.3.4"
 ip_network_table = "0.1.2"
-clap = { version = "2.33", default-features = false, features = ["suggestions"], optional = true }
-daemonize = { version = "0.4.1", optional = true }
 
 [dev-dependencies]
 slog-term = { version = "2.7" }
 
 [target.'cfg(not(target_arch="arm"))'.dependencies]
 ring = "0.16"
+
+[target.'cfg(not(any(target_os="windows", target_os="ios", target_os="android")))'.dependencies]
+clap = { version = "2.33", default-features = false, features = ["suggestions"], optional = true }
+daemonize = { version = "0.4.1", optional = true }
 
 [target.'cfg(target_os="android")'.dependencies]
 jni = "0.10"
