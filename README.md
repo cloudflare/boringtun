@@ -2,7 +2,7 @@
 
 # BoringTun
 
-[![crates.io](https://meritbadge.herokuapp.com/boringtun)](https://crates.io/crates/boringtun)
+[![crates.io](https://img.shields.io/crates/v/boringtun.svg)](https://crates.io/crates/boringtun)
 
 **BoringTun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
 
