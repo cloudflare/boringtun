@@ -86,6 +86,9 @@ jobs:
     demands: agent.name -equals aarch64
   continueOnError: true
   steps:
+  - script: |
+      docker stop $(docker ps -aq)
+    displayName: 'Fix docker'
   - template: ci/azure-build.yml
 
 - job: Linux_armv7
@@ -95,4 +98,7 @@ jobs:
     demands: agent.name -equals armv7
   continueOnError: true
   steps:
+  - script: |
+      docker stop $(docker ps -aq)
+    displayName: 'Fix docker'
   - template: ci/azure-build.yml
