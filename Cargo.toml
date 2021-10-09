@@ -13,13 +13,20 @@ hex = "0.4"
 untrusted = "0.7"
 libc = "0.2"
 parking_lot = "0.11"
-slog = "2.7"
-slog-term = { version = "2.7", optional = true }
+tracing = "0.1.29"
 ip_network = "0.3.4"
 ip_network_table = "0.1.2"
 
+[dependencies.tracing-subscriber]
+version = "0.2.25"
+optional = true
+
+[dependencies.tracing-appender]
+version = "0.1.2"
+optional = true
+
 [dev-dependencies]
-slog-term = { version = "2.7" }
+tracing-subscriber = "0.2.25"
 
 [target.'cfg(not(target_arch="arm"))'.dependencies]
 ring = "0.16"
@@ -33,7 +40,7 @@ jni = "0.10"
 
 [features]
 default = ["build-binary"]
-build-binary = ["slog-term", "clap", "daemonize"]
+build-binary = ["tracing-subscriber", "tracing-appender", "clap", "daemonize"]
 
 [lib]
 crate-type = ["lib", "staticlib", "dylib"]

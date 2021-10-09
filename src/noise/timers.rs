@@ -3,7 +3,6 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
-use slog::debug;
 use std::ops::Index;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -25,17 +24,27 @@ const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
 
 #[derive(Debug)]
 pub enum TimerName {
-    TimeCurrent,                // Current time, updated each call to `update_timers`
-    TimeSessionEstablished,     // Time when last handshake was completed
-    TimeLastHandshakeStarted,   // Time the last attempt for a new handshake began
-    TimeLastPacketReceived,     // Time we last received and authenticated a packet
-    TimeLastPacketSent,         // Time we last send a packet
-    TimeLastDataPacketReceived, // Time we last received and authenticated a DATA packet
-    TimeLastDataPacketSent,     // Time we last send a DATA packet
-    TimeCookieReceived,         // Time we last received a cookie
-    TimePersistentKeepalive,    // Time we last sent persistent keepalive
+    /// Current time, updated each call to `update_timers`
+    TimeCurrent,
+    /// Time when last handshake was completed
+    TimeSessionEstablished,
+    /// Time the last attempt for a new handshake began
+    TimeLastHandshakeStarted,
+    /// Time we last received and authenticated a packet
+    TimeLastPacketReceived,
+    /// Time we last send a packet
+    TimeLastPacketSent,
+    /// Time we last received and authenticated a DATA packet
+    TimeLastDataPacketReceived,
+    /// Time we last send a DATA packet
+    TimeLastDataPacketSent,
+    /// Time we last received a cookie
+    TimeCookieReceived,
+    /// Time we last sent persistent keepalive
+    TimePersistentKeepalive,
     Top,
 }
+
 use self::TimerName::*;
 
 // Although technically there are data races in play, but in practice
@@ -48,14 +57,19 @@ pub struct Timer {
 
 #[derive(Debug)]
 pub struct Timers {
-    is_initiator: AtomicBool, // Is the owner of the timer the initiator or the responder for the last handshake?
-    time_started: Instant,    // Start time of the tunnel
+    /// Is the owner of the timer the initiator or the responder for the last handshake?
+    is_initiator: AtomicBool,
+    /// Start time of the tunnel
+    time_started: Instant,
     timers: [Timer; TimerName::Top as usize],
     pub(super) session_timers: [Timer; super::N_SESSIONS],
-    want_keepalive: AtomicBool, // Did we receive data without sending anything back?
-    want_handshake: AtomicBool, // Did we send data without hearing back?
+    /// Did we receive data without sending anything back?
+    want_keepalive: AtomicBool,
+    /// Did we send data without hearing back?
+    want_handshake: AtomicBool,
     persistent_keepalive: AtomicUsize,
-    pub(super) should_reset_rr: bool, // Should this timer call reset rr function (if not a shared rr instance)
+    /// Should this timer call reset rr function (if not a shared rr instance)
+    pub(super) should_reset_rr: bool,
 }
 
 impl Timers {
@@ -152,7 +166,10 @@ impl Tunn {
         for (i, t) in timers.session_timers.iter().enumerate() {
             if time_now - t.time() > REJECT_AFTER_TIME {
                 if let Some(session) = self.sessions[i].write().take() {
-                    debug!(self.logger, "SESSION_EXPIRED(REJECT_AFTER_TIME)"; "session" => session.receiving_index);
+                    tracing::debug!(
+                        message = "SESSION_EXPIRED(REJECT_AFTER_TIME)",
+                        session = session.receiving_index
+                    );
                 }
                 t.set(time_now);
             }
@@ -206,7 +223,7 @@ impl Tunn {
             // All ephemeral private keys and symmetric session keys are zeroed out after
             // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
             if now - session_established >= REJECT_AFTER_TIME * 3 {
-                debug!(self.logger, "CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
+                tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
                 handshake.set_expired();
                 self.clear_all();
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
@@ -219,7 +236,7 @@ impl Tunn {
                     // the retries give up and cease, and clear all existing packets queued
                     // up to be sent. If a packet is explicitly queued up to be sent, then
                     // this timer is reset.
-                    debug!(self.logger, "CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
+                    tracing::debug!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                     handshake.set_expired();
                     self.clear_all();
                     return TunnResult::Err(WireGuardError::ConnectionExpired);
@@ -231,7 +248,7 @@ impl Tunn {
                     // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
                     // if a response has not been received, where jitter is some random
                     // value between 0 and 333 ms.
-                    debug!(self.logger, "HANDSHAKE(REKEY_TIMEOUT)");
+                    tracing::debug!("HANDSHAKE(REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
             } else {
@@ -244,7 +261,7 @@ impl Tunn {
                     if session_established < data_packet_sent
                         && now - session_established >= REKEY_AFTER_TIME
                     {
-                        debug!(self.logger, "HANDSHAKE(REKEY_AFTER_TIME (on send))");
+                        tracing::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
                         handshake_initiation_required = true;
                     }
 
@@ -256,7 +273,11 @@ impl Tunn {
                         && now - session_established
                             >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
                     {
-                        debug!(self.logger, "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))");
+                        tracing::debug!(
+                            "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - \
+                        REKEY_TIMEOUT \
+                        (on receive))"
+                        );
                         handshake_initiation_required = true;
                     }
                 }
@@ -268,7 +289,7 @@ impl Tunn {
                     && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                     && timers.want_handshake.swap(false, Ordering::Relaxed)
                 {
-                    debug!(self.logger, "HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
+                    tracing::debug!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
 
@@ -279,7 +300,7 @@ impl Tunn {
                         && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
                         && timers.want_keepalive.swap(false, Ordering::Relaxed)
                     {
-                        debug!(self.logger, "KEEPALIVE(KEEPALIVE_TIMEOUT)");
+                        tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                         keepalive_required = true;
                     }
 
@@ -288,7 +309,7 @@ impl Tunn {
                         && (now - timers[TimePersistentKeepalive].time()
                             >= Duration::from_secs(persistent_keepalive as _))
                     {
-                        debug!(self.logger, "KEEPALIVE(PERSISTENT_KEEPALIVE)");
+                        tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
                         keepalive_required = true;
                     }
