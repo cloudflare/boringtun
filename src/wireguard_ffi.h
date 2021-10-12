@@ -67,6 +67,7 @@ int check_base64_encoded_x25519_key(const char *key);
 // Allocate a new tunnel
 struct wireguard_tunnel *new_tunnel(const char *static_private,
                                     const char *server_static_public,
+                                    const char *preshared_key,
                                     uint16_t keep_alive, // Keep alive interval in seconds
                                     uint32_t index,      // The 24bit index prefix to be used for session indexes
                                     void (*log_printer)(const char *),
