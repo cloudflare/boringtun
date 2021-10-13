@@ -8,7 +8,7 @@
 /// C bindings for the BoringTun library
 pub mod benchmark;
 use self::benchmark::do_benchmark;
-use super::noise::{Tunn, TunnResult};
+use super::noise::{make_array, Tunn, TunnResult};
 use crate::crypto::{X25519PublicKey, X25519SecretKey};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
@@ -176,6 +176,7 @@ pub unsafe extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> 
 pub unsafe extern "C" fn new_tunnel(
     static_private: *const c_char,
     server_static_public: *const c_char,
+    preshared_key: *const c_char,
     keep_alive: u16,
     index: u32,
     log_printer: Option<unsafe extern "C" fn(*const c_char)>,
@@ -191,6 +192,15 @@ pub unsafe extern "C" fn new_tunnel(
     let server_static_public = match c_str.to_str() {
         Err(_) => return ptr::null_mut(),
         Ok(string) => string,
+    };
+
+    let c_str = CStr::from_ptr(preshared_key);
+    let preshared_key = match c_str.to_str() {
+        Err(_) => None,
+        Ok(string) => match string.parse::<X25519PublicKey>() {
+            Ok(key) => Some(make_array(key.as_bytes())),
+            Err(_) => None,
+        },
     };
 
     let private_key = match static_private.parse() {
@@ -212,7 +222,7 @@ pub unsafe extern "C" fn new_tunnel(
     let mut tunnel = match Tunn::new(
         Arc::new(private_key),
         Arc::new(public_key),
-        None,
+        preshared_key,
         keep_alive,
         index,
         None,
