@@ -50,7 +50,6 @@ use tun::{errno, errno_str, TunSocket};
 use udp::UDPSocket;
 
 use dev_lock::{Lock, LockReadGuard};
-use slog::{error, info, o, Discard, Logger};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 
@@ -131,7 +130,6 @@ pub struct DeviceHandle<T: Tun = TunSocket, S: Sock = UDPSocket> {
 pub struct DeviceConfig {
     pub n_threads: usize,
     pub use_connected_socket: bool,
-    pub logger: Logger,
     #[cfg(target_os = "linux")]
     pub use_multi_queue: bool,
     #[cfg(target_os = "linux")]
@@ -143,7 +141,6 @@ impl Default for DeviceConfig {
         DeviceConfig {
             n_threads: 4,
             use_connected_socket: true,
-            logger: Logger::root(Discard, o!()),
             #[cfg(target_os = "linux")]
             use_multi_queue: true,
             #[cfg(target_os = "linux")]
@@ -288,7 +285,7 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
                         }
                         handler.cancel();
                     }
-                    WaitResult::Error(e) => error!(device_lock.config.logger, "Poll error {:}", e),
+                    WaitResult::Error(e) => tracing::error!(message = "Poll error", error = ?e),
                 }
             }
         }
@@ -318,7 +315,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
             self.peers_by_ip
                 .remove(&|p: &Arc<Peer<S>>| Arc::ptr_eq(&peer, p)); // peers_by_ip
 
-            info!(peer.tunnel.logger, "Peer removed");
+            tracing::info!("Peer removed");
         }
     }
 
@@ -352,7 +349,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
             .as_ref()
             .expect("Private key must be set first");
 
-        let mut tunn = Tunn::new(
+        let tunn = Tunn::new(
             Arc::clone(&device_key_pair.0),
             Arc::clone(&pub_key),
             preshared_key,
@@ -361,13 +358,6 @@ impl<T: Tun, S: Sock> Device<T, S> {
             None,
         )
         .unwrap();
-
-        {
-            let pub_key = base64::encode(pub_key.as_bytes());
-            let peer_name = format!("{}…{}", &pub_key[0..4], &pub_key[pub_key.len() - 4..]);
-            let peer_logger = self.config.logger.new(o!("peer" => peer_name));
-            tunn.set_logger(peer_logger);
-        }
 
         let peer = Peer::new(tunn, next_index, endpoint, &allowed_ips, preshared_key);
 
@@ -379,7 +369,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
             self.peers_by_ip.insert(addr, cidr as _, Arc::clone(&peer));
         }
 
-        info!(peer.tunnel.logger, "Peer added");
+        tracing::info!("Peer added");
     }
 
     pub fn new(name: &str, config: DeviceConfig) -> Result<Device<T, S>, Error> {
@@ -590,7 +580,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
                         TunnResult::Err(WireGuardError::ConnectionExpired) => {
                             peer.shutdown_endpoint(); // close open udp socket
                         }
-                        TunnResult::Err(e) => error!(d.config.logger, "Timer error {:?}", e),
+                        TunnResult::Err(e) => tracing::error!(message = "Timer error", error = ?e),
                         TunnResult::WriteToNetwork(packet) => {
                             match endpoint_addr {
                                 SocketAddr::V4(_) => udp4.sendto(packet, endpoint_addr),
@@ -822,7 +812,9 @@ impl<T: Tun, S: Sock> Device<T, S> {
 
                     match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
                         TunnResult::Done => {}
-                        TunnResult::Err(e) => error!(d.config.logger, "Encapsulate error {:?}", e),
+                        TunnResult::Err(e) => {
+                            tracing::error!(message = "Encapsulate error", error = ?e)
+                        }
                         TunnResult::WriteToNetwork(packet) => {
                             let endpoint = peer.endpoint();
                             if let Some(ref conn) = endpoint.conn {
@@ -833,7 +825,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
                             } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
                                 udp6.sendto(packet, addr);
                             } else {
-                                error!(d.config.logger, "No endpoint");
+                                tracing::error!("No endpoint");
                             }
                         }
                         _ => panic!("Unexpected result from encapsulate"),
