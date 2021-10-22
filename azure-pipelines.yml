@@ -118,6 +118,8 @@ jobs:
 
 - job: dist_linux
   displayName: "Create Linux Release"
+  pool:
+    vmImage: 'ubuntu-20.04'
   steps:
     - template: ci/azure-install-rust.yml
     - script: rustup target add x86_64-unknown-linux-musl
@@ -138,6 +140,8 @@ jobs:
     - dist_darwin
     - dist_linux
   displayName: "Push to GitHub Releases"
+  pool:
+    vmImage: 'ubuntu-20.04'
   steps:
     - task: DownloadPipelineArtifact@0
       displayName: "Download Linux release"
