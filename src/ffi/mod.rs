@@ -13,7 +13,6 @@ use crate::crypto::{X25519PublicKey, X25519SecretKey};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
-use slog::{o, Drain, Level, Logger};
 
 use std::ffi::{CStr, CString};
 use std::mem;
@@ -84,22 +83,6 @@ impl<'a> From<TunnResult<'a>> for wireguard_result {
                 size: b.len(),
             },
         }
-    }
-}
-
-/// Custom slog Drain logic
-struct FFIDrain {
-    logger: unsafe extern "C" fn(*const c_char),
-}
-
-impl Drain for FFIDrain {
-    type Ok = ();
-    type Err = ();
-
-    fn log(&self, record: &slog::Record, _: &slog::OwnedKVList) -> Result<Self::Ok, Self::Err> {
-        let cstr = CString::new(format!("{}", record.msg())).unwrap();
-        unsafe { (self.logger)(cstr.as_ptr()) };
-        Ok(())
     }
 }
 
@@ -179,8 +162,6 @@ pub unsafe extern "C" fn new_tunnel(
     preshared_key: *const c_char,
     keep_alive: u16,
     index: u32,
-    log_printer: Option<unsafe extern "C" fn(*const c_char)>,
-    log_level: u32,
 ) -> *mut Tunn {
     let c_str = CStr::from_ptr(static_private);
     let static_private = match c_str.to_str() {
@@ -219,7 +200,7 @@ pub unsafe extern "C" fn new_tunnel(
         Some(keep_alive)
     };
 
-    let mut tunnel = match Tunn::new(
+    let tunnel = match Tunn::new(
         Arc::new(private_key),
         Arc::new(public_key),
         preshared_key,
@@ -230,20 +211,6 @@ pub unsafe extern "C" fn new_tunnel(
         Ok(t) => t,
         Err(_) => return ptr::null_mut(),
     };
-
-    if let Some(logger) = log_printer {
-        let level = match log_level {
-            0 => Level::Error,
-            1 => Level::Info,
-            2 => Level::Debug,
-            _ => Level::Trace,
-        };
-
-        let drain = FFIDrain { logger };
-        let logger = Logger::root(drain.filter_level(level).fuse(), o!());
-
-        tunnel.set_logger(logger);
-    }
 
     PANIC_HOOK.call_once(|| {
         // FFI won't properly unwind on panic, but it will if we cause a segmentation fault

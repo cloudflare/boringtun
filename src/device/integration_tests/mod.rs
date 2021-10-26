@@ -11,7 +11,6 @@ mod tests {
     use hex::encode;
     #[cfg(not(target_arch = "arm"))]
     pub use ring::rand::SecureRandom;
-    use slog::{Drain, Logger};
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::net::UnixStream;
@@ -263,19 +262,11 @@ mod tests {
     impl WGHandle {
         /// Create a new interface for the tunnel with the given address
         fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
-            let logger = Logger::root(
-                slog_term::FullFormat::new(slog_term::PlainSyncDecorator::new(std::io::stdout()))
-                    .build()
-                    .fuse(),
-                slog::o!(),
-            );
-
             WGHandle::init_with_config(
                 addr_v4,
                 addr_v6,
                 DeviceConfig {
                     n_threads: 2,
-                    logger,
                     use_connected_socket: true,
                     #[cfg(target_os = "linux")]
                     use_multi_queue: true,
@@ -555,19 +546,11 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let logger = Logger::root(
-            slog_term::FullFormat::new(slog_term::PlainSyncDecorator::new(std::io::stdout()))
-                .build()
-                .fuse(),
-            slog::o!(),
-        );
-
         let mut wg = WGHandle::init_with_config(
             addr_v4,
             addr_v6,
             DeviceConfig {
                 n_threads: 2,
-                logger,
                 use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
@@ -717,19 +700,11 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let logger = Logger::root(
-            slog_term::FullFormat::new(slog_term::PlainSyncDecorator::new(std::io::stdout()))
-                .build()
-                .fuse(),
-            slog::o!(),
-        );
-
         let mut wg = WGHandle::init_with_config(
             addr_v4,
             addr_v6,
             DeviceConfig {
                 n_threads: 2,
-                logger,
                 use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,

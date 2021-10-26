@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use parking_lot::RwLock;
-use slog::info;
 
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -80,7 +79,7 @@ impl<S: Sock> Peer<S> {
 
     pub fn shutdown_endpoint(&self) {
         if let Some(conn) = self.endpoint.write().conn.take() {
-            info!(self.tunnel.logger, "Disconnecting from endpoint");
+            tracing::info!("Disconnecting from endpoint");
             conn.shutdown();
         }
     }
@@ -125,11 +124,10 @@ impl<S: Sock> Peer<S> {
             udp_conn.set_fwmark(fwmark)?;
         }
 
-        info!(
-            self.tunnel.logger,
-            "Connected endpoint :{}->{}",
-            port,
-            endpoint.addr.unwrap()
+        tracing::info!(
+            message="Connected endpoint",
+            port=port,
+            endpoint=?endpoint.addr.unwrap()
         );
 
         endpoint.conn = Some(Arc::clone(&udp_conn));
