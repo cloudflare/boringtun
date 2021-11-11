@@ -127,6 +127,7 @@ pub struct DeviceHandle<T: Tun = TunSocket, S: Sock = UDPSocket> {
     threads: Vec<JoinHandle<()>>,
 }
 
+#[derive(Debug, Clone, Copy)
 pub struct DeviceConfig {
     pub n_threads: usize,
     pub use_connected_socket: bool,
