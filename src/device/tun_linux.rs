@@ -5,8 +5,6 @@ use super::Error;
 use libc::*;
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use crate::device::Tun;
-
 pub fn errno() -> i32 {
     unsafe { *__errno_location() }
 }
@@ -72,10 +70,8 @@ impl TunSocket {
             n => n as usize,
         }
     }
-}
 
-impl Tun for TunSocket {
-    fn new(name: &str) -> Result<TunSocket, Error> {
+    pub fn new(name: &str) -> Result<TunSocket, Error> {
         // If the provided name appears to be a FD, use that.
         let provided_fd = name.parse::<i32>();
         if provided_fd.is_ok() {
@@ -111,7 +107,7 @@ impl Tun for TunSocket {
         Ok(TunSocket { fd, name })
     }
 
-    fn set_non_blocking(self) -> Result<TunSocket, Error> {
+    pub fn set_non_blocking(self) -> Result<TunSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
             -1 => Err(Error::FCntl(errno_str())),
             flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
@@ -121,12 +117,12 @@ impl Tun for TunSocket {
         }
     }
 
-    fn name(&self) -> Result<String, Error> {
+    pub fn name(&self) -> Result<String, Error> {
         Ok(self.name.clone())
     }
 
     /// Get the current MTU value
-    fn mtu(&self) -> Result<usize, Error> {
+    pub fn mtu(&self) -> Result<usize, Error> {
         let provided_fd = self.name.parse::<i32>();
         if provided_fd.is_ok() {
             return Ok(1500);
@@ -155,15 +151,15 @@ impl Tun for TunSocket {
         Ok(unsafe { ifr.ifr_ifru.ifru_mtu } as _)
     }
 
-    fn write4(&self, src: &[u8]) -> usize {
+    pub fn write4(&self, src: &[u8]) -> usize {
         self.write(src)
     }
 
-    fn write6(&self, src: &[u8]) -> usize {
+    pub fn write6(&self, src: &[u8]) -> usize {
         self.write(src)
     }
 
-    fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
+    pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         match unsafe { read(self.fd, dst.as_mut_ptr() as _, dst.len()) } {
             -1 => Err(Error::IfaceRead(errno())),
             n => Ok(&mut dst[..n as usize]),

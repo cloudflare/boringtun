@@ -6,8 +6,6 @@ use libc::*;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use crate::device::Sock;
-
 /// Receives and sends UDP packets over the network
 #[derive(Debug)]
 pub struct UDPSocket {
@@ -235,9 +233,9 @@ impl AsRawFd for UDPSocket {
     }
 }
 
-impl Sock for UDPSocket {
+impl UDPSocket {
     /// Create a new IPv4 UDP socket
-    fn new() -> Result<UDPSocket, Error> {
+    pub fn new() -> Result<UDPSocket, Error> {
         match unsafe { socket(AF_INET, SOCK_DGRAM, 0) } {
             -1 => Err(Error::Socket(errno_str())),
             fd => Ok(UDPSocket { fd, version: 4 }),
@@ -245,7 +243,7 @@ impl Sock for UDPSocket {
     }
 
     /// Create a new IPv6 UDP socket
-    fn new6() -> Result<UDPSocket, Error> {
+    pub fn new6() -> Result<UDPSocket, Error> {
         match unsafe { socket(AF_INET6, SOCK_DGRAM, 0) } {
             -1 => Err(Error::Socket(errno_str())),
             fd => Ok(UDPSocket { fd, version: 6 }),
@@ -253,7 +251,7 @@ impl Sock for UDPSocket {
     }
 
     /// Bind the socket to a local port
-    fn bind(self, port: u16) -> Result<UDPSocket, Error> {
+    pub fn bind(self, port: u16) -> Result<UDPSocket, Error> {
         if self.version == 6 {
             return self.bind6(port);
         }
@@ -264,7 +262,7 @@ impl Sock for UDPSocket {
     /// Connect a socket to a remote address, must call bind prior to connect
     /// # Panics
     /// When connecting an IPv4 socket to an IPv6 address and vice versa
-    fn connect(self, dst: &SocketAddr) -> Result<UDPSocket, Error> {
+    pub fn connect(self, dst: &SocketAddr) -> Result<UDPSocket, Error> {
         match dst {
             SocketAddr::V4(dst) => self.connect4(dst),
             SocketAddr::V6(dst) => self.connect6(dst),
@@ -272,7 +270,7 @@ impl Sock for UDPSocket {
     }
 
     /// Set socket mode to non blocking
-    fn set_non_blocking(self) -> Result<UDPSocket, Error> {
+    pub fn set_non_blocking(self) -> Result<UDPSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
             -1 => Err(Error::FCntl(errno_str())),
             flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
@@ -283,7 +281,7 @@ impl Sock for UDPSocket {
     }
 
     /// Set the SO_REUSEPORT/SO_REUSEADDR option, so multiple sockets can bind on the same port
-    fn set_reuse(self) -> Result<UDPSocket, Error> {
+    pub fn set_reuse(self) -> Result<UDPSocket, Error> {
         match unsafe {
             setsockopt(
                 self.fd,
@@ -304,7 +302,7 @@ impl Sock for UDPSocket {
     #[cfg(target_os = "linux")]
     /// Set the mark on all packets sent by this socket using SO_MARK
     /// Only available on Linux
-    fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
+    pub fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
         match unsafe {
             setsockopt(
                 self.fd,
@@ -320,14 +318,14 @@ impl Sock for UDPSocket {
     }
 
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    fn set_fwmark(&self, _: u32) -> Result<(), Error> {
+    pub fn set_fwmark(&self, _: u32) -> Result<(), Error> {
         Ok(())
     }
 
     /// Query the local port the socket is bound to
     /// # Panics
     /// If socket is IPv6
-    fn port(&self) -> Result<u16, Error> {
+    pub fn port(&self) -> Result<u16, Error> {
         if self.version != 4 {
             panic!("Can only query ports of IPv4 sockets");
         }
@@ -342,7 +340,7 @@ impl Sock for UDPSocket {
     /// Send buf to a remote address, returns 0 on error, or amount of data send on success
     /// # Panics
     /// When sending from an IPv4 socket to an IPv6 address and vice versa
-    fn sendto(&self, buf: &[u8], dst: SocketAddr) -> usize {
+    pub fn sendto(&self, buf: &[u8], dst: SocketAddr) -> usize {
         match dst {
             SocketAddr::V4(addr) => self.sendto4(buf, addr),
             SocketAddr::V6(addr) => self.sendto6(buf, addr),
@@ -350,7 +348,7 @@ impl Sock for UDPSocket {
     }
 
     /// Receives a message on a non-connected UDP socket and returns its contents and origin address
-    fn recvfrom<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
+    pub fn recvfrom<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
         match self.version {
             4 => self.recvfrom4(buf),
             _ => self.recvfrom6(buf),
@@ -358,7 +356,7 @@ impl Sock for UDPSocket {
     }
 
     /// Receives a message on a connected UDP socket and returns its contents
-    fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
+    pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         match unsafe { recv(self.fd, &mut dst[0] as *mut u8 as _, dst.len(), 0) } {
             -1 => Err(Error::UDPRead(errno())),
             n => Ok(&mut dst[..n as usize]),
@@ -366,12 +364,12 @@ impl Sock for UDPSocket {
     }
 
     /// Sends a message on a connected UDP socket. Returns number of bytes successfully sent.
-    fn write(&self, src: &[u8]) -> usize {
+    pub fn write(&self, src: &[u8]) -> usize {
         UDPSocket::write_fd(self.fd, src)
     }
 
     /// Calls shutdown on a connected socket. This will trigger an EOF in the event queue.
-    fn shutdown(&self) {
+    pub fn shutdown(&self) {
         unsafe { shutdown(self.fd, SHUT_RDWR) };
     }
 }

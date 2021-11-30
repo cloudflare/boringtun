@@ -54,7 +54,7 @@ macro_rules! SEAL {
 
 macro_rules! OPEN {
     ($pt:expr, $key:expr, $counter:expr, $data:expr, $aad:expr) => {
-        ChaCha20Poly1305::new_aead(&$key).open_wg($counter, &$aad, &$data, &mut $pt);
+        ChaCha20Poly1305::new_aead(&$key).open_wg($counter, &$aad, &$data, &mut $pt)
     };
 }
 
