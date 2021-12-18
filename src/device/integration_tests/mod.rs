@@ -272,6 +272,8 @@ mod tests {
                     use_multi_queue: true,
                     #[cfg(target_os = "linux")]
                     uapi_fd: -1,
+                    peer_auth_script: None,
+                    listen_port: 0,
                 },
             )
         }
@@ -556,6 +558,8 @@ mod tests {
                 use_multi_queue: true,
                 #[cfg(target_os = "linux")]
                 uapi_fd: -1,
+                peer_auth_script: None,
+                listen_port: 0,
             },
         );
 
@@ -710,6 +714,8 @@ mod tests {
                 use_multi_queue: true,
                 #[cfg(target_os = "linux")]
                 uapi_fd: -1,
+                peer_auth_script: None,
+                listen_port: 0,
             },
         );
 

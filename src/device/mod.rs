@@ -37,6 +37,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
+use std::process::Command;
+use std::str::FromStr;
+use std::str;
 
 use crate::crypto::{X25519PublicKey, X25519SecretKey};
 use crate::noise::errors::WireGuardError;
@@ -100,6 +103,8 @@ pub struct DeviceConfig {
     pub use_multi_queue: bool,
     #[cfg(target_os = "linux")]
     pub uapi_fd: i32,
+    pub peer_auth_script: Option<String>,
+    pub listen_port: u16,
 }
 
 impl Default for DeviceConfig {
@@ -111,6 +116,8 @@ impl Default for DeviceConfig {
             use_multi_queue: true,
             #[cfg(target_os = "linux")]
             uapi_fd: -1,
+            peer_auth_script: None,
+            listen_port: 0,
         }
     }
 }
@@ -153,10 +160,16 @@ struct ThreadData {
 }
 
 impl DeviceHandle {
-    pub fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
+    pub fn new(name: &str, config: DeviceConfig, pkey: Option<X25519SecretKey) -> Result<DeviceHandle, Error> {
         let n_threads = config.n_threads;
+        let port = config.listen_port.clone();
         let mut wg_interface = Device::new(name, config)?;
-        wg_interface.open_listen_socket(0)?; // Start listening on a random port
+        wg_interface.open_listen_socket(port)?; // Start listening on a random port
+
+        // set private key if provided
+        if let Some(private_key) = pkey {
+            wg_interface.set_key(private_key);
+        }
 
         let interface_lock = Arc::new(Lock::new(wg_interface));
 
@@ -616,6 +629,7 @@ impl Device {
                             parse_handshake_anon(&private_key, &public_key, &p)
                                 .ok()
                                 .and_then(|hh| {
+                                    check_auth(&hh, d);
                                     d.peers
                                         .get(&X25519PublicKey::from(&hh.peer_static_public[..]))
                                 })
@@ -812,4 +826,104 @@ impl Device {
         )?;
         Ok(())
     }
+}
+
+// check external auth for the provided public key, if it exists, create a new peer and return it
+fn check_auth (hh: &handshake::HalfHandshake, d: &mut LockReadGuard<Device>) {
+
+    // // We need to get a write lock on the device first
+    let mut write_mark = match d.mark_want_write() {
+        None => {
+            eprintln!("check_auth could not get device lock");
+            return
+        },
+        Some(lock) => lock,
+    };
+
+    write_mark.trigger_yield();
+    let mut device = write_mark.write();
+    device.cancel_yield();
+
+    // check if we have an auth script to try
+    let auth_script = match &device.config.peer_auth_script {
+        Some(auth_script) => auth_script,
+        None => return
+    };
+
+    let pub_key = &X25519PublicKey::from(&hh.peer_static_public[..]);
+
+    // check if we have a peer already and return
+    if device.peers.get(pub_key).is_some() {
+        return;
+    }
+
+    // call auth script: this MUST return ip in CIDR format x.x.x.x/32
+    let external_auth = Command::new(auth_script)
+                        .arg("wg")
+                        .arg("--pubkey")
+                        .arg(base64::encode(pub_key.as_bytes()))
+                        .output();
+
+    // response should contain the allowed ip + preshared-key seperated by new lines
+    if let Ok(out) = external_auth {
+        let auth_data = String::from_utf8(out.stdout).unwrap_or(String::from(""));
+        if auth_data.len() > 0 {
+            let auth_parts: Vec<&str> = auth_data.split("\n").collect();
+            if auth_parts.len() >= 2 {
+                let ips: Vec<&str> = &auth_parts[0].split(",").collect();
+
+                let allowed_ips_vec: Vec<AllowedIP>;
+
+                for i in ips {
+                    allowed_ips_vec.push(AllowedIP::from_str(i).ok())
+                }
+
+                // parse the pre shared key
+                match auth_parts[1].parse::<X25519PublicKey>() {
+                    Ok(preshared_key) => {
+                        let psk = Some(make_array(preshared_key.as_bytes()));
+                        match ip {
+                            Some(allowed_ip) => {
+                                set_peer(
+                                    &mut device,
+                                    X25519PublicKey::from(&hh.peer_static_public[..]),
+                                    allowed_ips_vec,
+                                    psk,
+                                );
+                            },
+                            None => return
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("could not parse psk: {:?}", e);
+                        return
+                    },
+                }
+            }
+        }
+    }
+}
+
+fn set_peer(
+    d: &mut Device,
+    pub_key: X25519PublicKey,
+    allowed_ips: Vec<AllowedIP>,
+    preshared_key: Option<[u8; 32]>,
+){
+
+    let remove = false;
+    let replace_ips = false;
+    let endpoint = None;
+    let keepalive = None;
+
+    d.update_peer(
+        pub_key,
+        remove,
+        replace_ips,
+        endpoint,
+        allowed_ips,
+        keepalive,
+        preshared_key,
+    );
+
 }
