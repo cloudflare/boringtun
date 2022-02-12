@@ -132,7 +132,7 @@ impl RateLimiter {
         let (message_type, rest) = dst.split_at_mut(4);
         let (receiver_index, rest) = rest.split_at_mut(4);
         let (nonce, rest) = rest.split_at_mut(24);
-        let (mut encrypted_cookie, _) = rest.split_at_mut(16 + 16);
+        let (encrypted_cookie, _) = rest.split_at_mut(16 + 16);
 
         // msg.message_type = 3
         // msg.reserved_zero = { 0, 0, 0 }
@@ -142,10 +142,10 @@ impl RateLimiter {
         nonce.copy_from_slice(&self.nonce()[..]);
 
         ChaCha20Poly1305::new_aead(&self.cookie_key).xseal(
-            &nonce,
+            nonce,
             mac1,
             &cookie[..],
-            &mut encrypted_cookie,
+            encrypted_cookie,
         );
 
         Ok(&mut dst[..super::COOKIE_REPLY_SZ])

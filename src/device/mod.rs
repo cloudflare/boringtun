@@ -613,7 +613,7 @@ impl Device {
 
                     let peer = match &parsed_packet {
                         Packet::HandshakeInit(p) => {
-                            parse_handshake_anon(&private_key, &public_key, &p)
+                            parse_handshake_anon(private_key, public_key, p)
                                 .ok()
                                 .and_then(|hh| {
                                     d.peers

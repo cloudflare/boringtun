@@ -124,7 +124,7 @@ pub extern "C" fn x25519_key_to_hex(key: x25519_key) -> *const c_char {
 /// Frees memory of the string given by `x25519_key_to_hex` or `x25519_key_to_base64`
 #[no_mangle]
 pub unsafe extern "C" fn x25519_key_to_str_free(stringified_key: *mut c_char) {
-    CString::from_raw(stringified_key);
+    let _ = CString::from_raw(stringified_key);
 }
 
 /// Check if the input C-string represents a valid base64 encoded x25519 key.

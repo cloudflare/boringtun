@@ -386,7 +386,7 @@ impl<'a, H> EventGuard<'a, H> {
     }
 
     pub fn fd(&self) -> i32 {
-        return self.event.fd;
+        self.event.fd
     }
 
     /// Change the event flags to enable or disable notifying when the fd is writable
