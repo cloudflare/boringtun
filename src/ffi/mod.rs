@@ -177,7 +177,7 @@ pub unsafe extern "C" fn new_tunnel(
     };
 
     let c_str = CStr::from_ptr(preshared_key);
-    let preshared_key = if preshared_key == null() {
+    let preshared_key = if preshared_key.is_null() {
         None
     } else {
         if let Ok(string) = c_str.to_str() {
