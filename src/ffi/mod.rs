@@ -19,7 +19,7 @@ use std::mem;
 use std::os::raw::c_char;
 use std::panic;
 use std::ptr;
-use std::ptr::{null, null_mut};
+use std::ptr::null_mut;
 use std::slice;
 use std::sync::{Arc, Once};
 
@@ -176,10 +176,11 @@ pub unsafe extern "C" fn new_tunnel(
         Ok(string) => string,
     };
 
-    let c_str = CStr::from_ptr(preshared_key);
     let preshared_key = if preshared_key.is_null() {
         None
     } else {
+        let c_str = CStr::from_ptr(preshared_key);
+
         if let Ok(string) = c_str.to_str() {
             if let Ok(key) = string.parse::<X25519PublicKey>() {
                 Some(make_array(key.as_bytes()))
