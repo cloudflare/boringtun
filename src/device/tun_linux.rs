@@ -74,9 +74,9 @@ impl TunSocket {
     pub fn new(name: &str) -> Result<TunSocket, Error> {
         // If the provided name appears to be a FD, use that.
         let provided_fd = name.parse::<i32>();
-        if provided_fd.is_ok() {
+        if let Ok(fd) = provided_fd {
             return Ok(TunSocket {
-                fd: provided_fd.unwrap(),
+                fd,
                 name: name.to_string(),
             });
         }
