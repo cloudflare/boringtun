@@ -132,6 +132,7 @@ pub unsafe extern "C" fn create_new_tunnel(
     _class: JClass,
     arg_secret_key: JString,
     arg_public_key: JString,
+    arg_preshared_key: JString,
     keep_alive: jshort,
     index: jint,
 ) -> jlong {
@@ -145,13 +146,17 @@ pub unsafe extern "C" fn create_new_tunnel(
         Err(_) => return 0,
     };
 
+    let preshared_key = match env.get_string_utf_chars(arg_preshared_key) {
+        Ok(v) => v,
+        Err(_) => return 0,
+    };
+
     let tunnel = new_tunnel(
         secret_key,
         public_key,
+        preshared_key,
         keep_alive as u16,
         index as u32,
-        Some(log_print),
-        3,
     );
 
     if tunnel.is_null() {
