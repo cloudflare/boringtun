@@ -10,7 +10,7 @@ use jni::strings::JNIStr;
 use jni::sys::{jbyteArray, jint, jlong, jshort, jstring};
 use jni::JNIEnv;
 
-use crate::crypto::x25519::X25519SecretKey;
+use crate::crypto::X25519SecretKey;
 use std::str::FromStr;
 
 use crate::ffi::new_tunnel;
