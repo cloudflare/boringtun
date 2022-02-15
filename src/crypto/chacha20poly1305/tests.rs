@@ -1,121 +1,118 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#[cfg(test)]
-mod tests {
+extern crate hex;
+use super::ChaCha20Poly1305;
 
-    extern crate hex;
-    use super::super::ChaCha20Poly1305;
+struct Chacha20poly1305TestVector {
+    pt: &'static str,
+    aad: &'static str,
+    key: &'static str,
+    nonce: &'static str,
+    out: &'static str,
+}
 
-    struct Chacha20poly1305TestVector {
-        pt: &'static str,
-        aad: &'static str,
-        key: &'static str,
-        nonce: &'static str,
-        out: &'static str,
-    }
+#[test]
+fn chacha20_poly1305_test_vectors() {
+    for (i, v) in CHACHA20_POLY1305_TEST_VECTORS.iter().enumerate() {
+        let pt = hex::decode(v.pt).unwrap();
+        let aad = hex::decode(v.aad).unwrap();
+        let key = hex::decode(v.key).unwrap();
+        let nonce = hex::decode(v.nonce).unwrap();
+        let out = hex::decode(v.out).unwrap();
 
-    #[test]
-    fn chacha20_poly1305_test_vectors() {
-        for (i, v) in CHACHA20_POLY1305_TEST_VECTORS.iter().enumerate() {
-            let pt = hex::decode(v.pt).unwrap();
-            let aad = hex::decode(v.aad).unwrap();
-            let key = hex::decode(v.key).unwrap();
-            let nonce = hex::decode(v.nonce).unwrap();
-            let out = hex::decode(v.out).unwrap();
-
-            let mut ct = Vec::with_capacity(out.len());
-            let mut dec = Vec::with_capacity(pt.len());
-            unsafe {
-                ct.set_len(out.len());
-                dec.set_len(pt.len());
-            }
-
-            println!(
-                "Test vector #{}, , pt.len():{}, ct.len():{}, aad.len():{}",
-                i,
-                pt.len(),
-                ct.len(),
-                aad.len(),
-            );
-
-            let n = ChaCha20Poly1305::new_aead(&key).seal(&nonce, &aad, &pt, &mut ct);
-            assert_eq!(n, out.len());
-            assert_eq!(ct[..n], out[..]);
-
-            let dec = ChaCha20Poly1305::new_aead(&key)
-                .open(&nonce, &aad, &ct, &mut dec)
-                .unwrap();
-
-            assert_eq!(dec.len(), pt.len());
-            assert_eq!(dec[..], pt[..]);
+        let mut ct = Vec::with_capacity(out.len());
+        let mut dec = Vec::with_capacity(pt.len());
+        unsafe {
+            ct.set_len(out.len());
+            dec.set_len(pt.len());
         }
+
+        println!(
+            "Test vector #{}, , pt.len():{}, ct.len():{}, aad.len():{}",
+            i,
+            pt.len(),
+            ct.len(),
+            aad.len(),
+        );
+
+        let n = ChaCha20Poly1305::new_aead(&key).seal(&nonce, &aad, &pt, &mut ct);
+        assert_eq!(n, out.len());
+        assert_eq!(ct[..n], out[..]);
+
+        let dec = ChaCha20Poly1305::new_aead(&key)
+            .open(&nonce, &aad, &ct, &mut dec)
+            .unwrap();
+
+        assert_eq!(dec.len(), pt.len());
+        assert_eq!(dec[..], pt[..]);
     }
+}
 
-    #[test]
-    fn xchacha20_poly1305_test_vector() {
-        for (i, v) in XCHACHA20_POLY1305_TEST_VECTORS.iter().enumerate() {
-            let pt = hex::decode(v.pt).unwrap();
-            let aad = hex::decode(v.aad).unwrap();
-            let key = hex::decode(v.key).unwrap();
-            let nonce = hex::decode(v.nonce).unwrap();
-            let out = hex::decode(v.out).unwrap();
+#[test]
+fn xchacha20_poly1305_test_vector() {
+    for (i, v) in XCHACHA20_POLY1305_TEST_VECTORS.iter().enumerate() {
+        let pt = hex::decode(v.pt).unwrap();
+        let aad = hex::decode(v.aad).unwrap();
+        let key = hex::decode(v.key).unwrap();
+        let nonce = hex::decode(v.nonce).unwrap();
+        let out = hex::decode(v.out).unwrap();
 
-            let mut ct = Vec::with_capacity(out.len());
-            let mut dec = Vec::with_capacity(pt.len());
-            unsafe {
-                ct.set_len(out.len());
-                dec.set_len(pt.len());
-            }
-
-            println!(
-                "Test vector #{}, , pt.len():{}, ct.len():{}, aad.len():{}",
-                i,
-                pt.len(),
-                ct.len(),
-                aad.len(),
-            );
-
-            let n = ChaCha20Poly1305::new_aead(&key).xseal(&nonce, &aad, &pt, &mut ct);
-            assert_eq!(n, out.len());
-            assert_eq!(ct[..n], out[..]);
-
-            let dec = ChaCha20Poly1305::new_aead(&key)
-                .xopen(&nonce, &aad, &ct, &mut dec)
-                .unwrap();
-
-            assert_eq!(dec.len(), pt.len());
-            assert_eq!(dec[..], pt[..]);
+        let mut ct = Vec::with_capacity(out.len());
+        let mut dec = Vec::with_capacity(pt.len());
+        unsafe {
+            ct.set_len(out.len());
+            dec.set_len(pt.len());
         }
+
+        println!(
+            "Test vector #{}, , pt.len():{}, ct.len():{}, aad.len():{}",
+            i,
+            pt.len(),
+            ct.len(),
+            aad.len(),
+        );
+
+        let n = ChaCha20Poly1305::new_aead(&key).xseal(&nonce, &aad, &pt, &mut ct);
+        assert_eq!(n, out.len());
+        assert_eq!(ct[..n], out[..]);
+
+        let dec = ChaCha20Poly1305::new_aead(&key)
+            .xopen(&nonce, &aad, &ct, &mut dec)
+            .unwrap();
+
+        assert_eq!(dec.len(), pt.len());
+        assert_eq!(dec[..], pt[..]);
     }
+}
 
-    #[test]
-    fn chacha20_poly1305_self_validation() {
-        let key = [
-            0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7,
-            8, 9, 0, 1,
-        ];
-        let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1];
+#[test]
+fn chacha20_poly1305_self_validation() {
+    let key = [
+        0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+        0, 1,
+    ];
+    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1];
 
-        for len in 0..1024 {
-            let pt = vec![0; len];
-            let aad = vec![0; len];
-            let mut ct = vec![0; len + 16];
-            let mut dec = vec![0; len];
+    for len in 0..1024 {
+        let pt = vec![0; len];
+        let aad = vec![0; len];
+        let mut ct = vec![0; len + 16];
+        let mut dec = vec![0; len];
 
-            let n = ChaCha20Poly1305::new_aead(&key).seal(&nonce, &aad, &pt, &mut ct);
-            assert_eq!(n, ct.len());
+        let n = ChaCha20Poly1305::new_aead(&key).seal(&nonce, &aad, &pt, &mut ct);
+        assert_eq!(n, ct.len());
 
-            let dec = ChaCha20Poly1305::new_aead(&key)
-                .open(&nonce, &aad, &ct, &mut dec)
-                .unwrap();
+        let dec = ChaCha20Poly1305::new_aead(&key)
+            .open(&nonce, &aad, &ct, &mut dec)
+            .unwrap();
 
-            assert_eq!(dec.len(), pt.len());
-            assert_eq!(dec[..], pt[..]);
-        }
+        assert_eq!(dec.len(), pt.len());
+        assert_eq!(dec[..], pt[..]);
     }
+}
 
-    static XCHACHA20_POLY1305_TEST_VECTORS: [Chacha20poly1305TestVector; 2] = [
+static XCHACHA20_POLY1305_TEST_VECTORS: [Chacha20poly1305TestVector; 2] = [
         Chacha20poly1305TestVector {
             pt: "000000000000000000000000000000",
             aad: "",
@@ -132,7 +129,7 @@ mod tests {
         },
     ];
 
-    static CHACHA20_POLY1305_TEST_VECTORS: [Chacha20poly1305TestVector; 47] = [
+static CHACHA20_POLY1305_TEST_VECTORS: [Chacha20poly1305TestVector; 47] = [
         Chacha20poly1305TestVector {
             pt: "",
             aad: "",
@@ -463,4 +460,3 @@ mod tests {
             out: "2c125232a59879aee36cacc4aca5085a4688c4f776667a8fbd86862b5cfb1d57c976688fdd652eafa2b88b1b8e358aa2110ff6ef13cdc1ceca9c9f087c35c38d89d6fbd8de89538070f17916ecb19ca3ef4a1c834f0bdaa1df62aaabef2e117106787056c909e61ecd208357dd5c363f11c5d6cf24992cc873cf69f59360a820fcf290bd90b2cab24c47286acb4e1033962b6d41e562a206a94796a8ab1c6b8bade804ff9bdf5ba6062d2c1f8fe0f4dfc05720bd9a612b92c26789f9f6a7ce43f5e8e3aee99a9cd7d6c11eaa611983c36935b0dda57d898a60a0ab7c4b54",
         },
     ];
-}

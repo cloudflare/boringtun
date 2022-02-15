@@ -25,6 +25,7 @@
 //! assert!(validate_mac(key, msg, expected_mac));
 //! ```
 
+#[cfg(test)]
 mod tests;
 
 use crate::noise::errors::WireGuardError;

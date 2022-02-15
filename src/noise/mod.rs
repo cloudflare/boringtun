@@ -6,6 +6,7 @@ pub mod handshake;
 pub mod rate_limiter;
 
 mod session;
+#[cfg(test)]
 mod tests;
 mod timers;
 

@@ -5,6 +5,7 @@ pub mod allowed_ips;
 pub mod api;
 mod dev_lock;
 pub mod drop_privileges;
+#[cfg(test)]
 mod integration_tests;
 pub mod peer;
 
