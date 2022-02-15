@@ -21,12 +21,8 @@ fn chacha20_poly1305_test_vectors() {
         let nonce = hex::decode(v.nonce).unwrap();
         let out = hex::decode(v.out).unwrap();
 
-        let mut ct = Vec::with_capacity(out.len());
-        let mut dec = Vec::with_capacity(pt.len());
-        unsafe {
-            ct.set_len(out.len());
-            dec.set_len(pt.len());
-        }
+        let mut ct = vec![0_u8; out.len()];
+        let mut dec = vec![0_u8; pt.len()];
 
         println!(
             "Test vector #{}, , pt.len():{}, ct.len():{}, aad.len():{}",
@@ -58,12 +54,8 @@ fn xchacha20_poly1305_test_vector() {
         let nonce = hex::decode(v.nonce).unwrap();
         let out = hex::decode(v.out).unwrap();
 
-        let mut ct = Vec::with_capacity(out.len());
-        let mut dec = Vec::with_capacity(pt.len());
-        unsafe {
-            ct.set_len(out.len());
-            dec.set_len(pt.len());
-        }
+        let mut ct = vec![0_u8; out.len()];
+        let mut dec = vec![0_u8; pt.len()];
 
         println!(
             "Test vector #{}, , pt.len():{}, ct.len():{}, aad.len():{}",

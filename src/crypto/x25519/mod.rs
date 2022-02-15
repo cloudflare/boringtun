@@ -13,6 +13,7 @@ use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
 use std::str::FromStr;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[cfg(not(target_arch = "arm"))]
 pub use ring::rand::{SecureRandom, SystemRandom};
@@ -49,7 +50,7 @@ pub mod SystemRandom {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
 /// A secret X25519 key.
 pub struct X25519SecretKey {
     internal: [u8; 32],
@@ -124,15 +125,8 @@ impl FromStr for X25519SecretKey {
     }
 }
 
-impl Drop for X25519SecretKey {
-    fn drop(&mut self) {
-        // Force zero out of the memory on Drop
-        unsafe { std::ptr::write_volatile(&mut self.internal, [0u8; 32]) }
-    }
-}
-
 #[repr(C)]
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Zeroize, ZeroizeOnDrop)]
 /// A public X25519, derived from a secret key.
 pub struct X25519PublicKey {
     internal: [u8; 32],
@@ -156,13 +150,6 @@ impl<'a> From<&'a [u8]> for X25519PublicKey {
         let mut internal = [0u8; 32];
         internal[..].copy_from_slice(slice);
         X25519PublicKey { internal }
-    }
-}
-
-impl Drop for X25519PublicKey {
-    fn drop(&mut self) {
-        // Force zero out of the memory on Drop
-        unsafe { std::ptr::write_volatile(&mut self.internal, [0u8; 32]) }
     }
 }
 
