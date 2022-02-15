@@ -4,6 +4,7 @@
 //! ChaCha20-Poly1305 authenticated encryption.
 
 mod poly1305;
+#[cfg(test)]
 mod tests;
 
 use self::poly1305::Poly1305;

@@ -3,6 +3,7 @@
 
 //! Elliptic-curve Diffie-Hellman exchange over Curve25519.
 
+#[cfg(test)]
 mod tests;
 
 use crate::noise::errors::WireGuardError;

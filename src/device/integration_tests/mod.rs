@@ -214,15 +214,13 @@ mod tests {
             let mut len = 0usize;
 
             // Read response code
-            if let Ok(_) = reader.read_line(&mut line) {
-                if !line.starts_with("HTTP/1.1 200") {
-                    return response;
-                }
+            if reader.read_line(&mut line).is_ok() && !line.starts_with("HTTP/1.1 200") {
+                return response;
             }
             line.clear();
 
             // Read headers
-            while let Ok(_) = reader.read_line(&mut line) {
+            while reader.read_line(&mut line).is_ok() {
                 if line.trim() == "" {
                     break;
                 }
@@ -248,7 +246,7 @@ mod tests {
             let mut buf = [0u8; 256];
             while len > 0 {
                 let to_read = len.min(buf.len());
-                if let Err(_) = reader.read_exact(&mut buf[..to_read]) {
+                if reader.read_exact(&mut buf[..to_read]).is_err() {
                     return response;
                 }
                 response.push_str(&String::from_utf8_lossy(&buf[..to_read]));
