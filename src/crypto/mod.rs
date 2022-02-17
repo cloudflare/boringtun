@@ -11,7 +11,4 @@ pub use blake2s::{constant_time_mac_check, Blake2s};
 pub use chacha20poly1305::ChaCha20Poly1305;
 pub use x25519::{X25519PublicKey, X25519SecretKey};
 
-#[cfg(not(target_arch = "arm"))]
 pub use ring::rand::SystemRandom;
-#[cfg(target_arch = "arm")]
-pub use x25519::SystemRandom;
