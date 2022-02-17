@@ -2,25 +2,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::PacketData;
-#[cfg(target_arch = "arm")]
-use crate::crypto::ChaCha20Poly1305;
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
-#[cfg(not(target_arch = "arm"))]
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct Session {
     pub(crate) receiving_index: u32,
     sending_index: u32,
-    #[cfg(not(target_arch = "arm"))]
     receiver: LessSafeKey,
-    #[cfg(not(target_arch = "arm"))]
     sender: LessSafeKey,
-    #[cfg(target_arch = "arm")]
-    receiver: ChaCha20Poly1305,
-    #[cfg(target_arch = "arm")]
-    sender: ChaCha20Poly1305,
     sending_key_counter: AtomicUsize,
     receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
 }
@@ -163,16 +154,10 @@ impl Session {
         Session {
             receiving_index: local_index,
             sending_index: peer_index,
-            #[cfg(not(target_arch = "arm"))]
             receiver: LessSafeKey::new(
                 UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
             ),
-            #[cfg(not(target_arch = "arm"))]
             sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
-            #[cfg(target_arch = "arm")]
-            receiver: ChaCha20Poly1305::new_aead(&receiving_key[..]),
-            #[cfg(target_arch = "arm")]
-            sender: ChaCha20Poly1305::new_aead(&sending_key[..]),
             sending_key_counter: AtomicUsize::new(0),
             receiving_key_counter: Mutex::new(Default::default()),
         }
@@ -221,7 +206,6 @@ impl Session {
         counter.copy_from_slice(&sending_key_counter.to_le_bytes());
 
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
-        #[cfg(not(target_arch = "arm"))]
         let n = {
             let mut nonce = [0u8; 12];
             nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
@@ -238,14 +222,6 @@ impl Session {
                 })
                 .unwrap()
         };
-
-        #[cfg(target_arch = "arm")]
-        let n = self.sender.seal_wg(
-            sending_key_counter,
-            &[],
-            src,
-            &mut data[..src.len() + AEAD_SIZE],
-        );
 
         &mut dst[..DATA_OFFSET + n]
     }
@@ -270,7 +246,6 @@ impl Session {
         // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
         self.receiving_counter_quick_check(packet.counter)?;
 
-        #[cfg(not(target_arch = "arm"))]
         let ret = {
             let mut nonce = [0u8; 12];
             nonce[4..12].copy_from_slice(&packet.counter.to_le_bytes());
@@ -283,14 +258,6 @@ impl Session {
                 )
                 .map_err(|_| WireGuardError::InvalidAeadTag)?
         };
-
-        #[cfg(target_arch = "arm")]
-        let ret = self.receiver.open_wg(
-            packet.counter,
-            &[],
-            packet.encrypted_encapsulated_packet,
-            dst,
-        )?;
 
         // After decryption is done, check counter again, and mark as received
         self.receiving_counter_mark(packet.counter)?;

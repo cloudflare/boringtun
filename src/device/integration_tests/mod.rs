@@ -9,8 +9,7 @@ mod tests {
     use crate::device::{DeviceConfig, DeviceHandle};
     use base64::encode as base64encode;
     use hex::encode;
-    #[cfg(not(target_arch = "arm"))]
-    pub use ring::rand::SecureRandom;
+    use ring::rand::SecureRandom;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::net::UnixStream;

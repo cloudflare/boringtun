@@ -18,6 +18,7 @@ tracing = "0.1.29"
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
 zeroize = { version = "1.5.2", features = ["zeroize_derive"]}
+ring = "0.16"
 
 [dependencies.tracing-subscriber]
 version = "0.3"
@@ -29,9 +30,6 @@ optional = true
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
-
-[target.'cfg(not(target_arch="arm"))'.dependencies]
-ring = "0.16"
 
 [target.'cfg(not(any(target_os="windows", target_os="ios", target_os="android")))'.dependencies]
 clap = { version = "2.33", default-features = false, features = ["suggestions"], optional = true }
