@@ -44,6 +44,10 @@ jni = "0.19.0"
 default = ["build-binary"]
 build-binary = ["tracing-subscriber", "tracing-appender", "clap", "daemonize"]
 
+[profile.release]
+lto = true        # Enable full link-time optimization.
+codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
+
 [lib]
 crate-type = ["lib", "staticlib", "dylib"]
 
