@@ -306,6 +306,8 @@ impl Device {
 
         // Update an existing peer
         if self.peers.get(&pub_key).is_some() {
+            let peer = self.peers.get(&pub_key).unwrap()
+
             if peer.endpoint() != endpoint || peer.allowed_ips() != allowed_ips || peer.keepalive() != keepalive || peer.preshared_key() != preshared_key {
                 self.remove_peer(&pub_key);
             } else {
