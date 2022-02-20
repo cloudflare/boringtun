@@ -306,8 +306,20 @@ impl Device {
 
         // Update an existing peer
         if self.peers.get(&pub_key).is_some() {
-            // We already have a peer, we need to merge the existing config into the newly created one
-            panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
+            let mut peer = self.peers.get_mut(&pub_key).unwrap();
+            if peer.endpoint() != endpoint {
+                peer.set_endpoint(endpoint);
+            }
+            if peer.allowed_ips != allowed_ips {
+                peer.allowed_ips = allowed_ips;
+            }
+            if peer.keepalive != keepalive {
+                peer.keepalive = keepalive;
+            }
+            if peer.preshared_key != preshared_key {
+                peer.preshared_key = preshared_key;
+            }
+            return;
         }
 
         let next_index = self.next_index();
