@@ -306,20 +306,11 @@ impl Device {
 
         // Update an existing peer
         if self.peers.get(&pub_key).is_some() {
-            let mut peer = self.peers.get_mut(&pub_key).unwrap();
-            if peer.endpoint() != endpoint {
-                peer.set_endpoint(endpoint);
+            if peer.endpoint() != endpoint || peer.allowed_ips() != allowed_ips || peer.keepalive() != keepalive || peer.preshared_key() != preshared_key {
+                self.remove_peer(&pub_key);
+            } else {
+                return;
             }
-            if peer.allowed_ips != allowed_ips {
-                peer.allowed_ips = allowed_ips;
-            }
-            if peer.keepalive != keepalive {
-                peer.keepalive = keepalive;
-            }
-            if peer.preshared_key != preshared_key {
-                peer.preshared_key = preshared_key;
-            }
-            return;
         }
 
         let next_index = self.next_index();
