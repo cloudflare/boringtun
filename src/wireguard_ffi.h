@@ -21,14 +21,6 @@ enum result_type
     WRITE_TO_TUNNEL_IPV6 = 6,
 };
 
-enum log_level
-{
-    ERR = 0,
-    INFO = 1,
-    DBG = 2,
-    TRACE = 3,
-};
-
 struct wireguard_result
 {
     enum result_type op;
@@ -69,9 +61,7 @@ struct wireguard_tunnel *new_tunnel(const char *static_private,
                                     const char *server_static_public,
                                     const char *preshared_key,
                                     uint16_t keep_alive, // Keep alive interval in seconds
-                                    uint32_t index,      // The 24bit index prefix to be used for session indexes
-                                    void (*log_printer)(const char *),
-                                    enum log_level log_level);
+                                    uint32_t index);      // The 24bit index prefix to be used for session indexes
 
 // Deallocate the tunnel
 void tunnel_free(struct wireguard_tunnel *);
