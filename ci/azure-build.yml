@@ -20,10 +20,10 @@ steps:
     displayName: 'Library integration tests'
   - script: |
       export PATH=$PATH:$HOME/.cargo/bin
-      cargo build --bin boringtun
+      cargo build --bin boringtun-cli
     displayName: 'Build executable'
   - ${{ if eq(parameters.runBinaryTests, 'true') }}:
     - script: |
         export PATH=$PATH:$HOME/.cargo/bin
-        cargo test --bin boringtun -- --test-threads=1
+        cargo test --bin boringtun-cli -- --test-threads=1
       displayName: 'Test executable'
