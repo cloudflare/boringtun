@@ -1,59 +1,6 @@
-[package]
-name = "boringtun"
-description = "an implementation of the WireGuard® protocol designed for portability and speed"
-version = "0.4.0"
-authors = ["Noah Kennedy <nkennedy@cloudflare.com>", "Andy Grover <agrover@cloudflare.com>"]
-license = "BSD-3-Clause"
-repository = "https://github.com/cloudflare/boringtun"
-documentation = "https://docs.rs/boringtun/0.4.0/boringtun/"
-edition = "2018"
-
-[dependencies]
-base64 = "0.13"
-hex = "0.4"
-untrusted = "0.9.0"
-libc = "0.2"
-parking_lot = "0.12"
-tracing = "0.1.29"
-ip_network = "0.4.1"
-ip_network_table = "0.2.0"
-zeroize = { version = "1.5.2", features = ["zeroize_derive"]}
-ring = "0.16"
-
-[dependencies.tracing-subscriber]
-version = "0.3"
-optional = true
-
-[dependencies.tracing-appender]
-version = "0.2.0"
-optional = true
-
-[dev-dependencies]
-tracing-subscriber = "0.3"
-
-[target.'cfg(not(any(target_os="windows", target_os="ios", target_os="android")))'.dependencies]
-clap = { version = "2.33", default-features = false, features = ["suggestions"], optional = true }
-daemonize = { version = "0.4.1", optional = true }
-
-[target.'cfg(target_os="android")'.dependencies]
-jni = "0.19.0"
-
-[features]
-default = ["build-binary"]
-build-binary = ["tracing-subscriber", "tracing-appender", "clap", "daemonize"]
+[workspace]
+members = ["boringtun", "boringtun-cli"]
 
 [profile.release]
 lto = true        # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
-
-[lib]
-crate-type = ["lib", "staticlib", "dylib"]
-
-[[bin]]
-name = "boringtun"
-path = "src/main.rs"
-required-features = ["build-binary"]
-
-[[example]]
-name = "benchmarks"
-path = "src/benchmarks_example.rs"

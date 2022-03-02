@@ -1,16 +1,8 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-pub mod crypto;
-
-#[cfg(not(target_os = "windows"))]
-pub mod device;
-
-pub mod ffi;
-pub mod noise;
-
-use crate::device::drop_privileges::drop_privileges;
-use crate::device::{DeviceConfig, DeviceHandle};
+use boringtun::device::drop_privileges::drop_privileges;
+use boringtun::device::{DeviceConfig, DeviceHandle};
 use clap::{value_t, App, Arg};
 use daemonize::Daemonize;
 use std::fs::File;
@@ -20,7 +12,7 @@ use std::process::exit;
 fn check_tun_name(_v: String) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        if device::tun::parse_utun_name(&_v).is_ok() {
+        if boringtun::device::tun::parse_utun_name(&_v).is_ok() {
             Ok(())
         } else {
             Err("Tunnel name must have the format 'utun[0-9]+', use 'utun' for automatic assignment".to_owned())
