@@ -271,21 +271,22 @@ fn api_set_peer(
     let mut replace_ips = false;
     let mut endpoint = None;
     let mut keepalive = None;
-    let mut preshared_key = None;
+    let mut public_key = pub_key;
+    let mut preshared_key = None;    
     let mut allowed_ips: Vec<AllowedIP> = vec![];
-
     while reader.read_line(&mut cmd).is_ok() {
         cmd.pop(); // remove newline if any
         if cmd.is_empty() {
             d.update_peer(
-                pub_key,
+                public_key,
                 remove,
                 replace_ips,
                 endpoint,
-                allowed_ips,
+                allowed_ips.as_slice(),
                 keepalive,
                 preshared_key,
             );
+            allowed_ips.clear(); //clear the vector content after update
             return 0; // Done
         }
         {
@@ -293,9 +294,7 @@ fn api_set_peer(
             if parsed_cmd.len() != 2 {
                 return EPROTO;
             }
-
             let (key, val) = (parsed_cmd[0], parsed_cmd[1]);
-
             match key {
                 "remove" => match val.parse::<bool>() {
                     Ok(true) => remove = true,
@@ -326,16 +325,17 @@ fn api_set_peer(
                 "public_key" => {
                     // Indicates a new peer section. Commit changes for current peer, and continue to next peer
                     d.update_peer(
-                        pub_key,
+                        public_key,
                         remove,
                         replace_ips,
                         endpoint,
-                        allowed_ips,
+                        allowed_ips.as_slice(),
                         keepalive,
                         preshared_key,
                     );
+                    allowed_ips.clear(); //clear the vector content after update
                     match val.parse::<X25519PublicKey>() {
-                        Ok(key) => return api_set_peer(reader, d, key),
+                        Ok(key) => public_key = key,
                         Err(_) => return EINVAL,
                     }
                 }
@@ -347,6 +347,6 @@ fn api_set_peer(
             }
         }
         cmd.clear();
-    }
+    }    
     0
 }
