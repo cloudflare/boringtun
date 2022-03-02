@@ -6,7 +6,7 @@ steps:
   - bash: |
       set -ex
       dst=$BUILD_ARTIFACTSTAGINGDIRECTORY
-      cp ${{ parameters.artifacts }}/boringtun $dst/
+      cp ${{ parameters.artifacts }}/boringtun-cli $dst/
     displayName: Create distribution tarball
   - task: PublishPipelineArtifact@0
     inputs:
