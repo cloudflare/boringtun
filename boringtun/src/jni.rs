@@ -146,9 +146,13 @@ pub unsafe extern "C" fn create_new_tunnel(
         Err(_) => return 0,
     };
 
-    let preshared_key = match env.get_string_utf_chars(arg_preshared_key) {
-        Ok(v) => v,
-        Err(_) => return 0,
+    let preshared_key = if arg_preshared_key.is_null() {
+        ptr::null_mut()
+    } else {
+        match env.get_string_utf_chars(arg_preshared_key) {
+            Ok(v) => v,
+            Err(_) => return 0,
+        }
     };
 
     let tunnel = new_tunnel(
