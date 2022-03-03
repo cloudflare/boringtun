@@ -297,7 +297,7 @@ impl Device {
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
     ) {
-        let pub_key = Arc::new(pub_key);        
+        let pub_key = Arc::new(pub_key);
         if remove {
             // Completely remove a peer
             return self.remove_peer(&pub_key);
@@ -332,7 +332,8 @@ impl Device {
         self.peers_by_idx.insert(next_index, Arc::clone(&peer));
 
         for AllowedIP { addr, cidr } in allowed_ips {
-            self.peers_by_ip.insert(*addr, *cidr as _, Arc::clone(&peer));
+            self.peers_by_ip
+                .insert(*addr, *cidr as _, Arc::clone(&peer));
         }
 
         tracing::info!("Peer added");

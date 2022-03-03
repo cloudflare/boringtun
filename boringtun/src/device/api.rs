@@ -272,7 +272,7 @@ fn api_set_peer(
     let mut endpoint = None;
     let mut keepalive = None;
     let mut public_key = pub_key;
-    let mut preshared_key = None;    
+    let mut preshared_key = None;
     let mut allowed_ips: Vec<AllowedIP> = vec![];
     while reader.read_line(&mut cmd).is_ok() {
         cmd.pop(); // remove newline if any
@@ -347,6 +347,6 @@ fn api_set_peer(
             }
         }
         cmd.clear();
-    }    
+    }
     0
 }
