@@ -165,7 +165,7 @@ jobs:
           mkdir -p tmp/$name
           cp README.md \
             LICENSE.md \
-            tmp/$src/boringtun \
+            tmp/$src/boringtun-cli \
             tmp/$name/
           chmod +x tmp/$name/boringtun*
           tar czvf gh-release/$name.tar.gz -C tmp $name
