@@ -7,7 +7,7 @@ mod poly1305;
 #[cfg(test)]
 mod tests;
 
-use self::poly1305::Poly1305;
+pub use self::poly1305::Poly1305;
 use crate::noise::errors::WireGuardError;
 use crate::noise::make_array;
 use std::ops::AddAssign;
