@@ -3,12 +3,12 @@
 
 use boringtun::device::drop_privileges::drop_privileges;
 use boringtun::device::{DeviceConfig, DeviceHandle};
-use clap::{Command, Arg};
+use clap::{Arg, Command};
 use daemonize::Daemonize;
-use tracing::Level;
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
 use std::process::exit;
+use tracing::Level;
 
 fn check_tun_name(_v: String) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -94,8 +94,7 @@ fn main() {
         tun_name = matches.value_of("tun-fd").unwrap();
     }
     let n_threads: usize = matches.value_of_t("threads").unwrap_or_else(|e| e.exit());
-    let log_level: Level =
-        matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
+    let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
 
     // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
