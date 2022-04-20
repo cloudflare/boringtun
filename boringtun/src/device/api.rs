@@ -184,8 +184,8 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
             writeln!(writer, "endpoint={}", addr);
         }
 
-        for (ip, cidr) in p.allowed_ips() {
-            writeln!(writer, "allowed_ip={}/{}", ip, cidr);
+        for AllowedIP { addr, cidr } in p.allowed_ips() {
+            writeln!(writer, "allowed_ip={}/{}", addr, cidr);
         }
 
         if let Some(time) = p.time_since_last_handshake() {
@@ -283,6 +283,7 @@ fn api_set_peer(
 ) -> i32 {
     let mut cmd = String::new();
 
+    let mut update_only = false;
     let mut remove = false;
     let mut replace_ips = false;
     let mut endpoint = None;
@@ -293,8 +294,9 @@ fn api_set_peer(
     while reader.read_line(&mut cmd).is_ok() {
         cmd.pop(); // remove newline if any
         if cmd.is_empty() {
-            d.update_peer(
+            let res = d.update_peer(
                 public_key,
+                update_only,
                 remove,
                 replace_ips,
                 endpoint,
@@ -303,7 +305,7 @@ fn api_set_peer(
                 preshared_key,
             );
             allowed_ips.clear(); //clear the vector content after update
-            return 0; // Done
+            return res.and(Ok(0)).unwrap_or(EINVAL);
         }
         {
             let parsed_cmd: Vec<&str> = cmd.splitn(2, '=').collect();
@@ -312,6 +314,10 @@ fn api_set_peer(
             }
             let (key, val) = (parsed_cmd[0], parsed_cmd[1]);
             match key {
+                "update_only" => match val.parse::<bool>().map(|val| update_only = val) {
+                    Ok(_) => {}
+                    Err(_) => return EINVAL,
+                },
                 "remove" => match val.parse::<bool>() {
                     Ok(true) => remove = true,
                     Ok(false) => remove = false,
@@ -340,8 +346,9 @@ fn api_set_peer(
                 },
                 "public_key" => {
                     // Indicates a new peer section. Commit changes for current peer, and continue to next peer
-                    d.update_peer(
+                    let res = d.update_peer(
                         public_key,
+                        update_only,
                         remove,
                         replace_ips,
                         endpoint,
@@ -350,6 +357,15 @@ fn api_set_peer(
                         preshared_key,
                     );
                     allowed_ips.clear(); //clear the vector content after update
+
+                    // Reset state for the next peer(s)
+                    replace_ips = false;
+                    remove = false;
+                    update_only = false;
+
+                    if res.is_err() {
+                        return EINVAL;
+                    }
                     match val.parse::<KeyBytes>() {
                         Ok(key_bytes) => public_key = key_bytes.0.into(),
                         Err(_) => return EINVAL,

@@ -89,6 +89,8 @@ pub enum Error {
     DropPrivileges(String),
     #[error("API socket error: {0}")]
     ApiSocket(io::Error),
+    #[error("{0:?}")]
+    WireGuard(WireGuardError),
 }
 
 // What the event loop should do after a handler returns
@@ -303,30 +305,73 @@ impl Device {
     fn update_peer(
         &mut self,
         pub_key: x25519::PublicKey,
+        update_only: bool,
         remove: bool,
-        _replace_ips: bool,
+        replace_ips: bool,
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
-    ) {
+    ) -> Result<(), Error> {
         if remove {
-            // Completely remove a peer
-            return self.remove_peer(&pub_key);
+            self.remove_peer(&pub_key);
+
+            return Ok(());
         }
 
-        // Update an existing peer
-        if self.peers.get(&pub_key).is_some() {
-            // We already have a peer, we need to merge the existing config into the newly created one
-            panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
+        if let Some(peer) = self.peers.get(&pub_key) {
+            let peer = Arc::clone(peer);
+
+            if let Some(endpoint) = endpoint {
+                peer.lock().set_endpoint(endpoint);
+            }
+
+            if replace_ips {
+                self.peers_by_ip
+                    .remove(&|p: &Arc<Mutex<Peer>>| Arc::ptr_eq(&peer, p));
+                peer.lock().set_allowed_ips(allowed_ips);
+            } else {
+                peer.lock().add_allowed_ips(allowed_ips);
+            }
+
+            if let Some(keepalive) = keepalive {
+                peer.lock().set_persistent_keepalive(keepalive);
+            }
+
+            if let Some(preshared_key) = preshared_key {
+                peer.lock().set_preshared_key(preshared_key);
+            }
+
+            for AllowedIP { addr, cidr } in allowed_ips {
+                self.peers_by_ip
+                    .insert(*addr, *cidr as _, Arc::clone(&peer));
+            }
+        } else {
+            if update_only {
+                return Ok(());
+            }
+
+            return self
+                .new_peer(pub_key, endpoint, allowed_ips, keepalive, preshared_key)
+                .and(Ok(()));
         }
 
+        Ok(())
+    }
+
+    fn new_peer(
+        &mut self,
+        pub_key: x25519_dalek::PublicKey,
+        endpoint: Option<SocketAddr>,
+        allowed_ips: &[AllowedIP],
+        keepalive: Option<u16>,
+        preshared_key: Option<[u8; 32]>,
+    ) -> Result<Arc<Mutex<Peer>>, Error> {
         let next_index = self.next_index();
         let device_key_pair = self
             .key_pair
             .as_ref()
             .expect("Private key must be set first");
-
         let tunn = Tunn::new(
             device_key_pair.0.clone(),
             pub_key,
@@ -335,11 +380,15 @@ impl Device {
             next_index,
             None,
         )
-        .unwrap();
+        .map_err(Error::WireGuard)?;
+        let peer = Arc::new(Mutex::new(Peer::new(
+            tunn,
+            next_index,
+            endpoint,
+            allowed_ips,
+            preshared_key,
+        )));
 
-        let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);
-
-        let peer = Arc::new(Mutex::new(peer));
         self.peers.insert(pub_key, Arc::clone(&peer));
         self.peers_by_idx.insert(next_index, Arc::clone(&peer));
 
@@ -349,6 +398,8 @@ impl Device {
         }
 
         tracing::info!("Peer added");
+
+        Ok(peer)
     }
 
     pub fn new(name: &str, config: DeviceConfig) -> Result<Device, Error> {

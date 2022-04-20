@@ -198,7 +198,7 @@ impl Tunn {
         persistent_keepalive: Option<u16>,
         index: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
-    ) -> Result<Self, &'static str> {
+    ) -> Result<Self, WireGuardError> {
         let static_public = x25519::PublicKey::from(&static_private);
 
         let tunn = Tunn {
@@ -208,8 +208,7 @@ impl Tunn {
                 peer_static_public,
                 index << 8,
                 preshared_key,
-            )
-            .map_err(|_| "Invalid parameters")?,
+            )?,
             sessions: Default::default(),
             current: Default::default(),
             tx_bytes: Default::default(),
