@@ -21,7 +21,7 @@ const MASK_63BITS: u128 = 0x7fff_ffff_ffff_ffff;
 const MASK_64BITS: u128 = 0xffff_ffff_ffff_ffff;
 
 #[repr(C)]
-#[derive(Debug, Zeroize, ZeroizeOnDrop)]
+#[derive(Debug, PartialEq, Zeroize, ZeroizeOnDrop)]
 /// A secret X25519 key.
 pub struct X25519SecretKey {
     internal: [u8; 32],
