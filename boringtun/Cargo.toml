@@ -8,6 +8,9 @@ repository = "https://github.com/cloudflare/boringtun"
 documentation = "https://docs.rs/boringtun/0.4.0/boringtun/"
 edition = "2018"
 
+[lib]
+crate-type = ["dylib", "staticlib", "rlib"]
+
 [dependencies]
 base64 = "0.13"
 hex = "0.4"
