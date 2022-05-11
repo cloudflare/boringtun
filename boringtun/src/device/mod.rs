@@ -325,7 +325,7 @@ impl Device {
         )
         .unwrap();
 
-        let peer = Peer::new(tunn, next_index, endpoint, &allowed_ips, preshared_key);
+        let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);
 
         let peer = Arc::new(peer);
         self.peers.insert(pub_key, Arc::clone(&peer));

@@ -153,7 +153,7 @@ fn main() {
         use_multi_queue: !matches.is_present("disable-multi-queue"),
     };
 
-    let mut device_handle: DeviceHandle = match DeviceHandle::new(&tun_name, config) {
+    let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config) {
         Ok(d) => d,
         Err(e) => {
             // Notify parent that tunnel initialization failed
