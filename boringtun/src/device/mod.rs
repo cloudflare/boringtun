@@ -449,6 +449,11 @@ impl Device {
 
         let private_key = Arc::new(private_key);
         let public_key = Arc::new(private_key.public_key());
+        let key_pair = Some((private_key.clone(), public_key.clone()));
+
+        if self.key_pair == key_pair {
+            return;
+        }
 
         let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
 
@@ -471,7 +476,7 @@ impl Device {
             }
         }
 
-        self.key_pair = Some((private_key, public_key));
+        self.key_pair = key_pair;
         self.rate_limiter = Some(rate_limiter);
 
         // Remove all the bad peers
