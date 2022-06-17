@@ -289,7 +289,7 @@ impl Tunn {
                     && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                     && timers.want_handshake.swap(false, Ordering::Relaxed)
                 {
-                    tracing::error!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
+                    tracing::warn!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
 
