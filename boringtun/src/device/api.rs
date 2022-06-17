@@ -3,8 +3,9 @@
 
 use super::dev_lock::LockReadGuard;
 use super::drop_privileges::get_saved_ids;
-use super::{make_array, AllowedIP, Device, Error, SocketAddr, X25519PublicKey, X25519SecretKey};
+use super::{AllowedIP, Device, Error, SocketAddr};
 use crate::device::Action;
+use crate::serialization::KeyBytes;
 use hex::encode as encode_hex;
 use libc::*;
 use std::fs::{create_dir, remove_file};
@@ -155,7 +156,7 @@ impl Device {
 fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
-        writeln!(writer, "private_key={}", encode_hex(k.0.as_bytes()));
+        writeln!(writer, "own_public_key={}", encode_hex(k.1.as_bytes()));
     }
 
     if d.listen_port != 0 {
@@ -220,8 +221,10 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
                     let (key, val) = (parsed_cmd[0], parsed_cmd[1]);
 
                     match key {
-                        "private_key" => match val.parse::<X25519SecretKey>() {
-                            Ok(key) => device.set_key(key),
+                        "private_key" => match val.parse::<KeyBytes>() {
+                            Ok(key_bytes) => {
+                                device.set_key(x25519_dalek::StaticSecret::from(key_bytes.0))
+                            }
                             Err(_) => return EINVAL,
                         },
                         "listen_port" => match val.parse::<u16>() {
@@ -243,9 +246,15 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
                             Ok(false) => {}
                             Err(_) => return EINVAL,
                         },
-                        "public_key" => match val.parse::<X25519PublicKey>() {
+                        "public_key" => match val.parse::<KeyBytes>() {
                             // Indicates a new peer section
-                            Ok(key) => return api_set_peer(reader, device, key),
+                            Ok(key_bytes) => {
+                                return api_set_peer(
+                                    reader,
+                                    device,
+                                    x25519_dalek::PublicKey::from(key_bytes.0),
+                                )
+                            }
                             Err(_) => return EINVAL,
                         },
                         _ => return EINVAL,
@@ -263,7 +272,7 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
 fn api_set_peer(
     reader: &mut BufReader<&UnixStream>,
     d: &mut Device,
-    pub_key: X25519PublicKey,
+    pub_key: x25519_dalek::PublicKey,
 ) -> i32 {
     let mut cmd = String::new();
 
@@ -301,8 +310,8 @@ fn api_set_peer(
                     Ok(false) => remove = false,
                     Err(_) => return EINVAL,
                 },
-                "preshared_key" => match val.parse::<X25519PublicKey>() {
-                    Ok(key) => preshared_key = Some(make_array(key.as_bytes())),
+                "preshared_key" => match val.parse::<KeyBytes>() {
+                    Ok(key_bytes) => preshared_key = Some(key_bytes.0),
                     Err(_) => return EINVAL,
                 },
                 "endpoint" => match val.parse::<SocketAddr>() {
@@ -334,8 +343,8 @@ fn api_set_peer(
                         preshared_key,
                     );
                     allowed_ips.clear(); //clear the vector content after update
-                    match val.parse::<X25519PublicKey>() {
-                        Ok(key) => public_key = key,
+                    match val.parse::<KeyBytes>() {
+                        Ok(key_bytes) => public_key = key_bytes.0.into(),
                         Err(_) => return EINVAL,
                     }
                 }

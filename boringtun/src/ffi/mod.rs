@@ -8,12 +8,14 @@
 /// C bindings for the BoringTun library
 pub mod benchmark;
 use self::benchmark::do_benchmark;
-use super::noise::{make_array, Tunn, TunnResult};
-use crate::crypto::{X25519PublicKey, X25519SecretKey};
+use super::noise::{Tunn, TunnResult};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
+use rand_core::OsRng;
+use x25519_dalek::{PublicKey, StaticSecret};
 
+use crate::serialization::KeyBytes;
 use std::ffi::{CStr, CString};
 use std::mem;
 use std::os::raw::c_char;
@@ -94,14 +96,20 @@ pub struct x25519_key {
 
 /// Generates a new x25519 secret key.
 #[no_mangle]
-pub extern "C" fn x25519_secret_key() -> X25519SecretKey {
-    X25519SecretKey::new()
+pub extern "C" fn x25519_secret_key() -> x25519_key {
+    x25519_key {
+        key: StaticSecret::new(OsRng).to_bytes(),
+    }
 }
 
 /// Computes a public x25519 key from a secret key.
 #[no_mangle]
-pub extern "C" fn x25519_public_key(private_key: X25519SecretKey) -> X25519PublicKey {
-    private_key.public_key()
+pub extern "C" fn x25519_public_key(private_key: x25519_key) -> x25519_key {
+    let private = StaticSecret::from(private_key.key);
+    let public = PublicKey::from(&private);
+    x25519_key {
+        key: public.to_bytes(),
+    }
 }
 
 /// Returns the base64 encoding of a key as a UTF8 C-string.
@@ -182,8 +190,8 @@ pub unsafe extern "C" fn new_tunnel(
         let c_str = CStr::from_ptr(preshared_key);
 
         if let Ok(string) = c_str.to_str() {
-            if let Ok(key) = string.parse::<X25519PublicKey>() {
-                Some(make_array(key.as_bytes()))
+            if let Ok(key) = string.parse::<KeyBytes>() {
+                Some(key.0)
             } else {
                 return null_mut();
             }
@@ -192,14 +200,14 @@ pub unsafe extern "C" fn new_tunnel(
         }
     };
 
-    let private_key = match static_private.parse() {
+    let private_key = match static_private.parse::<KeyBytes>() {
         Err(_) => return ptr::null_mut(),
-        Ok(key) => key,
+        Ok(key) => StaticSecret::from(key.0),
     };
 
-    let public_key = match server_static_public.parse() {
+    let public_key = match server_static_public.parse::<KeyBytes>() {
         Err(_) => return ptr::null_mut(),
-        Ok(key) => key,
+        Ok(key) => PublicKey::from(key.0),
     };
 
     let keep_alive = if keep_alive == 0 {

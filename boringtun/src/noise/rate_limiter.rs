@@ -1,7 +1,5 @@
 use super::make_array;
-use crate::crypto::{
-    constant_time_mac_check, Blake2s, ChaCha20Poly1305, X25519PublicKey, X25519SecretKey,
-};
+use crate::crypto::{constant_time_mac_check, Blake2s, ChaCha20Poly1305};
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
@@ -10,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use parking_lot::Mutex;
+use rand_core::{OsRng, RngCore};
 
 const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can optimize out the division
 const COOKIE_SIZE: usize = 16;
@@ -40,10 +39,10 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
-    pub fn new(public_key: &X25519PublicKey, limit: u64) -> Self {
+    pub fn new(public_key: &x25519_dalek::PublicKey, limit: u64) -> Self {
         RateLimiter {
-            nonce_key: RateLimiter::rand_bytes(),
-            secret_key: make_array(&RateLimiter::rand_bytes()[..16]),
+            nonce_key: Self::rand_bytes(),
+            secret_key: make_array(&Self::rand_bytes()[..16]),
             start_time: Instant::now(),
             nonce_ctr: AtomicU64::new(0),
             mac1_key: Blake2s::new_hash()
@@ -61,7 +60,9 @@ impl RateLimiter {
     }
 
     fn rand_bytes() -> [u8; 32] {
-        make_array(X25519SecretKey::new().as_bytes()) // Use the randomness of X25519 secret key as a hack
+        let mut key = [0u8; 32];
+        OsRng.fill_bytes(&mut key);
+        key
     }
 
     /// Reset packet count (ideally should be called with a period of 1 second)

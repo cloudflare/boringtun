@@ -3,6 +3,7 @@
 mod crypto;
 mod ffi;
 mod noise;
+mod serialization;
 
 use ffi::benchmark::do_benchmark;
 use std::io::prelude::Write;

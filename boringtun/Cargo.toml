@@ -17,8 +17,9 @@ parking_lot = "0.12"
 tracing = "0.1.29"
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
-zeroize = { version = "1.5.2", features = ["zeroize_derive"]}
 ring = "0.16"
+x25519-dalek = { version = "1.2", features = ["reusable_secrets"] }
+rand_core = "0.5.1"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
