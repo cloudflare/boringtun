@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 /// This module implements benchmarking code for use with the FFI bindings
-use crate::crypto::{Blake2s, ChaCha20Poly1305, X25519SecretKey};
+use crate::crypto::{Blake2s, ChaCha20Poly1305};
+use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use ring::{agreement, rand};
+use x25519_dalek::{PublicKey, StaticSecret};
 
 use std::time::Instant;
 
@@ -76,11 +78,11 @@ fn bench_x25519_shared_key(name: bool, _: usize) -> String {
         return "X25519 Shared Key: ".to_string();
     }
 
-    let secret_key = X25519SecretKey::new();
-    let public_key = X25519SecretKey::new().public_key();
+    let secret_key = StaticSecret::new(OsRng);
+    let public_key = PublicKey::from(&StaticSecret::new(OsRng));
 
     let result = run_bench(&mut move || {
-        let _ = secret_key.shared_key(&public_key);
+        let _ = secret_key.diffie_hellman(&public_key);
         1
     });
 
@@ -92,10 +94,10 @@ fn bench_x25519_public_key(name: bool, _: usize) -> String {
         return "X25519 Public Key: ".to_string();
     }
 
-    let secret_key = X25519SecretKey::new();
+    let secret_key = StaticSecret::new(OsRng);
 
     let result = run_bench(&mut move || {
-        let _ = secret_key.public_key();
+        let _ = PublicKey::from(&secret_key);
         1
     });
 

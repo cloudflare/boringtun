@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::*;
+use crate::serialization::KeyBytes;
 use base64::encode;
+use rand_core::OsRng;
 use std::fs;
 use std::fs::File;
 use std::io::prelude::Write;
@@ -170,8 +172,8 @@ fn wireguard_test_peer(
     peer_static_public: &str,
     close: Arc<AtomicBool>,
 ) -> UdpSocket {
-    let static_private = static_private.parse().unwrap();
-    let peer_static_public = peer_static_public.parse().unwrap();
+    let static_private = static_private.parse::<KeyBytes>().unwrap().0.into();
+    let peer_static_public = peer_static_public.parse::<KeyBytes>().unwrap().0.into();
 
     let peer = Tunn::new(
         Arc::new(static_private),
@@ -301,9 +303,9 @@ fn connected_sock_pair() -> (UdpSocket, UdpSocket) {
 }
 
 fn key_pair() -> (String, String) {
-    let secret_key = X25519SecretKey::new();
-    let public_key = secret_key.public_key();
-    (encode(secret_key.as_bytes()), encode(public_key.as_bytes()))
+    let secret_key = x25519_dalek::StaticSecret::new(OsRng);
+    let public_key = x25519_dalek::PublicKey::from(&secret_key);
+    (encode(secret_key.to_bytes()), encode(public_key.as_bytes()))
 }
 
 fn wireguard_test_pair() -> (UdpSocket, UdpSocket, Arc<AtomicBool>) {

@@ -30,7 +30,6 @@ pub mod tun;
 pub mod udp;
 
 use std::collections::HashMap;
-use std::convert::From;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::os::unix::io::AsRawFd;
@@ -39,11 +38,10 @@ use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
-use crate::crypto::{X25519PublicKey, X25519SecretKey};
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
-use crate::noise::{make_array, Packet, Tunn, TunnResult};
+use crate::noise::{Packet, Tunn, TunnResult};
 use allowed_ips::AllowedIps;
 use peer::{AllowedIP, Peer};
 use poll::{EventPoll, EventRef, WaitResult};
@@ -117,7 +115,10 @@ impl Default for DeviceConfig {
 }
 
 pub struct Device {
-    key_pair: Option<(Arc<X25519SecretKey>, Arc<X25519PublicKey>)>,
+    key_pair: Option<(
+        Arc<x25519_dalek::StaticSecret>,
+        Arc<x25519_dalek::PublicKey>,
+    )>,
     queue: Arc<EventPoll<Handler>>,
 
     listen_port: u16,
@@ -130,7 +131,7 @@ pub struct Device {
     yield_notice: Option<EventRef>,
     exit_notice: Option<EventRef>,
 
-    peers: HashMap<Arc<X25519PublicKey>, Arc<Peer>>,
+    peers: HashMap<Arc<x25519_dalek::PublicKey>, Arc<Peer>>,
     peers_by_ip: AllowedIps<Arc<Peer>>,
     peers_by_idx: HashMap<u32, Arc<Peer>>,
     next_index: u32,
@@ -274,7 +275,7 @@ impl Device {
         next_index
     }
 
-    fn remove_peer(&mut self, pub_key: &X25519PublicKey) {
+    fn remove_peer(&mut self, pub_key: &x25519_dalek::PublicKey) {
         if let Some(peer) = self.peers.remove(pub_key) {
             // Found a peer to remove, now purge all references to it:
             peer.shutdown_endpoint(); // close open udp socket and free the closure
@@ -289,7 +290,7 @@ impl Device {
     #[allow(clippy::too_many_arguments)]
     fn update_peer(
         &mut self,
-        pub_key: X25519PublicKey,
+        pub_key: x25519_dalek::PublicKey,
         remove: bool,
         _replace_ips: bool,
         endpoint: Option<SocketAddr>,
@@ -444,14 +445,16 @@ impl Device {
         Ok(())
     }
 
-    fn set_key(&mut self, private_key: X25519SecretKey) {
+    fn set_key(&mut self, private_key: x25519_dalek::StaticSecret) {
         let mut bad_peers = vec![];
 
+        let public_key = Arc::new(x25519_dalek::PublicKey::from(&private_key));
         let private_key = Arc::new(private_key);
-        let public_key = Arc::new(private_key.public_key());
         let key_pair = Some((private_key.clone(), public_key.clone()));
 
-        if self.key_pair == key_pair {
+        // x25519_dalek (rightly) doesn't let us expose secret keys for comparison.
+        // If the public keys are the same, then the private keys are the same.
+        if Some(&public_key) == self.key_pair.as_ref().map(|p| &p.1) {
             return;
         }
 
@@ -623,7 +626,7 @@ impl Device {
                                 .ok()
                                 .and_then(|hh| {
                                     d.peers
-                                        .get(&X25519PublicKey::from(&hh.peer_static_public[..]))
+                                        .get(&x25519_dalek::PublicKey::from(hh.peer_static_public))
                                 })
                         }
                         Packet::HandshakeResponse(p) => d.peers_by_idx.get(&(p.receiver_idx >> 8)),

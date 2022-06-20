@@ -8,24 +8,25 @@ extern crate test;
 mod tests {
     use boringtun::crypto::Blake2s;
     use boringtun::crypto::ChaCha20Poly1305;
-    use boringtun::crypto::X25519SecretKey;
+    use rand_core::OsRng;
     use test::{black_box, Bencher};
+    use x25519_dalek::{PublicKey, StaticSecret};
 
     #[bench]
     fn bench_x25519_public_key(b: &mut Bencher) {
-        let secret_key = X25519SecretKey::new();
+        let secret_key = StaticSecret::new(OsRng);
 
         b.iter(|| {
-            black_box(secret_key.public_key());
+            black_box(PublicKey::from(&secret_key));
         });
     }
 
     #[bench]
     fn bench_x25519_shared_key(b: &mut Bencher) {
-        let secret_key = X25519SecretKey::new();
-        let public_key = X25519SecretKey::new().public_key();
+        let secret_key = StaticSecret::new(OsRng);
+        let public_key = PublicKey::from(&StaticSecret::new(OsRng));
 
-        b.iter(|| black_box(secret_key.shared_key(&public_key)));
+        b.iter(|| black_box(secret_key.diffie_hellman(&public_key)));
     }
 
     #[bench]
