@@ -4,9 +4,9 @@
 //! Optimized cryptographic primitives for the WireGuard protocol.
 
 mod blake2s;
-mod chacha20poly1305;
+mod chacha20poly1305_custom;
 
 pub use blake2s::{constant_time_mac_check, Blake2s};
-pub use chacha20poly1305::ChaCha20Poly1305;
+pub use chacha20poly1305_custom::ChaCha20Poly1305;
 
 pub use ring::rand::SystemRandom;
