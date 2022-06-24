@@ -5,9 +5,12 @@ pub fn bench_x25519_public_key(c: &mut Criterion) {
     let mut group = c.benchmark_group("x25519_public_key");
 
     group.bench_function("x25519_public_key_dalek", |b| {
-        let secret_key = x25519_dalek::StaticSecret::new(OsRng);
+        b.iter(|| {
+            let secret_key = x25519_dalek::StaticSecret::new(OsRng);
+            let public_key = x25519_dalek::PublicKey::from(&secret_key);
 
-        b.iter(|| x25519_dalek::PublicKey::from(&secret_key));
+            (secret_key, public_key)
+        });
     });
 
     group.bench_function("x25519_public_key_ring", |b| {
