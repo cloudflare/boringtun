@@ -1,14 +1,17 @@
-use criterion::Criterion;
+use criterion::{BatchSize, Criterion};
 use rand_core::OsRng;
 
 pub fn bench_x25519_shared_key(c: &mut Criterion) {
     let mut group = c.benchmark_group("x25519_shared_key");
 
     group.bench_function("x25519_shared_key_dalek", |b| {
-        let secret_key = x25519_dalek::StaticSecret::new(OsRng);
         let public_key = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::new(OsRng));
 
-        b.iter(|| secret_key.diffie_hellman(&public_key));
+        b.iter_batched(
+            || x25519_dalek::StaticSecret::new(OsRng),
+            |secret_key| secret_key.diffie_hellman(&public_key),
+            BatchSize::SmallInput,
+        );
     });
 
     group.bench_function("x25519_shared_key_ring", |b| {
@@ -22,21 +25,25 @@ pub fn bench_x25519_shared_key(c: &mut Criterion) {
         };
         let peer_public_key_alg = &ring::agreement::X25519;
 
-        b.iter(|| {
-            let my_private_key =
-                ring::agreement::EphemeralPrivateKey::generate(&ring::agreement::X25519, &rng)
-                    .unwrap();
-            let my_public_key =
-                ring::agreement::UnparsedPublicKey::new(peer_public_key_alg, &peer_public_key);
+        let my_public_key =
+            ring::agreement::UnparsedPublicKey::new(peer_public_key_alg, &peer_public_key);
 
-            ring::agreement::agree_ephemeral(
-                my_private_key,
-                &my_public_key,
-                ring::error::Unspecified,
-                |_key_material| Ok(()),
-            )
-            .unwrap()
-        });
+        b.iter_batched(
+            || {
+                ring::agreement::EphemeralPrivateKey::generate(&ring::agreement::X25519, &rng)
+                    .unwrap()
+            },
+            |my_private_key| {
+                ring::agreement::agree_ephemeral(
+                    my_private_key,
+                    &my_public_key,
+                    ring::error::Unspecified,
+                    |_key_material| Ok(()),
+                )
+                .unwrap()
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.finish();
