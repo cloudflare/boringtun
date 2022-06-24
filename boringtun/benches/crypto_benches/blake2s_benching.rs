@@ -5,7 +5,7 @@ pub fn bench_blake2s(c: &mut Criterion) {
     let mut group = c.benchmark_group("blake2s");
 
     for size in [128, 1024] {
-        group.throughput(Throughput::Bytes(128 as u64));
+        group.throughput(Throughput::Bytes(size as u64));
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             let buf_in = vec![0u8; size];
