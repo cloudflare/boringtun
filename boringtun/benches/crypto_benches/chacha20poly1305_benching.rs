@@ -7,7 +7,7 @@ fn chacha20poly1305_ring(key_bytes: &[u8], buf: &mut [u8]) {
     let len = buf.len();
     let n = len - 16;
 
-    let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &key_bytes).unwrap());
+    let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key_bytes).unwrap());
 
     let tag = key
         .seal_in_place_separate_tag(
@@ -71,26 +71,6 @@ pub fn bench_chacha20poly1305(c: &mut Criterion) {
                 rng.fill_bytes(&mut buf);
 
                 b.iter(|| chacha20poly1305_non_ring(&key, &mut buf));
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("chacha20poly1305_custom", size),
-            &size,
-            |b, _| {
-                let mut key = [0; 32];
-
-                let mut buf_in = vec![0u8; size];
-                let mut buf_out = vec![0u8; size + 16];
-
-                let mut rng = OsRng::default();
-
-                rng.fill_bytes(&mut key);
-                rng.fill_bytes(&mut buf_in);
-
-                let aead = boringtun::crypto::ChaCha20Poly1305::new_aead(&key);
-
-                b.iter(|| aead.seal_wg(0, &[], &buf_in, &mut buf_out) - 16)
             },
         );
     }
