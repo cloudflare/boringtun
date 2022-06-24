@@ -6,8 +6,6 @@
 #![allow(clippy::missing_safety_doc)]
 
 /// C bindings for the BoringTun library
-pub mod benchmark;
-use self::benchmark::do_benchmark;
 use super::noise::{Tunn, TunnResult};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
@@ -17,7 +15,6 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::serialization::KeyBytes;
 use std::ffi::{CStr, CString};
-use std::mem;
 use std::os::raw::c_char;
 use std::panic;
 use std::ptr;
@@ -320,18 +317,5 @@ pub unsafe extern "C" fn wireguard_stats(tunnel: *mut Tunn) -> stats {
         estimated_loss,
         estimated_rtt: estimated_rtt.map(|r| r as i32).unwrap_or(-1),
         reserved: [0u8; 56],
-    }
-}
-
-/// Performs an internal benchmark, and returns its result as a C-string.
-#[no_mangle]
-pub extern "C" fn benchmark(name: i32, idx: u32) -> *const c_char {
-    if let Some(s) = do_benchmark(name != 0, idx as usize) {
-        let s = CString::new(s).unwrap();
-        let v = s.as_ptr();
-        mem::forget(s); // This is a memory leak, but we assume it is rarely used anyway
-        v
-    } else {
-        ptr::null()
     }
 }
