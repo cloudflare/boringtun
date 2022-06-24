@@ -8,19 +8,15 @@ fn chacha20poly1305_ring(key_bytes: &[u8], buf: &mut [u8]) {
 
     let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &key_bytes).unwrap());
 
-    let x = key
+    let tag = key
         .seal_in_place_separate_tag(
             Nonce::assume_unique_for_key([0u8; 12]),
             Aad::from(&[]),
             &mut buf[..n],
         )
-        .map(|tag| {
-            buf[n..].copy_from_slice(tag.as_ref());
-            len
-        })
         .unwrap();
 
-    criterion::black_box(x);
+    buf[n..].copy_from_slice(tag.as_ref())
 }
 
 fn chacha20poly1305_non_ring(key_bytes: &[u8], buf: &mut [u8]) {
@@ -30,15 +26,11 @@ fn chacha20poly1305_non_ring(key_bytes: &[u8], buf: &mut [u8]) {
     let aead = chacha20poly1305::ChaCha20Poly1305::new_from_slice(key_bytes).unwrap();
     let nonce = chacha20poly1305::Nonce::default();
 
-    let x = aead
+    let tag = aead
         .encrypt_in_place_detached(&nonce, &[], &mut buf[..n])
-        .map(|tag| {
-            buf[n..].copy_from_slice(tag.as_ref());
-            n
-        })
         .unwrap();
 
-    criterion::black_box(x);
+    buf[n..].copy_from_slice(tag.as_ref());
 }
 
 pub fn bench_chacha20poly1305(c: &mut Criterion) {
