@@ -37,6 +37,8 @@ fn chacha20poly1305_non_ring(key_bytes: &[u8], buf: &mut [u8]) {
 pub fn bench_chacha20poly1305(c: &mut Criterion) {
     let mut group = c.benchmark_group("chacha20poly1305");
 
+    group.sample_size(1000);
+
     for size in [128, 192, 1400, 8192] {
         group.throughput(Throughput::Bytes(size as u64));
 

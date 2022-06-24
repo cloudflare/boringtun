@@ -4,6 +4,8 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 pub fn bench_blake2s(c: &mut Criterion) {
     let mut group = c.benchmark_group("blake2s");
 
+    group.sample_size(1000);
+
     for size in [128, 1024] {
         group.throughput(Throughput::Bytes(size as u64));
 
