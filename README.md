@@ -51,16 +51,6 @@ Testing this project has a few requirements:
 - `sudo`: required to create tunnels. When you run `cargo test` you'll be prompted for your password.
 - Docker: you can install it [here](https://www.docker.com/get-started). If you are on Ubuntu/Debian you can run `apt-get install docker.io`.
 
-### Benchmarking
-
-To benchmark this project you can run this command:
-
-```
-cargo +nightly bench
-```
-
-This command depends on the unstable `test` feature of the Rust compiler. As a result, you'll need to use the `nightly` channel of Rust when you run it.
-
 ## Supported platforms
 
 Target triple                 |Binary|Library|                 |

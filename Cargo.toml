@@ -4,3 +4,7 @@ members = ["boringtun", "boringtun-cli"]
 [profile.release]
 lto = true        # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
+
+[profile.bench]
+lto = true        # Enable full link-time optimization.
+codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
