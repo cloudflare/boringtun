@@ -11,7 +11,6 @@ use chacha20poly1305::XChaCha20Poly1305;
 use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
-use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 // static CONSTRUCTION: &'static [u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
@@ -191,9 +190,9 @@ impl Tai64N {
 
 // Parameters used by the noise protocol
 struct NoiseParams {
-    static_public: Arc<x25519_dalek::PublicKey>, // Our static public key
-    static_private: Arc<x25519_dalek::StaticSecret>, // Our static private key
-    peer_static_public: Arc<x25519_dalek::PublicKey>, // Static public key of the other party
+    static_public: x25519_dalek::PublicKey, // Our static public key
+    static_private: x25519_dalek::StaticSecret, // Our static private key
+    peer_static_public: x25519_dalek::PublicKey, // Static public key of the other party
     static_shared: x25519_dalek::SharedSecret, // A shared key = DH(static_private, peer_static_public)
     sending_mac1_key: [u8; KEY_LEN], // A pre-computation of HASH("mac1----", peer_static_public) for this peer
     preshared_key: Option<[u8; KEY_LEN]>, // An optional preshared key
@@ -317,12 +316,12 @@ pub fn parse_handshake_anon(
 impl NoiseParams {
     /// New noise params struct from our secret key, peers public key, and optional preshared key
     fn new(
-        static_private: Arc<x25519_dalek::StaticSecret>,
-        static_public: Arc<x25519_dalek::PublicKey>,
-        peer_static_public: Arc<x25519_dalek::PublicKey>,
+        static_private: x25519_dalek::StaticSecret,
+        static_public: x25519_dalek::PublicKey,
+        peer_static_public: x25519_dalek::PublicKey,
         preshared_key: Option<[u8; 32]>,
     ) -> Result<NoiseParams, WireGuardError> {
-        let static_shared = static_private.diffie_hellman(peer_static_public.as_ref());
+        let static_shared = static_private.diffie_hellman(&peer_static_public);
 
         let initial_sending_mac_key = b2s_hash(LABEL_MAC1, peer_static_public.as_bytes());
 
@@ -339,11 +338,11 @@ impl NoiseParams {
     /// Set a new private key
     fn set_static_private(
         &mut self,
-        static_private: Arc<x25519_dalek::StaticSecret>,
-        static_public: Arc<x25519_dalek::PublicKey>,
+        static_private: x25519_dalek::StaticSecret,
+        static_public: x25519_dalek::PublicKey,
     ) -> Result<(), WireGuardError> {
         // Check that the public key indeed matches the private key
-        let check_key = x25519_dalek::PublicKey::from(static_private.as_ref());
+        let check_key = x25519_dalek::PublicKey::from(&static_private);
         assert_eq!(check_key.as_bytes(), static_public.as_bytes());
 
         self.static_private = static_private;
@@ -356,9 +355,9 @@ impl NoiseParams {
 
 impl Handshake {
     pub(crate) fn new(
-        static_private: Arc<x25519_dalek::StaticSecret>,
-        static_public: Arc<x25519_dalek::PublicKey>,
-        peer_static_public: Arc<x25519_dalek::PublicKey>,
+        static_private: x25519_dalek::StaticSecret,
+        static_public: x25519_dalek::PublicKey,
+        peer_static_public: x25519_dalek::PublicKey,
         global_idx: u32,
         preshared_key: Option<[u8; 32]>,
     ) -> Result<Handshake, WireGuardError> {
@@ -419,8 +418,8 @@ impl Handshake {
 
     pub(crate) fn set_static_private(
         &mut self,
-        private_key: Arc<x25519_dalek::StaticSecret>,
-        public_key: Arc<x25519_dalek::PublicKey>,
+        private_key: x25519_dalek::StaticSecret,
+        public_key: x25519_dalek::PublicKey,
     ) -> Result<(), WireGuardError> {
         self.params.set_static_private(private_key, public_key)
     }

@@ -20,7 +20,7 @@ use std::panic;
 use std::ptr;
 use std::ptr::null_mut;
 use std::slice;
-use std::sync::{Arc, Once};
+use std::sync::Once;
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -214,8 +214,8 @@ pub unsafe extern "C" fn new_tunnel(
     };
 
     let tunnel = match Tunn::new(
-        Arc::new(private_key),
-        Arc::new(public_key),
+        private_key,
+        public_key,
         preshared_key,
         keep_alive,
         index,
