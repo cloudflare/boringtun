@@ -15,3 +15,5 @@ pub mod noise;
 
 #[cfg(target_os = "android")]
 pub mod jni;
+
+pub(crate) mod serialization;

@@ -32,7 +32,7 @@ pub fn get_saved_ids() -> Result<(uid_t, gid_t), Error> {
         // Saved user ID
         let saved_uid = unsafe { (*userinfo).pw_uid };
 
-        return Ok((saved_uid, saved_gid));
+        Ok((saved_uid, saved_gid))
     }
 }
 

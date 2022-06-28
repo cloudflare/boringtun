@@ -10,7 +10,6 @@ use jni::strings::JNIStr;
 use jni::sys::{jbyteArray, jint, jlong, jshort, jstring};
 use jni::JNIEnv;
 
-use crate::crypto::X25519SecretKey;
 use std::str::FromStr;
 
 use crate::ffi::new_tunnel;
@@ -51,19 +50,18 @@ pub unsafe extern "C" fn generate_public_key1(
     _class: JClass,
     arg_secret_key: jbyteArray,
 ) -> jbyteArray {
-    let mut secret_key = [0; 32];
+    let mut key_inner = [0; 32];
 
     if env
-        .get_byte_array_region(arg_secret_key, 0, &mut secret_key)
+        .get_byte_array_region(arg_secret_key, 0, &mut key_inner)
         .is_err()
     {
         return ptr::null_mut();
     }
 
-    let secret_key: X25519SecretKey = X25519SecretKey::from_str(&hex::encode(
-        std::mem::transmute::<[i8; 32], [u8; 32]>(secret_key),
-    ))
-    .unwrap();
+    let secret_key = x25519_key {
+        key: std::mem::transmute::<[i8; 32], [u8; 32]>(key_inner),
+    };
 
     match env.byte_array_from_slice(&x25519_public_key(secret_key).as_bytes()) {
         Ok(v) => v,

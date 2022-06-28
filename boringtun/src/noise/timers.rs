@@ -223,7 +223,7 @@ impl Tunn {
             // All ephemeral private keys and symmetric session keys are zeroed out after
             // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
             if now - session_established >= REJECT_AFTER_TIME * 3 {
-                tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
+                tracing::error!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
                 handshake.set_expired();
                 self.clear_all();
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
@@ -236,7 +236,7 @@ impl Tunn {
                     // the retries give up and cease, and clear all existing packets queued
                     // up to be sent. If a packet is explicitly queued up to be sent, then
                     // this timer is reset.
-                    tracing::debug!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
+                    tracing::error!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                     handshake.set_expired();
                     self.clear_all();
                     return TunnResult::Err(WireGuardError::ConnectionExpired);
@@ -248,7 +248,7 @@ impl Tunn {
                     // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
                     // if a response has not been received, where jitter is some random
                     // value between 0 and 333 ms.
-                    tracing::debug!("HANDSHAKE(REKEY_TIMEOUT)");
+                    tracing::warn!("HANDSHAKE(REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
             } else {
@@ -273,7 +273,7 @@ impl Tunn {
                         && now - session_established
                             >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
                     {
-                        tracing::debug!(
+                        tracing::warn!(
                             "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - \
                         REKEY_TIMEOUT \
                         (on receive))"
@@ -289,7 +289,7 @@ impl Tunn {
                     && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                     && timers.want_handshake.swap(false, Ordering::Relaxed)
                 {
-                    tracing::debug!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
+                    tracing::warn!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
 

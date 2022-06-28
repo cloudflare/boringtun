@@ -10,13 +10,13 @@ mod session;
 mod tests;
 mod timers;
 
-use crate::crypto::{X25519PublicKey, X25519SecretKey};
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 
 use std::collections::VecDeque;
+use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -83,7 +83,7 @@ const DATA_OVERHEAD_SZ: usize = 32;
 #[derive(Debug)]
 pub struct HandshakeInit<'a> {
     sender_idx: u32,
-    unencrypted_ephemeral: &'a [u8],
+    unencrypted_ephemeral: &'a [u8; 32],
     encrypted_static: &'a [u8],
     encrypted_timestamp: &'a [u8],
 }
@@ -92,7 +92,7 @@ pub struct HandshakeInit<'a> {
 pub struct HandshakeResponse<'a> {
     sender_idx: u32,
     pub receiver_idx: u32,
-    unencrypted_ephemeral: &'a [u8],
+    unencrypted_ephemeral: &'a [u8; 32],
     encrypted_nothing: &'a [u8],
 }
 
@@ -122,20 +122,20 @@ pub enum Packet<'a> {
 impl Tunn {
     /// Create a new tunnel using own private key and the peer public key
     pub fn new(
-        static_private: Arc<X25519SecretKey>,
-        peer_static_public: Arc<X25519PublicKey>,
+        static_private: x25519_dalek::StaticSecret,
+        peer_static_public: x25519_dalek::PublicKey,
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
         index: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Result<Box<Tunn>, &'static str> {
-        let static_public = Arc::new(static_private.public_key());
+        let static_public = x25519_dalek::PublicKey::from(&static_private);
 
         let tunn = Tunn {
             handshake: Mutex::new(
                 Handshake::new(
                     static_private,
-                    Arc::clone(&static_public),
+                    static_public,
                     peer_static_public,
                     index << 8,
                     preshared_key,
@@ -161,8 +161,8 @@ impl Tunn {
     /// Update the private key and clear existing sessions
     pub fn set_static_private(
         &mut self,
-        static_private: Arc<X25519SecretKey>,
-        static_public: Arc<X25519PublicKey>,
+        static_private: x25519_dalek::StaticSecret,
+        static_public: x25519_dalek::PublicKey,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Result<(), WireGuardError> {
         self.timers.should_reset_rr = rate_limiter.is_none();
@@ -262,14 +262,16 @@ impl Tunn {
         Ok(match (packet_type, src.len()) {
             (HANDSHAKE_INIT, HANDSHAKE_INIT_SZ) => Packet::HandshakeInit(HandshakeInit {
                 sender_idx: u32::from_le_bytes(make_array(&src[4..8])),
-                unencrypted_ephemeral: &src[8..40],
+                unencrypted_ephemeral: <&[u8; 32] as TryFrom<&[u8]>>::try_from(&src[8..40])
+                    .expect("length already checked above"),
                 encrypted_static: &src[40..88],
                 encrypted_timestamp: &src[88..116],
             }),
             (HANDSHAKE_RESP, HANDSHAKE_RESP_SZ) => Packet::HandshakeResponse(HandshakeResponse {
                 sender_idx: u32::from_le_bytes(make_array(&src[4..8])),
                 receiver_idx: u32::from_le_bytes(make_array(&src[8..12])),
-                unencrypted_ephemeral: &src[12..44],
+                unencrypted_ephemeral: <&[u8; 32] as TryFrom<&[u8]>>::try_from(&src[12..44])
+                    .expect("length already checked above"),
                 encrypted_nothing: &src[44..60],
             }),
             (COOKIE_REPLY, COOKIE_REPLY_SZ) => Packet::PacketCookieReply(PacketCookieReply {
