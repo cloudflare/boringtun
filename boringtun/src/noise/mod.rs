@@ -23,7 +23,8 @@ use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
 
-const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10; // The default value to use for rate limiting, when no other rate limiter is defined
+/// The default value to use for rate limiting, when no other rate limiter is defined
+const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
 
 const IPV4_MIN_HEADER_SIZE: usize = 20;
 const IPV4_LEN_OFF: usize = 2;
@@ -40,7 +41,8 @@ const IPV6_IP_SZ: usize = 16;
 const IP_LEN_SZ: usize = 2;
 
 const MAX_QUEUE_DEPTH: usize = 256;
-const N_SESSIONS: usize = 8; // number of sessions in the ring, better keep a PoT
+/// number of sessions in the ring, better keep a PoT
+const N_SESSIONS: usize = 8;
 
 #[derive(Debug)]
 pub enum TunnResult<'a> {
@@ -59,11 +61,16 @@ impl<'a> From<WireGuardError> for TunnResult<'a> {
 
 /// Tunnel represents a point-to-point WireGuard connection
 pub struct Tunn {
-    handshake: Mutex<handshake::Handshake>, // The handshake currently in progress
-    sessions: [Arc<RwLock<Option<session::Session>>>; N_SESSIONS], // The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
-    current: AtomicUsize, // Index of most recently used session
-    packet_queue: Mutex<VecDeque<Vec<u8>>>, // Queue to store blocked packets
-    timers: timers::Timers, // Keeps tabs on the expiring timers
+    /// The handshake currently in progress
+    handshake: Mutex<handshake::Handshake>,
+    /// The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
+    sessions: [Arc<RwLock<Option<session::Session>>>; N_SESSIONS],
+    /// Index of most recently used session
+    current: AtomicUsize,
+    /// Queue to store blocked packets
+    packet_queue: Mutex<VecDeque<Vec<u8>>>,
+    /// Keeps tabs on the expiring timers
+    timers: timers::Timers,
     tx_bytes: AtomicUsize,
     rx_bytes: AtomicUsize,
     rate_limiter: Arc<RateLimiter>,
@@ -110,7 +117,7 @@ pub struct PacketData<'a> {
     encrypted_encapsulated_packet: &'a [u8],
 }
 
-// Describes a packet from network
+/// Describes a packet from network
 #[derive(Debug)]
 pub enum Packet<'a> {
     HandshakeInit(HandshakeInit<'a>),
@@ -180,6 +187,7 @@ impl Tunn {
 
     /// Encapsulate a single packet from the tunnel interface.
     /// Returns TunnResult.
+    ///
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
@@ -205,6 +213,7 @@ impl Tunn {
 
     /// Receives a UDP datagram from the network and parses it.
     /// Returns TunnResult.
+    ///
     /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
     /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
     /// packet is processed.
@@ -367,7 +376,7 @@ impl Tunn {
         Ok(TunnResult::Done)
     }
 
-    // Update the index of the currently used session, if needed
+    /// Update the index of the currently used session, if needed
     fn set_current_session(&self, new_idx: usize) {
         let cur_idx = self.current.load(Ordering::Relaxed);
         if cur_idx == new_idx {
@@ -383,7 +392,7 @@ impl Tunn {
         }
     }
 
-    // Decrypts a data packet, and stores the decapsulated packet in dst.
+    /// Decrypts a data packet, and stores the decapsulated packet in dst.
     fn handle_data<'a>(
         &self,
         packet: PacketData,
@@ -409,8 +418,8 @@ impl Tunn {
         Ok(self.validate_decapsulated_packet(decapsulated_packet))
     }
 
-    // Formats a new handshake initiation message and store it in dst. If force_resend is true will send
-    // a new handshake, even if a handshake is already in progress (for example when a handshake times out)
+    /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
+    /// a new handshake, even if a handshake is already in progress (for example when a handshake times out)
     pub fn format_handshake_initiation<'a>(
         &self,
         dst: &'a mut [u8],
@@ -496,7 +505,7 @@ impl Tunn {
         }
     }
 
-    // Get a packet from the queue, and try to encapsulate it
+    /// Get a packet from the queue, and try to encapsulate it
     fn send_queued_packet<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
         if let Some(packet) = self.dequeue_packet() {
             match self.encapsulate(&packet, dst) {
@@ -510,7 +519,7 @@ impl Tunn {
         TunnResult::Done
     }
 
-    // Push packet to the back of the queue
+    /// Push packet to the back of the queue
     fn queue_packet(&self, packet: &[u8]) {
         let mut q = self.packet_queue.lock();
         if q.len() < MAX_QUEUE_DEPTH {
@@ -519,7 +528,7 @@ impl Tunn {
         }
     }
 
-    // Push packet to the front of the queue
+    /// Push packet to the front of the queue
     fn requeue_packet(&self, packet: Vec<u8>) {
         let mut q = self.packet_queue.lock();
         if q.len() < MAX_QUEUE_DEPTH {

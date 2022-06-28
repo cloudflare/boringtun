@@ -18,28 +18,34 @@ const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can opti
 const COOKIE_SIZE: usize = 16;
 const COOKIE_NONCE_SIZE: usize = 24;
 
-const RESET_PERIOD: u64 = 1; // How often should reset count in seconds
+/// How often should reset count in seconds
+const RESET_PERIOD: u64 = 1;
 
 type Cookie = [u8; COOKIE_SIZE];
 
-// There are two places where WireGuard requires "randomness" for cookies
-// * The 24 byte nonce in the cookie massage - here the only goal is to avoid nonce reuse
-// * A secret value that changes every two minutes
-// Because the main goal of the cookie is simply for a party to prove ownership of an IP address
-// we can relax the randomness definition a bit, in order to avoid locking, because using less
-// resources is the main goal of any DoS prevention mechanism.
-// In order to avoid locking and calls to rand we derive pseudo random values using the AEAD and
-// some counters.
+/// There are two places where WireGuard requires "randomness" for cookies
+/// * The 24 byte nonce in the cookie massage - here the only goal is to avoid nonce reuse
+/// * A secret value that changes every two minutes
+/// Because the main goal of the cookie is simply for a party to prove ownership of an IP address
+/// we can relax the randomness definition a bit, in order to avoid locking, because using less
+/// resources is the main goal of any DoS prevention mechanism.
+/// In order to avoid locking and calls to rand we derive pseudo random values using the AEAD and
+/// some counters.
 pub struct RateLimiter {
-    nonce_key: [u8; 32],  // The key we use to derive the nonce
-    secret_key: [u8; 16], // The key we use to derive the cookie
+    /// The key we use to derive the nonce
+    nonce_key: [u8; 32],
+    /// The key we use to derive the cookie
+    secret_key: [u8; 16],
     start_time: Instant,
-    nonce_ctr: AtomicU64, // A single 64bit counter should suffice for many years
+    /// A single 64 bit counter (should suffice for many years)
+    nonce_ctr: AtomicU64,
     mac1_key: [u8; 32],
     cookie_key: Key,
     limit: u64,
-    count: AtomicU64,           // The counter since last reset
-    last_reset: Mutex<Instant>, // The time last reset was performed on this rate limiter
+    /// The counter since last reset
+    count: AtomicU64,
+    /// The time last reset was performed on this rate limiter
+    last_reset: Mutex<Instant>,
 }
 
 impl RateLimiter {
@@ -74,7 +80,7 @@ impl RateLimiter {
         }
     }
 
-    // Compute the correct cookie value based on the current secret value and the source IP
+    /// Compute the correct cookie value based on the current secret value and the source IP
     fn current_cookie(&self, addr: IpAddr) -> Cookie {
         let mut addr_bytes = [0u8; 16];
 
@@ -138,7 +144,7 @@ impl RateLimiter {
         Ok(&mut dst[..super::COOKIE_REPLY_SZ])
     }
 
-    // Verify the MAC fields on the datagram, and apply rate limiting if needed
+    /// Verify the MAC fields on the datagram, and apply rate limiting if needed
     pub fn verify_packet<'a, 'b>(
         &self,
         src_addr: Option<IpAddr>,

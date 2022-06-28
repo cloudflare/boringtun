@@ -50,24 +50,24 @@ impl SpinLock {
 }
 
 const MAX_PACKET: usize = 65536;
-// Next unused port
+/// Next unused port
 static NEXT_PORT: AtomicCounter = AtomicCounter {
     ctr: AtomicUsize::new(30000),
 };
-// Next WG conf file name to use
+/// Next WG conf file name to use
 static NEXT_CONF: AtomicCounter = AtomicCounter {
     ctr: AtomicUsize::new(1),
 };
-// Next ip address to use for WG interface, of the form 192.168.2.NEXT_IP
+/// Next ip address to use for WG interface, of the form 192.168.2.NEXT_IP
 static NEXT_IP: AtomicCounter = AtomicCounter {
     ctr: AtomicUsize::new(3),
 };
-// Locks the use of wg-quick to a single thread
+/// Locks the use of wg-quick to a single thread
 static WG_LOCK: SpinLock = SpinLock {
     lock: AtomicBool::new(true),
 };
 
-// Reads a decapsulated packet and strips its IPv4 header
+/// Reads a decapsulated packet and strips its IPv4 header
 fn read_ipv4_packet(socket: &UdpSocket) -> Vec<u8> {
     let mut data = [0u8; MAX_PACKET];
     let mut packet = Vec::new();
@@ -76,7 +76,7 @@ fn read_ipv4_packet(socket: &UdpSocket) -> Vec<u8> {
     packet
 }
 
-// Appends an IPv4 header to a buffer and writes the resulting "packet"
+/// Appends an IPv4 header to a buffer and writes the resulting "packet"
 fn write_ipv4_packet(socket: &UdpSocket, data: &[u8]) {
     let mut header = [0u8; IPV4_MIN_HEADER_SIZE];
     let mut packet = Vec::new();
@@ -95,7 +95,7 @@ fn write_u16_be(val: u16, buf: &mut [u8]) {
     buf[1] = val as u8;
 }
 
-// Compute the internet checksum of a buffer
+/// Compute the internet checksum of a buffer
 fn ipv4_checksum(buf: &[u8]) -> u16 {
     let mut sum = 0u32;
     for i in 0..buf.len() / 2 {
@@ -110,7 +110,7 @@ fn ipv4_checksum(buf: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-// Generate a simple ping request packet from 192.168.2.2 to 192.168.2.ip
+/// Generate a simple ping request packet from 192.168.2.2 to 192.168.2.ip
 fn write_ipv4_ping(socket: &UdpSocket, data: &[u8], seq: u16, ip: u8) {
     let mut ipv4_header = [0u8; IPV4_MIN_HEADER_SIZE];
     let mut icmp_header = [0u8; 8];
@@ -142,7 +142,7 @@ fn write_ipv4_ping(socket: &UdpSocket, data: &[u8], seq: u16, ip: u8) {
     socket.send(&packet).unwrap();
 }
 
-// Validate a ping reply packet
+/// Validate a ping reply packet
 fn read_ipv4_ping(socket: &UdpSocket, want_seq: u16) -> Vec<u8> {
     let mut data = [0u8; MAX_PACKET];
     let mut packet = Vec::new();
@@ -165,7 +165,7 @@ fn read_ipv4_ping(socket: &UdpSocket, want_seq: u16) -> Vec<u8> {
     packet
 }
 
-// Start a WireGuard peer
+/// Start a WireGuard peer
 fn wireguard_test_peer(
     network_socket: UdpSocket,
     static_private: &str,
@@ -314,38 +314,36 @@ fn wireguard_test_pair() -> (UdpSocket, UdpSocket, Arc<AtomicBool>) {
 }
 
 #[test]
+/// Test the connection is successfully established and some packets are passed around
 fn wireguard_handshake() {
-    // Test the connection is successfully established and some packets are passed around
-    {
-        let (peer_iface_socket_sender, client_iface_socket_sender, close) = wireguard_test_pair();
+    let (peer_iface_socket_sender, client_iface_socket_sender, close) = wireguard_test_pair();
 
-        client_iface_socket_sender
-            .set_read_timeout(Some(Duration::from_millis(1000)))
-            .unwrap();
-        client_iface_socket_sender
-            .set_write_timeout(Some(Duration::from_millis(1000)))
-            .unwrap();
+    client_iface_socket_sender
+        .set_read_timeout(Some(Duration::from_millis(1000)))
+        .unwrap();
+    client_iface_socket_sender
+        .set_write_timeout(Some(Duration::from_millis(1000)))
+        .unwrap();
 
-        thread::spawn(move || loop {
-            let data = read_ipv4_packet(&peer_iface_socket_sender);
-            let data_string = str::from_utf8(&data).unwrap().to_uppercase().into_bytes();
-            write_ipv4_packet(&peer_iface_socket_sender, &data_string);
-        });
+    thread::spawn(move || loop {
+        let data = read_ipv4_packet(&peer_iface_socket_sender);
+        let data_string = str::from_utf8(&data).unwrap().to_uppercase().into_bytes();
+        write_ipv4_packet(&peer_iface_socket_sender, &data_string);
+    });
 
-        for _i in 0..64 {
-            write_ipv4_packet(&client_iface_socket_sender, b"test");
-            let response = read_ipv4_packet(&client_iface_socket_sender);
-            assert_eq!(&response, b"TEST");
-        }
-
-        for _i in 0..64 {
-            write_ipv4_packet(&client_iface_socket_sender, b"check");
-            let response = read_ipv4_packet(&client_iface_socket_sender);
-            assert_eq!(&response, b"CHECK");
-        }
-
-        close.store(true, Ordering::Relaxed);
+    for _i in 0..64 {
+        write_ipv4_packet(&client_iface_socket_sender, b"test");
+        let response = read_ipv4_packet(&client_iface_socket_sender);
+        assert_eq!(&response, b"TEST");
     }
+
+    for _i in 0..64 {
+        write_ipv4_packet(&client_iface_socket_sender, b"check");
+        let response = read_ipv4_packet(&client_iface_socket_sender);
+        assert_eq!(&response, b"CHECK");
+    }
+
+    close.store(true, Ordering::Relaxed);
 }
 
 struct WireGuardExt {
@@ -356,7 +354,7 @@ struct WireGuardExt {
 }
 
 impl WireGuardExt {
-    // Start an instance of wireguard using wg-quick
+    /// Start an instance of wireguard using wg-quick
     pub fn start(endpoint: u16, public_key: &str) -> WireGuardExt {
         WG_LOCK.lock();
         let conf_file_name = format!("./wg{}.conf", NEXT_CONF.next());
@@ -412,9 +410,9 @@ impl Drop for WireGuardExt {
 
 #[test]
 #[ignore]
+/// Test the connection with wireguard-go is successfully established
+/// and we are getting ping from server
 fn wireguard_interop() {
-    // Test the connection with wireguard-go is successfully established
-    // and we are getting ping from server
     let c_key_pair = key_pair();
     let itr = 1000;
     let endpoint = NEXT_PORT.next() as u16;
@@ -446,9 +444,9 @@ fn wireguard_interop() {
 
 #[test]
 #[ignore]
+/// Test the connection with wireguard-go is successfully established
+/// when go is the initiator
 fn wireguard_receiver() {
-    // Test the connection with wireguard-go is successfully established
-    // when go is the initiator
     let c_key_pair = key_pair();
     let itr = 1000;
 
