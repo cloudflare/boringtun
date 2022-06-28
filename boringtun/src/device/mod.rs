@@ -115,10 +115,7 @@ impl Default for DeviceConfig {
 }
 
 pub struct Device {
-    key_pair: Option<(
-        Arc<x25519_dalek::StaticSecret>,
-        Arc<x25519_dalek::PublicKey>,
-    )>,
+    key_pair: Option<(x25519_dalek::StaticSecret, x25519_dalek::PublicKey)>,
     queue: Arc<EventPoll<Handler>>,
 
     listen_port: u16,
@@ -131,7 +128,7 @@ pub struct Device {
     yield_notice: Option<EventRef>,
     exit_notice: Option<EventRef>,
 
-    peers: HashMap<Arc<x25519_dalek::PublicKey>, Arc<Peer>>,
+    peers: HashMap<x25519_dalek::PublicKey, Arc<Peer>>,
     peers_by_ip: AllowedIps<Arc<Peer>>,
     peers_by_idx: HashMap<u32, Arc<Peer>>,
     next_index: u32,
@@ -298,7 +295,6 @@ impl Device {
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
     ) {
-        let pub_key = Arc::new(pub_key);
         if remove {
             // Completely remove a peer
             return self.remove_peer(&pub_key);
@@ -317,8 +313,8 @@ impl Device {
             .expect("Private key must be set first");
 
         let tunn = Tunn::new(
-            Arc::clone(&device_key_pair.0),
-            Arc::clone(&pub_key),
+            device_key_pair.0.clone(),
+            pub_key,
             preshared_key,
             keepalive,
             next_index,
@@ -448,9 +444,8 @@ impl Device {
     fn set_key(&mut self, private_key: x25519_dalek::StaticSecret) {
         let mut bad_peers = vec![];
 
-        let public_key = Arc::new(x25519_dalek::PublicKey::from(&private_key));
-        let private_key = Arc::new(private_key);
-        let key_pair = Some((private_key.clone(), public_key.clone()));
+        let public_key = x25519_dalek::PublicKey::from(&private_key);
+        let key_pair = Some((private_key.clone(), public_key));
 
         // x25519_dalek (rightly) doesn't let us expose secret keys for comparison.
         // If the public keys are the same, then the private keys are the same.
@@ -466,8 +461,8 @@ impl Device {
 
             if unsafe {
                 mut_ptr.as_mut().unwrap().tunnel.set_static_private(
-                    Arc::clone(&private_key),
-                    Arc::clone(&public_key),
+                    private_key.clone(),
+                    public_key,
                     Some(Arc::clone(&rate_limiter)),
                 )
             }

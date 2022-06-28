@@ -175,15 +175,7 @@ fn wireguard_test_peer(
     let static_private = static_private.parse::<KeyBytes>().unwrap().0.into();
     let peer_static_public = peer_static_public.parse::<KeyBytes>().unwrap().0.into();
 
-    let peer = Tunn::new(
-        Arc::new(static_private),
-        Arc::new(peer_static_public),
-        None,
-        None,
-        100,
-        None,
-    )
-    .unwrap();
+    let peer = Tunn::new(static_private, peer_static_public, None, None, 100, None).unwrap();
 
     let peer: Arc<Box<Tunn>> = Arc::from(peer);
 
