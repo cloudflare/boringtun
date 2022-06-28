@@ -1,5 +1,5 @@
 use super::make_array;
-use crate::crypto::{constant_time_mac_check, Blake2s, ChaCha20Poly1305};
+use crate::crypto::{constant_time_mac_check, Blake2s};
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
@@ -7,6 +7,9 @@ use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use aead::generic_array::GenericArray;
+use aead::{AeadInPlace, NewAead};
+use chacha20poly1305::{Key, XChaCha20Poly1305};
 use parking_lot::Mutex;
 use rand_core::{OsRng, RngCore};
 
@@ -32,7 +35,7 @@ pub struct RateLimiter {
     start_time: Instant,
     nonce_ctr: AtomicU64, // A single 64bit counter should suffice for many years
     mac1_key: [u8; 32],
-    cookie_key: [u8; 32],
+    cookie_key: Key,
     limit: u64,
     count: AtomicU64,           // The counter since last reset
     last_reset: Mutex<Instant>, // The time last reset was performed on this rate limiter
@@ -52,7 +55,8 @@ impl RateLimiter {
             cookie_key: Blake2s::new_hash()
                 .hash(LABEL_COOKIE)
                 .hash(public_key.as_bytes())
-                .finalize(),
+                .finalize()
+                .into(),
             limit,
             count: AtomicU64::new(0),
             last_reset: Mutex::new(Instant::now()),
@@ -142,12 +146,16 @@ impl RateLimiter {
         receiver_index.copy_from_slice(&idx.to_le_bytes());
         nonce.copy_from_slice(&self.nonce()[..]);
 
-        ChaCha20Poly1305::new_aead(&self.cookie_key).xseal(
-            nonce,
-            mac1,
-            &cookie[..],
-            encrypted_cookie,
-        );
+        let cipher = XChaCha20Poly1305::new(&self.cookie_key);
+
+        let iv = GenericArray::from_slice(nonce);
+
+        encrypted_cookie.copy_from_slice(&cookie);
+        let tag = cipher
+            .encrypt_in_place_detached(iv, mac1, &mut encrypted_cookie[..16])
+            .map_err(|_| WireGuardError::DestinationBufferTooSmall)?;
+
+        encrypted_cookie[16..].copy_from_slice(&tag);
 
         Ok(&mut dst[..super::COOKIE_REPLY_SZ])
     }
