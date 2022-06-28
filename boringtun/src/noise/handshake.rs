@@ -14,21 +14,19 @@ use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
 use std::time::{Duration, Instant, SystemTime};
 
-// static CONSTRUCTION: &'static [u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
-// static IDENTIFIER: &'static [u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
-pub static LABEL_MAC1: &[u8] = b"mac1----";
-pub static LABEL_COOKIE: &[u8] = b"cookie--";
+pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
+pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
 const KEY_LEN: usize = 32;
 const TIMESTAMP_LEN: usize = 12;
 
 // initiator.chaining_key = HASH(CONSTRUCTION)
-static INITIAL_CHAIN_KEY: [u8; KEY_LEN] = [
+const INITIAL_CHAIN_KEY: [u8; KEY_LEN] = [
     96, 226, 109, 174, 243, 39, 239, 192, 46, 195, 53, 226, 160, 37, 210, 208, 22, 235, 66, 6, 248,
     114, 119, 245, 45, 56, 209, 152, 139, 120, 205, 54,
 ];
 
 // initiator.chaining_hash = HASH(initiator.chaining_key || IDENTIFIER)
-static INITIAL_CHAIN_HASH: [u8; KEY_LEN] = [
+const INITIAL_CHAIN_HASH: [u8; KEY_LEN] = [
     34, 17, 179, 97, 8, 26, 197, 102, 105, 18, 67, 219, 69, 138, 213, 50, 45, 156, 108, 102, 34,
     147, 232, 183, 14, 225, 156, 101, 186, 7, 158, 243,
 ];
