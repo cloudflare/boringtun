@@ -11,7 +11,7 @@ mod tests;
 mod timers;
 
 use crate::noise::errors::WireGuardError;
-use crate::noise::handshake::Handshake;
+use crate::noise::handshake::{Handshake, HandshakeState};
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 
@@ -569,14 +569,15 @@ impl Tunn {
     /// * Time since last handshake in seconds
     /// * Data bytes sent
     /// * Data bytes received
-    pub fn stats(&self) -> (Option<u64>, usize, usize, f32, Option<u32>) {
+    pub fn stats(&self) -> (Option<u64>, usize, usize, f32, Option<u32>, HandshakeState) {
         let time = self.time_since_last_handshake().map(|t| t.as_secs());
         let tx_bytes = self.tx_bytes.load(Ordering::Relaxed);
         let rx_bytes = self.rx_bytes.load(Ordering::Relaxed);
         let loss = self.estimate_loss();
         let rtt = self.handshake.lock().last_rtt;
+        let state = self.handshake.lock().state();
 
-        (time, tx_bytes, rx_bytes, loss, rtt)
+        (time, tx_bytes, rx_bytes, loss, rtt, state)
     }
 
     pub fn is_expired(&self) -> bool {

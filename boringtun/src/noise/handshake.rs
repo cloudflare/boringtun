@@ -211,12 +211,13 @@ impl std::fmt::Debug for NoiseParams {
     }
 }
 
-struct HandshakeInitSentState {
+#[derive(Clone)]
+pub struct HandshakeInitSentState {
     local_index: u32,
     hash: [u8; KEY_LEN],
     chaining_key: [u8; KEY_LEN],
     ephemeral_private: x25519_dalek::ReusableSecret,
-    time_sent: Instant,
+    pub time_sent: Instant,
 }
 
 impl std::fmt::Debug for HandshakeInitSentState {
@@ -231,8 +232,8 @@ impl std::fmt::Debug for HandshakeInitSentState {
     }
 }
 
-#[derive(Debug)]
-enum HandshakeState {
+#[derive(Debug, Clone)]
+pub enum HandshakeState {
     None,                             // No handshake in process
     InitSent(HandshakeInitSentState), // We initiated the handshake
     InitReceived {
@@ -378,6 +379,10 @@ impl Handshake {
             cookies: Default::default(),
             last_rtt: None,
         })
+    }
+
+    pub(crate) fn state(&self) -> HandshakeState {
+        self.state.clone()
     }
 
     pub(crate) fn is_in_progress(&self) -> bool {

@@ -309,7 +309,7 @@ pub unsafe extern "C" fn wireguard_force_handshake(
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_stats(tunnel: *mut Tunn) -> stats {
     let tunnel = tunnel.as_ref().unwrap();
-    let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt) = tunnel.stats();
+    let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt, _) = tunnel.stats();
     stats {
         time_since_last_handshake: time.map(|t| t as i64).unwrap_or(-1),
         tx_bytes,
