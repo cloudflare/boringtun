@@ -1,8 +1,7 @@
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
-use boringtun::crypto::{Blake2s, SystemRandom};
 use criterion::{BenchmarkId, Criterion, Throughput};
-use ring::rand::SecureRandom;
+use ring::rand::{SecureRandom, SystemRandom};
 
 pub fn bench_blake2s_hash(c: &mut Criterion) {
     let mut group = c.benchmark_group("blake2s_hash");
@@ -11,14 +10,6 @@ pub fn bench_blake2s_hash(c: &mut Criterion) {
 
     for size in [32, 64, 128] {
         group.throughput(Throughput::Bytes(size as u64));
-
-        group.bench_with_input(BenchmarkId::new("blake2s_custom", size), &size, |b, _| {
-            let buf_in = vec![0u8; size];
-
-            b.iter(|| {
-                Blake2s::new_hash().hash(&buf_in).finalize();
-            });
-        });
 
         group.bench_with_input(BenchmarkId::new("blake2s_crate", size), &size, |b, _| {
             let buf_in = vec![0u8; size];
@@ -41,23 +32,6 @@ pub fn bench_blake2s_hmac(c: &mut Criterion) {
 
     for size in [16, 32] {
         group.throughput(Throughput::Bytes(size as u64));
-
-        group.bench_with_input(BenchmarkId::new("blake2s_custom", size), &size, |b, _| {
-            let buf_in = vec![0u8; size];
-            let rng = SystemRandom::new();
-
-            b.iter_batched(
-                || {
-                    let mut key = [0u8; 32];
-                    rng.fill(&mut key).unwrap();
-                    key
-                },
-                |key| {
-                    Blake2s::new_hmac(&key).hash(&buf_in).finalize();
-                },
-                criterion::BatchSize::SmallInput,
-            );
-        });
 
         group.bench_with_input(BenchmarkId::new("blake2s_crate", size), &size, |b, _| {
             let buf_in = vec![0u8; size];
@@ -91,21 +65,6 @@ pub fn bench_blake2s_keyed(c: &mut Criterion) {
 
     for size in [128, 1024] {
         group.throughput(Throughput::Bytes(size as u64));
-
-        group.bench_with_input(BenchmarkId::new("blake2s_custom", size), &size, |b, _| {
-            let buf_in = vec![0u8; size];
-            let rng = SystemRandom::new();
-
-            b.iter_batched(
-                || {
-                    let mut key = [0u8; 16];
-                    rng.fill(&mut key).unwrap();
-                    key
-                },
-                |key| Blake2s::new_mac(&key).hash(&buf_in).finalize(),
-                criterion::BatchSize::SmallInput,
-            );
-        });
 
         group.bench_with_input(BenchmarkId::new("blake2s_crate", size), &size, |b, _| {
             let buf_in = vec![0u8; size];
