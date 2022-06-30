@@ -10,6 +10,7 @@ mod tests {
     use hex::encode;
     use rand_core::OsRng;
     use ring::rand::{SecureRandom, SystemRandom};
+    use std::fmt::Write as _;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::net::UnixStream;
@@ -100,28 +101,26 @@ mod tests {
             local_addr: &IpAddr,
             local_port: u16,
         ) -> String {
-            let mut conf = String::from("[Interface]");
+            let mut conf = String::from("[Interface]\n");
             // Each allowed ip, becomes a possible address in the config
             for ip in &self.allowed_ips {
-                conf.push_str(&format!("\nAddress = {}/{}", ip.ip, ip.cidr));
+                let _ = writeln!(conf, "Address = {}/{}", ip.ip, ip.cidr);
             }
 
             // The local endpoint port is the remote listen port
-            conf.push_str(&format!("\nListenPort = {}", self.endpoint.port()));
+            let _ = writeln!(conf, "ListenPort = {}", self.endpoint.port());
             // HACK: this should consume the key so it can't be reused instead of cloning and serializing
-            conf.push_str(&format!(
-                "\nPrivateKey = {}",
+            let _ = writeln!(
+                conf,
+                "PrivateKey = {}",
                 base64encode(&self.key.clone().to_bytes())
-            ));
+            );
 
             // We are the peer
-            conf.push_str("\n[Peer]");
-            conf.push_str(&format!(
-                "\nPublicKey = {}",
-                base64encode(local_key.as_bytes())
-            ));
-            conf.push_str(&format!("\nAllowedIPs = {}", local_addr));
-            conf.push_str(&format!("\nEndpoint = 127.0.0.1:{}", local_port));
+            let _ = writeln!(conf, "[Peer]");
+            let _ = writeln!(conf, "PublicKey = {}", base64encode(local_key.as_bytes()));
+            let _ = writeln!(conf, "AllowedIPs = {}", local_addr);
+            let _ = write!(conf, "Endpoint = 127.0.0.1:{}", local_port);
 
             conf
         }
@@ -441,7 +440,7 @@ mod tests {
         ) -> String {
             let mut req = format!("public_key={}\nendpoint={}", encode(key.as_bytes()), ep);
             for AllowedIp { ip, cidr } in allowed_ips {
-                req.push_str(&format!("\nallowed_ip={}/{}", ip, cidr));
+                let _ = write!(req, "\nallowed_ip={}/{}", ip, cidr);
             }
 
             self.wg_set(&req)
