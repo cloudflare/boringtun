@@ -456,17 +456,17 @@ impl Device {
         let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
 
         for peer in self.peers.values_mut() {
-            // Taking a pointer should be Ok as long as all other threads are stopped
-            let mut_ptr = Arc::into_raw(Arc::clone(peer)) as *mut Peer;
+            let peer_mut =
+                Arc::<Peer>::get_mut(peer).expect("set_key requires other threads to be stopped");
 
-            if unsafe {
-                mut_ptr.as_mut().unwrap().tunnel.set_static_private(
+            if peer_mut
+                .tunnel
+                .set_static_private(
                     private_key.clone(),
                     public_key,
                     Some(Arc::clone(&rate_limiter)),
                 )
-            }
-            .is_err()
+                .is_err()
             {
                 // In case we encounter an error, we will remove that peer
                 // An error will be a result of bad public key/secret key combination
