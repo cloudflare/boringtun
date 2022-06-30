@@ -22,6 +22,8 @@ x25519-dalek = { version = "2.0.0-pre.1", features = ["reusable_secrets"] }
 rand_core = { version = "0.6.3", features = ["getrandom"]}
 chacha20poly1305 = "0.10.0-pre"
 aead = "0.4.3"
+blake2 = "0.10"
+hmac = "0.12"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

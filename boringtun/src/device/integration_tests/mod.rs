@@ -5,12 +5,11 @@
 // Those tests require docker and sudo privileges to run
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
-    use crate::crypto::SystemRandom;
     use crate::device::{DeviceConfig, DeviceHandle};
     use base64::encode as base64encode;
     use hex::encode;
     use rand_core::OsRng;
-    use ring::rand::SecureRandom;
+    use ring::rand::{SecureRandom, SystemRandom};
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::net::UnixStream;

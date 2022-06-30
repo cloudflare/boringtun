@@ -1,5 +1,5 @@
+use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_24};
 use super::make_array;
-use crate::crypto::{constant_time_mac_check, Blake2s};
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
@@ -12,6 +12,7 @@ use aead::{AeadInPlace, NewAead};
 use chacha20poly1305::{Key, XChaCha20Poly1305};
 use parking_lot::Mutex;
 use rand_core::{OsRng, RngCore};
+use ring::constant_time::verify_slices_are_equal;
 
 const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can optimize out the division
 const COOKIE_SIZE: usize = 16;
@@ -48,15 +49,8 @@ impl RateLimiter {
             secret_key: make_array(&Self::rand_bytes()[..16]),
             start_time: Instant::now(),
             nonce_ctr: AtomicU64::new(0),
-            mac1_key: Blake2s::new_hash()
-                .hash(LABEL_MAC1)
-                .hash(public_key.as_bytes())
-                .finalize(),
-            cookie_key: Blake2s::new_hash()
-                .hash(LABEL_COOKIE)
-                .hash(public_key.as_bytes())
-                .finalize()
-                .into(),
+            mac1_key: b2s_hash(LABEL_MAC1, public_key.as_bytes()),
+            cookie_key: b2s_hash(LABEL_COOKIE, public_key.as_bytes()).into(),
             limit,
             count: AtomicU64::new(0),
             last_reset: Mutex::new(Instant::now()),
@@ -82,7 +76,6 @@ impl RateLimiter {
 
     // Compute the correct cookie value based on the current secret value and the source IP
     fn current_cookie(&self, addr: IpAddr) -> Cookie {
-        let mut cookie = [0u8; COOKIE_SIZE];
         let mut addr_bytes = [0u8; 16];
 
         match addr {
@@ -95,28 +88,13 @@ impl RateLimiter {
         let cur_counter = Instant::now().duration_since(self.start_time).as_secs() / COOKIE_REFRESH;
 
         // Next we derive the cookie
-        cookie[..].copy_from_slice(
-            &Blake2s::new_mac(&self.secret_key[..])
-                .hash(&cur_counter.to_le_bytes())
-                .hash(&addr_bytes[..])
-                .finalize()[..COOKIE_SIZE],
-        );
-
-        cookie
+        b2s_keyed_mac_16_2(&self.secret_key, &cur_counter.to_le_bytes(), &addr_bytes)
     }
 
     fn nonce(&self) -> [u8; COOKIE_NONCE_SIZE] {
-        let mut nonce = [0u8; COOKIE_NONCE_SIZE];
-
         let ctr = self.nonce_ctr.fetch_add(1, Ordering::Relaxed);
 
-        nonce[..].copy_from_slice(
-            &Blake2s::new_mac(&self.nonce_key[..])
-                .hash(&ctr.to_le_bytes())
-                .finalize()[..COOKIE_NONCE_SIZE],
-        );
-
-        nonce
+        b2s_mac_24(&self.nonce_key, &ctr.to_le_bytes())
     }
 
     fn is_under_load(&self) -> bool {
@@ -176,8 +154,9 @@ impl RateLimiter {
             let (msg, macs) = src.split_at(src.len() - 32);
             let (mac1, mac2) = macs.split_at(16);
 
-            let computed_mac1 = Blake2s::new_mac(&self.mac1_key).hash(msg).finalize();
-            constant_time_mac_check(&computed_mac1[..16], mac1).map_err(TunnResult::Err)?;
+            let computed_mac1 = b2s_keyed_mac_16(&self.mac1_key, msg);
+            verify_slices_are_equal(&computed_mac1[..16], mac1)
+                .map_err(|_| TunnResult::Err(WireGuardError::InvalidMac))?;
 
             if self.is_under_load() {
                 let addr = match src_addr {
@@ -187,12 +166,9 @@ impl RateLimiter {
 
                 // Only given an address can we validate mac2
                 let cookie = self.current_cookie(addr);
-                let computed_mac2 = Blake2s::new_mac(&cookie[..])
-                    .hash(msg)
-                    .hash(mac1)
-                    .finalize();
+                let computed_mac2 = b2s_keyed_mac_16_2(&cookie, msg, mac1);
 
-                if constant_time_mac_check(&computed_mac2[..16], mac2).is_err() {
+                if verify_slices_are_equal(&computed_mac2[..16], mac2).is_err() {
                     let cookie_packet = self
                         .format_cookie_reply(sender_idx, cookie, mac1, dst)
                         .map_err(TunnResult::Err)?;

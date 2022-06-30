@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
-use crate::crypto::Blake2s;
 use crate::noise::errors::WireGuardError;
 use crate::noise::make_array;
 use crate::noise::session::Session;
 use aead::{Aead, NewAead, Payload};
+use blake2::digest::{FixedOutput, KeyInit};
+use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
 use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
@@ -33,19 +34,53 @@ static INITIAL_CHAIN_HASH: [u8; KEY_LEN] = [
 ];
 
 #[inline]
-fn b2s_hash(data1: &[u8], data2: &[u8]) -> [u8; 32] {
-    Blake2s::new_hash().hash(data1).hash(data2).finalize()
+pub(crate) fn b2s_hash(data1: &[u8], data2: &[u8]) -> [u8; 32] {
+    let mut hash = Blake2s256::new();
+    hash.update(data1);
+    hash.update(data2);
+    hash.finalize().into()
 }
 
 #[inline]
-fn b2s_hmac(key: &[u8], data1: &[u8]) -> [u8; 32] {
-    Blake2s::new_hmac(key).hash(data1).finalize()
+/// RFC 2401 HMAC+Blake2s, not to be confused with *keyed* Blake2s
+pub(crate) fn b2s_hmac(key: &[u8], data1: &[u8]) -> [u8; 32] {
+    use blake2::digest::Update;
+    type HmacBlake2s = hmac::SimpleHmac<Blake2s256>;
+    let mut hmac = HmacBlake2s::new_from_slice(key).unwrap();
+    hmac.update(data1);
+    hmac.finalize_fixed().into()
 }
 
 #[inline]
 /// Like b2s_hmac, but chain data1 and data2 together
-fn b2s_hmac2(key: &[u8], data1: &[u8], data2: &[u8]) -> [u8; 32] {
-    Blake2s::new_hmac(key).hash(data1).hash(data2).finalize()
+pub(crate) fn b2s_hmac2(key: &[u8], data1: &[u8], data2: &[u8]) -> [u8; 32] {
+    use blake2::digest::Update;
+    type HmacBlake2s = hmac::SimpleHmac<Blake2s256>;
+    let mut hmac = HmacBlake2s::new_from_slice(key).unwrap();
+    hmac.update(data1);
+    hmac.update(data2);
+    hmac.finalize_fixed().into()
+}
+
+#[inline]
+pub(crate) fn b2s_keyed_mac_16(key: &[u8], data1: &[u8]) -> [u8; 16] {
+    let mut hmac = Blake2sMac::new_from_slice(key).unwrap();
+    blake2::digest::Update::update(&mut hmac, data1);
+    hmac.finalize_fixed().into()
+}
+
+#[inline]
+pub(crate) fn b2s_keyed_mac_16_2(key: &[u8], data1: &[u8], data2: &[u8]) -> [u8; 16] {
+    let mut hmac = Blake2sMac::new_from_slice(key).unwrap();
+    blake2::digest::Update::update(&mut hmac, data1);
+    blake2::digest::Update::update(&mut hmac, data2);
+    hmac.finalize_fixed().into()
+}
+
+pub(crate) fn b2s_mac_24(key: &[u8], data1: &[u8]) -> [u8; 24] {
+    let mut hmac = Blake2sMac::new_from_slice(key).unwrap();
+    blake2::digest::Update::update(&mut hmac, data1);
+    hmac.finalize_fixed().into()
 }
 
 #[inline]
@@ -634,17 +669,13 @@ impl Handshake {
         let mac2_off = dst.len() - 16;
 
         // msg.mac1 = MAC(HASH(LABEL_MAC1 || responder.static_public), msg[0:offsetof(msg.mac1)])
-        let msg_mac1: [u8; 16] = make_array(
-            &Blake2s::new_mac(&self.params.sending_mac1_key)
-                .hash(&dst[..mac1_off])
-                .finalize()[..],
-        );
+        let msg_mac1 = b2s_keyed_mac_16(&self.params.sending_mac1_key, &dst[..mac1_off]);
 
         dst[mac1_off..mac2_off].copy_from_slice(&msg_mac1[..]);
 
         //msg.mac2 = MAC(initiator.last_received_cookie, msg[0:offsetof(msg.mac2)])
         let msg_mac2: [u8; 16] = if let Some(cookie) = self.cookies.write_cookie {
-            make_array(&Blake2s::new_mac(&cookie).hash(&dst[..mac2_off]).finalize()[..])
+            b2s_keyed_mac_16(&cookie, &dst[..mac2_off])
         } else {
             [0u8; 16]
         };
