@@ -26,8 +26,10 @@ impl std::fmt::Debug for Session {
     }
 }
 
-const DATA_OFFSET: usize = 16; // Where encrypted data resides in a data packet
-const AEAD_SIZE: usize = 16; // The overhead of the AEAE
+/// Where encrypted data resides in a data packet
+const DATA_OFFSET: usize = 16;
+/// The overhead of the AEAD
+const AEAD_SIZE: usize = 16;
 
 // Receiving buffer constants
 const WORD_SIZE: u64 = 64;
@@ -36,10 +38,11 @@ const N_BITS: u64 = WORD_SIZE * N_WORDS;
 
 #[derive(Debug, Clone, Default)]
 struct ReceivingKeyCounterValidator {
-    // In order to avoid replays while allowing for some reordering of the packets, we keep a
-    // bitmap of received packets, and the value of the highest counter
+    /// In order to avoid replays while allowing for some reordering of the packets, we keep a
+    /// bitmap of received packets, and the value of the highest counter
     next: u64,
-    receive_cnt: u64, // Used to estimate packet loss
+    /// Used to estimate packet loss
+    receive_cnt: u64,
     bitmap: [u64; N_WORDS as usize],
 }
 
@@ -60,7 +63,7 @@ impl ReceivingKeyCounterValidator {
         self.bitmap[word] &= !(1u64 << bit);
     }
 
-    // Clear the word that contains idx
+    /// Clear the word that contains idx
     #[inline(always)]
     fn clear_word(&mut self, idx: u64) {
         let bit_idx = idx % N_BITS;
@@ -68,7 +71,7 @@ impl ReceivingKeyCounterValidator {
         self.bitmap[word] = 0;
     }
 
-    // Returns true if bit is set, false otherwise
+    /// Returns true if bit is set, false otherwise
     #[inline(always)]
     fn check_bit(&self, idx: u64) -> bool {
         let bit_idx = idx % N_BITS;
@@ -77,7 +80,7 @@ impl ReceivingKeyCounterValidator {
         ((self.bitmap[word] >> bit) & 1) == 1
     }
 
-    // Returns true if the counter was not yet received, and is not too far back
+    /// Returns true if the counter was not yet received, and is not too far back
     #[inline(always)]
     fn will_accept(&self, counter: u64) -> bool {
         if counter >= self.next {
@@ -91,8 +94,8 @@ impl ReceivingKeyCounterValidator {
         !self.check_bit(counter)
     }
 
-    // Marks the counter as received, and returns true if it is still good (in case during
-    // decryption something changed)
+    /// Marks the counter as received, and returns true if it is still good (in case during
+    /// decryption something changed)
     #[inline(always)]
     fn mark_did_receive(&mut self, counter: u64) -> Result<(), WireGuardError> {
         if counter + N_BITS < self.next {
@@ -167,7 +170,7 @@ impl Session {
         self.receiving_index as usize
     }
 
-    // Returns true if receiving counter is good to use
+    /// Returns true if receiving counter is good to use
     fn receiving_counter_quick_check(&self, counter: u64) -> Result<(), WireGuardError> {
         let counter_validator = self.receiving_key_counter.lock();
         if counter_validator.will_accept(counter) {
@@ -177,7 +180,7 @@ impl Session {
         }
     }
 
-    // Returns true if receiving counter is good to use, and marks it as used {
+    /// Returns true if receiving counter is good to use, and marks it as used {
     fn receiving_counter_mark(&self, counter: u64) -> Result<(), WireGuardError> {
         let mut counter_validator = self.receiving_key_counter.lock();
         let ret = counter_validator.mark_did_receive(counter);
@@ -187,9 +190,9 @@ impl Session {
         ret
     }
 
-    // src - an IP packet from the interface
-    // dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
-    // returns the size of the formatted packet
+    /// src - an IP packet from the interface
+    /// dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
+    /// returns the size of the formatted packet
     pub(super) fn format_packet_data<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> &'a mut [u8] {
         if dst.len() < src.len() + super::DATA_OVERHEAD_SZ {
             panic!("The destination buffer is too small");
@@ -226,10 +229,10 @@ impl Session {
         &mut dst[..DATA_OFFSET + n]
     }
 
-    // packet - a data packet we received from the network
-    // dst - pre-allocated space to hold the encapsulated IP packet, to send to the interface
-    //       dst will always take less space than src
-    // return the size of the encapsulated packet on success
+    /// packet - a data packet we received from the network
+    /// dst - pre-allocated space to hold the encapsulated IP packet, to send to the interface
+    ///       dst will always take less space than src
+    /// return the size of the encapsulated packet on success
     pub(super) fn receive_packet_data<'a>(
         &self,
         packet: PacketData,
@@ -264,7 +267,7 @@ impl Session {
         Ok(ret)
     }
 
-    // Returns the estimated downstream packet loss for this session
+    /// Returns the estimated downstream packet loss for this session
     pub(super) fn current_packet_cnt(&self) -> (u64, u64) {
         let counter_validator = self.receiving_key_counter.lock();
         (counter_validator.next, counter_validator.receive_cnt)

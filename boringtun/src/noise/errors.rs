@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #[derive(Debug)]
-#[repr(C)]
 pub enum WireGuardError {
     DestinationBufferTooSmall,
     IncorrectPacketLength,

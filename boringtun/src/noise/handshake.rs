@@ -14,21 +14,19 @@ use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
 use std::time::{Duration, Instant, SystemTime};
 
-// static CONSTRUCTION: &'static [u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
-// static IDENTIFIER: &'static [u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
-pub static LABEL_MAC1: &[u8] = b"mac1----";
-pub static LABEL_COOKIE: &[u8] = b"cookie--";
+pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
+pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
 const KEY_LEN: usize = 32;
 const TIMESTAMP_LEN: usize = 12;
 
 // initiator.chaining_key = HASH(CONSTRUCTION)
-static INITIAL_CHAIN_KEY: [u8; KEY_LEN] = [
+const INITIAL_CHAIN_KEY: [u8; KEY_LEN] = [
     96, 226, 109, 174, 243, 39, 239, 192, 46, 195, 53, 226, 160, 37, 210, 208, 22, 235, 66, 6, 248,
     114, 119, 245, 45, 56, 209, 152, 139, 120, 205, 54,
 ];
 
 // initiator.chaining_hash = HASH(initiator.chaining_key || IDENTIFIER)
-static INITIAL_CHAIN_HASH: [u8; KEY_LEN] = [
+const INITIAL_CHAIN_HASH: [u8; KEY_LEN] = [
     34, 17, 179, 97, 8, 26, 197, 102, 105, 18, 67, 219, 69, 138, 213, 50, 45, 156, 108, 102, 34,
     147, 232, 183, 14, 225, 156, 101, 186, 7, 158, 243,
 ];
@@ -156,21 +154,21 @@ fn aead_chacha20_open_inner<'in_out>(
 }
 
 #[derive(Debug)]
-// This struct represents a 12 byte [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp
+/// This struct represents a 12 byte [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp
 struct Tai64N {
     secs: u64,
     nano: u32,
 }
 
 #[derive(Debug)]
-// This struct computes a [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp from current system time
+/// This struct computes a [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp from current system time
 struct TimeStamper {
     duration_at_start: Duration,
     instant_at_start: Instant,
 }
 
 impl TimeStamper {
-    // Create a new TimeStamper
+    /// Create a new TimeStamper
     pub fn new() -> TimeStamper {
         TimeStamper {
             duration_at_start: SystemTime::now()
@@ -179,7 +177,8 @@ impl TimeStamper {
             instant_at_start: Instant::now(),
         }
     }
-    // Take time reading and generate a 12 byte timestamp
+
+    /// Take time reading and generate a 12 byte timestamp
     pub fn stamp(&self) -> [u8; 12] {
         const TAI64_BASE: u64 = (1u64 << 62) + 37;
         let mut ext_stamp = [0u8; 12];
@@ -191,12 +190,12 @@ impl TimeStamper {
 }
 
 impl Tai64N {
-    // A zeroed out timestamp
+    /// A zeroed out timestamp
     fn zero() -> Tai64N {
         Tai64N { secs: 0, nano: 0 }
     }
 
-    // Parse a timestamp from a 12 byte u8 slice
+    /// Parse a timestamp from a 12 byte u8 slice
     fn parse(buf: &[u8]) -> Result<Tai64N, WireGuardError> {
         if buf.len() < 12 {
             return Err(WireGuardError::InvalidTai64nTimestamp);
@@ -216,21 +215,27 @@ impl Tai64N {
         Ok(Tai64N { secs, nano })
     }
 
-    // Check if this timestamp represents a time that is chronologically after the time represented
-    // by the other timestamp
+    /// Check if this timestamp represents a time that is chronologically after the time represented
+    /// by the other timestamp
     pub fn after(&self, other: &Tai64N) -> bool {
         (self.secs > other.secs) || ((self.secs == other.secs) && (self.nano > other.nano))
     }
 }
 
-// Parameters used by the noise protocol
+/// Parameters used by the noise protocol
 struct NoiseParams {
-    static_public: x25519_dalek::PublicKey, // Our static public key
-    static_private: x25519_dalek::StaticSecret, // Our static private key
-    peer_static_public: x25519_dalek::PublicKey, // Static public key of the other party
-    static_shared: x25519_dalek::SharedSecret, // A shared key = DH(static_private, peer_static_public)
-    sending_mac1_key: [u8; KEY_LEN], // A pre-computation of HASH("mac1----", peer_static_public) for this peer
-    preshared_key: Option<[u8; KEY_LEN]>, // An optional preshared key
+    /// Our static public key
+    static_public: x25519_dalek::PublicKey,
+    /// Our static private key
+    static_private: x25519_dalek::StaticSecret,
+    /// Static public key of the other party
+    peer_static_public: x25519_dalek::PublicKey,
+    /// A shared key = DH(static_private, peer_static_public)
+    static_shared: x25519_dalek::SharedSecret,
+    /// A pre-computation of HASH("mac1----", peer_static_public) for this peer
+    sending_mac1_key: [u8; KEY_LEN],
+    /// An optional preshared key
+    preshared_key: Option<[u8; KEY_LEN]>,
 }
 
 impl std::fmt::Debug for NoiseParams {
@@ -268,25 +273,34 @@ impl std::fmt::Debug for HandshakeInitSentState {
 
 #[derive(Debug)]
 enum HandshakeState {
-    None,                             // No handshake in process
-    InitSent(HandshakeInitSentState), // We initiated the handshake
+    /// No handshake in process
+    None,
+    /// We initiated the handshake
+    InitSent(HandshakeInitSentState),
+    /// Handshake initiated by peer
     InitReceived {
         hash: [u8; KEY_LEN],
         chaining_key: [u8; KEY_LEN],
         peer_ephemeral_public: x25519_dalek::PublicKey,
         peer_index: u32,
-    }, // Handshake initiated by peer
-    Expired, // Handshake was established too long ago (implies no handshake is in progress)
+    },
+    /// Handshake was established too long ago (implies no handshake is in progress)
+    Expired,
 }
 
 pub struct Handshake {
     params: NoiseParams,
-    next_index: u32,          // Index of the next session
-    previous: HandshakeState, // Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed response to a handshake with bad networks
-    state: HandshakeState,    // Current handshake state
+    /// Index of the next session
+    next_index: u32,
+    /// Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed response to a handshake with bad networks
+    previous: HandshakeState,
+    /// Current handshake state
+    state: HandshakeState,
     cookies: Cookies,
-    last_handshake_timestamp: Tai64N, // The timestamp of the last handshake we received
-    stamper: TimeStamper,             // TODO: make TimeStamper a singleton
+    /// The timestamp of the last handshake we received
+    last_handshake_timestamp: Tai64N,
+    // TODO: make TimeStamper a singleton
+    stamper: TimeStamper,
     pub(super) last_rtt: Option<u32>,
 }
 
@@ -715,7 +729,7 @@ impl Handshake {
         message_type.copy_from_slice(&super::HANDSHAKE_INIT.to_le_bytes());
         // msg.sender_index = little_endian(initiator.sender_index)
         sender_index.copy_from_slice(&local_index.to_le_bytes());
-        //msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
+        // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
         unencrypted_ephemeral
             .copy_from_slice(x25519_dalek::PublicKey::from(&ephemeral_private).as_bytes());
         // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)

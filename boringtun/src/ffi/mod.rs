@@ -5,7 +5,7 @@
 // pointers and buffers/lengths to these, ok?
 #![allow(clippy::missing_safety_doc)]
 
-/// C bindings for the BoringTun library
+//! C bindings for the BoringTun library
 use super::noise::{Tunn, TunnResult};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
