@@ -299,7 +299,8 @@ pub struct Handshake {
     cookies: Cookies,
     /// The timestamp of the last handshake we received
     last_handshake_timestamp: Tai64N,
-    stamper: TimeStamper, // TODO: make TimeStamper a singleton
+    // TODO: make TimeStamper a singleton
+    stamper: TimeStamper,
     pub(super) last_rtt: Option<u32>,
 }
 
