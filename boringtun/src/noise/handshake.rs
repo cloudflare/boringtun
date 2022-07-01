@@ -3,7 +3,6 @@
 
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
-use crate::noise::make_array;
 use crate::noise::session::Session;
 use aead::{Aead, NewAead, Payload};
 use blake2::digest::{FixedOutput, KeyInit};
@@ -196,13 +195,14 @@ impl Tai64N {
     }
 
     /// Parse a timestamp from a 12 byte u8 slice
-    fn parse(buf: &[u8]) -> Result<Tai64N, WireGuardError> {
+    fn parse(buf: &[u8; 12]) -> Result<Tai64N, WireGuardError> {
         if buf.len() < 12 {
             return Err(WireGuardError::InvalidTai64nTimestamp);
         }
 
-        let secs = u64::from_be_bytes(make_array(&buf[0..]));
-        let nano = u32::from_be_bytes(make_array(&buf[8..]));
+        let (sec_bytes, nano_bytes) = buf.split_at(std::mem::size_of::<u64>());
+        let secs = u64::from_be_bytes(sec_bytes.try_into().unwrap());
+        let nano = u32::from_be_bytes(nano_bytes.try_into().unwrap());
 
         // WireGuard does not actually expect tai64n timestamp, just monotonically increasing one
         //if secs < (1u64 << 62) || secs >= (1u64 << 63) {

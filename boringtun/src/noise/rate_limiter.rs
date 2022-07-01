@@ -1,5 +1,4 @@
 use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_24};
-use super::make_array;
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
@@ -50,9 +49,11 @@ pub struct RateLimiter {
 
 impl RateLimiter {
     pub fn new(public_key: &x25519_dalek::PublicKey, limit: u64) -> Self {
+        let mut secret_key = [0u8; 16];
+        OsRng.fill_bytes(&mut secret_key);
         RateLimiter {
             nonce_key: Self::rand_bytes(),
-            secret_key: make_array(&Self::rand_bytes()[..16]),
+            secret_key,
             start_time: Instant::now(),
             nonce_ctr: AtomicU64::new(0),
             mac1_key: b2s_hash(LABEL_MAC1, public_key.as_bytes()),
