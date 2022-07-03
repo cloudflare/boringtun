@@ -194,7 +194,7 @@ impl<H: Send + Sync> EventPoll<H> {
 
         let guard = EventGuard {
             kqueue: self.kqueue,
-            event: &event_data,
+            event: event_data,
             poll: self,
         };
 
@@ -331,6 +331,6 @@ impl<'a, H> EventGuard<'a, H> {
 
     /// Stub: only used for Linux-specific features.
     pub fn fd(&self) -> i32 {
-        return -1;
+        -1
     }
 }

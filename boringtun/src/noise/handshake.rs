@@ -4,7 +4,7 @@
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
-use aead::{Aead, NewAead, Payload};
+use aead::{Aead, Payload};
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
