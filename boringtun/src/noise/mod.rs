@@ -172,8 +172,10 @@ impl Tunn {
         static_public: x25519_dalek::PublicKey,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Result<(), WireGuardError> {
-        let mut timers = self.timers.lock();
-        timers.should_reset_rr = rate_limiter.is_none();
+        {
+            let mut timers = self.timers.lock();
+            timers.should_reset_rr = rate_limiter.is_none();
+        }
 
         self.rate_limiter = rate_limiter.unwrap_or_else(|| {
             Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))

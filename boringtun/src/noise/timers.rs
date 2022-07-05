@@ -3,6 +3,7 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
+use parking_lot::MutexGuard;
 use std::mem;
 use std::ops::{Index, IndexMut};
 use std::sync::atomic::Ordering;
@@ -168,9 +169,7 @@ impl Tunn {
         timers.clear();
     }
 
-    fn update_session_timers(&self, time_now: Duration) {
-        let mut timers = self.timers.lock();
-
+    fn update_session_timers(&self, time_now: Duration, timers: &mut MutexGuard<'_, Timers>) {
         for (i, t) in timers.session_timers.iter_mut().enumerate() {
             if time_now - t.time() > REJECT_AFTER_TIME {
                 if let Some(session) = self.sessions[i].write().take() {
@@ -200,7 +199,7 @@ impl Tunn {
         let now = time.duration_since(timers.time_started);
         timers[TimeCurrent].set(now);
 
-        self.update_session_timers(now);
+        self.update_session_timers(now, &mut timers);
 
         // Load timers only once:
         let session_established = timers[TimeSessionEstablished].time();
