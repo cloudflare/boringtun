@@ -336,13 +336,15 @@ impl Tunn {
     }
 
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
-        let timers = self.timers.lock();
-
         let current_session = self.current.load(Ordering::Acquire);
-        if self.sessions[current_session % super::N_SESSIONS]
+
+        let has_current_session = self.sessions[current_session % super::N_SESSIONS]
             .read()
-            .is_some()
-        {
+            .is_some();
+
+        if has_current_session {
+            let timers = self.timers.lock();
+
             let time_current = Instant::now().duration_since(timers.time_started);
             let time_session_established = timers[TimeSessionEstablished].time();
             let epoch_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
