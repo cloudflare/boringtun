@@ -70,7 +70,7 @@ pub struct Tunn {
     /// Queue to store blocked packets
     packet_queue: Mutex<VecDeque<Vec<u8>>>,
     /// Keeps tabs on the expiring timers
-    timers: timers::Timers,
+    timers: Mutex<timers::Timers>,
     tx_bytes: AtomicUsize,
     rx_bytes: AtomicUsize,
     rate_limiter: Arc<RateLimiter>,
@@ -155,7 +155,7 @@ impl Tunn {
             rx_bytes: Default::default(),
 
             packet_queue: Mutex::new(VecDeque::new()),
-            timers: Timers::new(persistent_keepalive, rate_limiter.is_none()),
+            timers: Mutex::new(Timers::new(persistent_keepalive, rate_limiter.is_none())),
 
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
@@ -172,7 +172,9 @@ impl Tunn {
         static_public: x25519_dalek::PublicKey,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Result<(), WireGuardError> {
-        self.timers.should_reset_rr = rate_limiter.is_none();
+        let mut timers = self.timers.lock();
+        timers.should_reset_rr = rate_limiter.is_none();
+
         self.rate_limiter = rate_limiter.unwrap_or_else(|| {
             Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
         });
@@ -378,14 +380,17 @@ impl Tunn {
 
     /// Update the index of the currently used session, if needed
     fn set_current_session(&self, new_idx: usize) {
+        let timers = self.timers.lock();
+
         let cur_idx = self.current.load(Ordering::Relaxed);
         if cur_idx == new_idx {
             // There is nothing to do, already using this session, this is the common case
             return;
         }
+
         if self.sessions[cur_idx % N_SESSIONS].read().is_none()
-            || self.timers.session_timers[new_idx % N_SESSIONS].time()
-                >= self.timers.session_timers[cur_idx % N_SESSIONS].time()
+            || timers.session_timers[new_idx % N_SESSIONS].time()
+                >= timers.session_timers[cur_idx % N_SESSIONS].time()
         {
             self.current.store(new_idx, Ordering::SeqCst);
             tracing::debug!(message = "New session", session = new_idx);
@@ -431,7 +436,7 @@ impl Tunn {
         }
 
         if handshake.is_expired() {
-            self.timers.clear();
+            self.timers.lock().clear();
         }
 
         let starting_new_handshake = !handshake.is_in_progress();

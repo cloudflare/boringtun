@@ -3,8 +3,9 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
-use std::ops::Index;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::mem;
+use std::ops::{Index, IndexMut};
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 // Some constants, represent time in seconds
@@ -46,22 +47,22 @@ use self::TimerName::*;
 // * Even if some timer is triggered with a tiny delay there is no harm in that
 #[derive(Default, Debug)]
 pub struct Timer {
-    time: AtomicUsize,
+    time: usize,
 }
 
 #[derive(Debug)]
 pub struct Timers {
     /// Is the owner of the timer the initiator or the responder for the last handshake?
-    is_initiator: AtomicBool,
+    is_initiator: bool,
     /// Start time of the tunnel
     time_started: Instant,
     timers: [Timer; TimerName::Top as usize],
     pub(super) session_timers: [Timer; super::N_SESSIONS],
     /// Did we receive data without sending anything back?
-    want_keepalive: AtomicBool,
+    want_keepalive: bool,
     /// Did we send data without hearing back?
-    want_handshake: AtomicBool,
-    persistent_keepalive: AtomicUsize,
+    want_handshake: bool,
+    persistent_keepalive: usize,
     /// Should this timer call reset rr function (if not a shared rr instance)
     pub(super) should_reset_rr: bool,
 }
@@ -69,30 +70,30 @@ pub struct Timers {
 impl Timers {
     pub(super) fn new(persistent_keepalive: Option<u16>, reset_rr: bool) -> Timers {
         Timers {
-            is_initiator: AtomicBool::new(false),
+            is_initiator: false,
             time_started: Instant::now(),
             timers: Default::default(),
             session_timers: Default::default(),
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
-            persistent_keepalive: AtomicUsize::new(usize::from(persistent_keepalive.unwrap_or(0))),
+            persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
         }
     }
 
     fn is_initiator(&self) -> bool {
-        self.is_initiator.load(Ordering::Relaxed)
+        self.is_initiator
     }
 
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
-    pub(super) fn clear(&self) {
+    pub(super) fn clear(&mut self) {
         let now = Instant::now().duration_since(self.time_started);
-        for t in &self.timers[..] {
+        for t in &mut self.timers[..] {
             t.set(now);
         }
-        self.want_handshake.store(false, Ordering::Relaxed);
-        self.want_keepalive.store(false, Ordering::Relaxed);
+        self.want_handshake = false;
+        self.want_keepalive = false;
     }
 }
 
@@ -103,45 +104,58 @@ impl Index<TimerName> for Timers {
     }
 }
 
+impl IndexMut<TimerName> for Timers {
+    fn index_mut(&mut self, index: TimerName) -> &mut Timer {
+        &mut self.timers[index as usize]
+    }
+}
+
 impl Timer {
     pub(super) fn time(&self) -> Duration {
-        Duration::from_secs(self.time.load(Ordering::Relaxed) as _)
+        Duration::from_secs(self.time as _)
     }
 
-    fn set(&self, val: Duration) {
-        self.time.store(val.as_secs() as _, Ordering::Relaxed);
+    fn set(&mut self, val: Duration) {
+        self.time = val.as_secs() as _;
     }
 }
 
 impl Tunn {
     pub(super) fn timer_tick(&self, timer_name: TimerName) {
+        let mut timers = self.timers.lock();
         match timer_name {
             TimeLastPacketReceived => {
-                self.timers.want_keepalive.store(true, Ordering::Relaxed);
-                self.timers.want_handshake.store(false, Ordering::Relaxed);
+                timers.want_keepalive = true;
+                timers.want_handshake = false;
             }
             TimeLastPacketSent => {
-                self.timers.want_handshake.store(true, Ordering::Relaxed);
-                self.timers.want_keepalive.store(false, Ordering::Relaxed);
+                timers.want_handshake = true;
+                timers.want_keepalive = false;
             }
             _ => {}
         }
 
-        self.timers[timer_name].set(self.timers[TimeCurrent].time());
+        let time = timers[TimeCurrent].time();
+
+        timers[timer_name].set(time);
     }
 
     pub(super) fn timer_tick_session_established(&self, is_initiator: bool, session_idx: usize) {
         self.timer_tick(TimeSessionEstablished);
-        self.timers.session_timers[session_idx % crate::noise::N_SESSIONS]
-            .set(self.timers[TimeCurrent].time());
-        self.timers
-            .is_initiator
-            .store(is_initiator, Ordering::Relaxed)
+
+        let mut timers = self.timers.lock();
+
+        let time = timers[TimeCurrent].time();
+
+        timers.session_timers[session_idx % crate::noise::N_SESSIONS].set(time);
+        timers.is_initiator = is_initiator;
     }
 
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     fn clear_all(&self) {
+        let mut timers = self.timers.lock();
+
         for session in &self.sessions {
             *session.write() = None;
         }
@@ -151,13 +165,13 @@ impl Tunn {
             queued.clear();
         }
 
-        self.timers.clear();
+        timers.clear();
     }
 
     fn update_session_timers(&self, time_now: Duration) {
-        let timers = &self.timers;
+        let mut timers = self.timers.lock();
 
-        for (i, t) in timers.session_timers.iter().enumerate() {
+        for (i, t) in timers.session_timers.iter_mut().enumerate() {
             if time_now - t.time() > REJECT_AFTER_TIME {
                 if let Some(session) = self.sessions[i].write().take() {
                     tracing::debug!(
@@ -175,7 +189,7 @@ impl Tunn {
         let mut keepalive_required = false;
 
         let time = Instant::now();
-        let timers = &self.timers;
+        let mut timers = self.timers.lock();
 
         if timers.should_reset_rr {
             self.rate_limiter.reset_count();
@@ -195,7 +209,7 @@ impl Tunn {
         let aut_packet_sent = timers[TimeLastPacketSent].time();
         let data_packet_received = timers[TimeLastDataPacketReceived].time();
         let data_packet_sent = timers[TimeLastDataPacketSent].time();
-        let persistent_keepalive = timers.persistent_keepalive.load(Ordering::Relaxed);
+        let persistent_keepalive = timers.persistent_keepalive;
 
         {
             let mut handshake = match self.handshake.try_lock() {
@@ -281,7 +295,7 @@ impl Tunn {
                 // we initiate a new handshake.
                 if data_packet_sent > aut_packet_received
                     && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
-                    && timers.want_handshake.swap(false, Ordering::Relaxed)
+                    && mem::replace(&mut timers.want_handshake, false)
                 {
                     tracing::warn!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
@@ -292,7 +306,7 @@ impl Tunn {
                     // to the given peer in KEEPALIVE ms, we send an empty packet.
                     if data_packet_received > aut_packet_sent
                         && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
-                        && timers.want_keepalive.swap(false, Ordering::Relaxed)
+                        && mem::replace(&mut timers.want_keepalive, false)
                     {
                         tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                         keepalive_required = true;
@@ -323,13 +337,15 @@ impl Tunn {
     }
 
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
+        let timers = self.timers.lock();
+
         let current_session = self.current.load(Ordering::Acquire);
         if self.sessions[current_session % super::N_SESSIONS]
             .read()
             .is_some()
         {
-            let time_current = Instant::now().duration_since(self.timers.time_started);
-            let time_session_established = self.timers[TimeSessionEstablished].time();
+            let time_current = Instant::now().duration_since(timers.time_started);
+            let time_session_established = timers[TimeSessionEstablished].time();
             let epoch_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
             Some(epoch_time - (time_current - time_session_established))
@@ -339,7 +355,8 @@ impl Tunn {
     }
 
     pub fn persistent_keepalive(&self) -> Option<u16> {
-        let keepalive = self.timers.persistent_keepalive.load(Ordering::Relaxed);
+        let timers = self.timers.lock();
+        let keepalive = timers.persistent_keepalive;
 
         if keepalive > 0 {
             Some(keepalive as u16)
