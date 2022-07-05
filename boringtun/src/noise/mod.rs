@@ -382,18 +382,19 @@ impl Tunn {
 
     /// Update the index of the currently used session, if needed
     fn set_current_session(&self, new_idx: usize) {
-        let timers = self.timers.lock();
-
         let cur_idx = self.current.load(Ordering::Relaxed);
         if cur_idx == new_idx {
             // There is nothing to do, already using this session, this is the common case
             return;
         }
 
-        if self.sessions[cur_idx % N_SESSIONS].read().is_none()
-            || timers.session_timers[new_idx % N_SESSIONS].time()
+        let is_no_session = self.sessions[cur_idx % N_SESSIONS].read().is_none();
+
+        if is_no_session || {
+            let timers = self.timers.lock();
+            timers.session_timers[new_idx % N_SESSIONS].time()
                 >= timers.session_timers[cur_idx % N_SESSIONS].time()
-        {
+        } {
             self.current.store(new_idx, Ordering::SeqCst);
             tracing::debug!(message = "New session", session = new_idx);
         }
