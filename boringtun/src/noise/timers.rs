@@ -155,8 +155,6 @@ impl Tunn {
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     fn clear_all(&self) {
-        let mut timers = self.timers.lock();
-
         for session in &self.sessions {
             *session.write() = None;
         }
@@ -165,6 +163,8 @@ impl Tunn {
             let mut queued = self.packet_queue.lock();
             queued.clear();
         }
+
+        let mut timers = self.timers.lock();
 
         timers.clear();
     }
