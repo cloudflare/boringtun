@@ -14,7 +14,7 @@ pub fn get_saved_ids() -> Result<(uid_t, gid_t), Error> {
     {
         let uname: &'static str = env!("USER");
         let user = User::from_name(uname).unwrap().expect("a user");
-        return Ok((uid_t::from(user.uid), gid_t::from(user.gid)));
+        Ok((uid_t::from(user.uid), gid_t::from(user.gid)))
     }
     #[cfg(not(target_os = "macos"))]
     {
