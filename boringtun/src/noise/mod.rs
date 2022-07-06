@@ -198,12 +198,13 @@ impl Tunn {
     pub fn encapsulate<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
         let current = self.current.load(Ordering::SeqCst);
         if let Some(ref session) = *self.sessions[current % N_SESSIONS].read() {
+            let mut timers = self.timers.lock();
             // Send the packet using an established session
             let packet = session.format_packet_data(src, dst);
-            self.timer_tick(TimerName::TimeLastPacketSent);
+            self.timer_tick(TimerName::TimeLastPacketSent, &mut timers);
             // Exclude Keepalive packets from timer update.
             if !src.is_empty() {
-                self.timer_tick(TimerName::TimeLastDataPacketSent);
+                self.timer_tick(TimerName::TimeLastDataPacketSent, &mut timers);
             }
             self.tx_bytes.fetch_add(src.len(), Ordering::Relaxed);
             return TunnResult::WriteToNetwork(packet);
@@ -320,9 +321,12 @@ impl Tunn {
         let index = session.local_index();
         *self.sessions[index % N_SESSIONS].write() = Some(session);
 
-        self.timer_tick(TimerName::TimeLastPacketReceived);
-        self.timer_tick(TimerName::TimeLastPacketSent);
-        self.timer_tick_session_established(false, index); // New session established, we are not the initiator
+        let mut timers = self.timers.lock();
+
+        self.timer_tick(TimerName::TimeLastPacketReceived, &mut timers);
+        self.timer_tick(TimerName::TimeLastPacketSent, &mut timers);
+        // New session established, we are not the initiator
+        self.timer_tick_session_established(false, index, &mut timers);
 
         tracing::debug!(message = "Sending handshake_response", local_idx = index);
 
@@ -351,8 +355,10 @@ impl Tunn {
         let index = l_idx % N_SESSIONS;
         *self.sessions[index].write() = Some(session);
 
-        self.timer_tick(TimerName::TimeLastPacketReceived);
-        self.timer_tick_session_established(true, index); // New session established, we are the initiator
+        let mut timers = self.timers.lock();
+        self.timer_tick(TimerName::TimeLastPacketReceived, &mut timers);
+        // New session established, we are the initiator
+        self.timer_tick_session_established(true, index, &mut timers);
         self.set_current_session(l_idx);
 
         tracing::debug!("Sending keepalive");
@@ -372,8 +378,10 @@ impl Tunn {
             let mut handshake = self.handshake.lock();
             handshake.receive_cookie_reply(p)?;
         }
-        self.timer_tick(TimerName::TimeLastPacketReceived);
-        self.timer_tick(TimerName::TimeCookieReceived);
+
+        let mut timers = self.timers.lock();
+        self.timer_tick(TimerName::TimeLastPacketReceived, &mut timers);
+        self.timer_tick(TimerName::TimeCookieReceived, &mut timers);
 
         tracing::debug!("Did set cookie");
 
@@ -421,9 +429,10 @@ impl Tunn {
 
         self.set_current_session(r_idx);
 
-        self.timer_tick(TimerName::TimeLastPacketReceived);
+        let mut timers = self.timers.lock();
+        self.timer_tick(TimerName::TimeLastPacketReceived, &mut timers);
 
-        Ok(self.validate_decapsulated_packet(decapsulated_packet))
+        Ok(self.validate_decapsulated_packet(decapsulated_packet, &mut timers))
     }
 
     /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
@@ -446,12 +455,14 @@ impl Tunn {
 
         match handshake.format_handshake_initiation(dst) {
             Ok(packet) => {
+                let mut timers = self.timers.lock();
+
                 tracing::debug!("Sending handshake_initiation");
 
                 if starting_new_handshake {
-                    self.timer_tick(TimerName::TimeLastHandshakeStarted);
+                    self.timer_tick(TimerName::TimeLastHandshakeStarted, &mut timers);
                 }
-                self.timer_tick(TimerName::TimeLastPacketSent);
+                self.timer_tick(TimerName::TimeLastPacketSent, &mut timers);
                 TunnResult::WriteToNetwork(packet)
             }
             Err(e) => TunnResult::Err(e),
@@ -484,7 +495,11 @@ impl Tunn {
 
     /// Check if an IP packet is v4 or v6, truncate to the length indicated by the length field
     /// Returns the truncated packet and the source IP as TunnResult
-    fn validate_decapsulated_packet<'a>(&self, packet: &'a mut [u8]) -> TunnResult<'a> {
+    fn validate_decapsulated_packet<'a>(
+        &self,
+        packet: &'a mut [u8],
+        timers: &mut Timers,
+    ) -> TunnResult<'a> {
         let (computed_len, src_ip_address) = match packet.len() {
             0 => return TunnResult::Done, // This is keepalive, and not an error
             _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => {
@@ -520,7 +535,7 @@ impl Tunn {
             return TunnResult::Err(WireGuardError::InvalidPacket);
         }
 
-        self.timer_tick(TimerName::TimeLastDataPacketReceived);
+        self.timer_tick(TimerName::TimeLastDataPacketReceived, timers);
         self.rx_bytes.fetch_add(computed_len, Ordering::Relaxed);
 
         match src_ip_address {
