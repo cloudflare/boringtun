@@ -3,8 +3,9 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
-use std::ops::Index;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use parking_lot::RwLock;
+use std::mem;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 // Some constants, represent time in seconds
@@ -51,55 +52,106 @@ pub struct Timer {
 
 #[derive(Debug)]
 pub struct Timers {
+    inner: RwLock<TimersInner>,
+}
+
+#[derive(Debug)]
+struct TimersInner {
     /// Is the owner of the timer the initiator or the responder for the last handshake?
-    is_initiator: AtomicBool,
+    is_initiator: bool,
     /// Start time of the tunnel
     time_started: Instant,
     timers: [Timer; TimerName::Top as usize],
-    pub(super) session_timers: [Timer; super::N_SESSIONS],
+    session_timers: [Timer; super::N_SESSIONS],
     /// Did we receive data without sending anything back?
-    want_keepalive: AtomicBool,
+    want_keepalive: bool,
     /// Did we send data without hearing back?
-    want_handshake: AtomicBool,
-    persistent_keepalive: AtomicUsize,
+    want_handshake: bool,
+    persistent_keepalive: usize,
     /// Should this timer call reset rr function (if not a shared rr instance)
-    pub(super) should_reset_rr: bool,
+    should_reset_rr: bool,
 }
 
 impl Timers {
     pub(super) fn new(persistent_keepalive: Option<u16>, reset_rr: bool) -> Timers {
-        Timers {
-            is_initiator: AtomicBool::new(false),
+        let inner = TimersInner {
+            is_initiator: false,
             time_started: Instant::now(),
             timers: Default::default(),
             session_timers: Default::default(),
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
-            persistent_keepalive: AtomicUsize::new(usize::from(persistent_keepalive.unwrap_or(0))),
+            persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
+        };
+
+        Self {
+            inner: RwLock::new(inner),
         }
     }
 
+    pub(super) fn with_session_timers<O, F: FnOnce(&[Timer; super::N_SESSIONS]) -> O>(
+        &self,
+        f: F,
+    ) -> O {
+        let guard = self.inner.read();
+
+        f(&guard.session_timers)
+    }
+
+    pub(super) fn with_timers<O, F: FnOnce(&[Timer; TimerName::Top as usize]) -> O>(
+        &self,
+        f: F,
+    ) -> O {
+        let guard = self.inner.read();
+
+        f(&guard.timers)
+    }
+
+    pub(super) fn should_reset_rr(&self) -> bool {
+        self.inner.read().should_reset_rr
+    }
+
+    pub(super) fn time_started(&self) -> Instant {
+        self.inner.read().time_started
+    }
+
+    pub(super) fn persistent_keepalive(&self) -> usize {
+        self.inner.read().persistent_keepalive
+    }
+
+    pub(super) fn swap_want_keepalive(&self, val: bool) -> bool {
+        let mut guard = self.inner.write();
+        mem::replace(&mut guard.want_keepalive, val)
+    }
+
+    pub(super) fn swap_want_handshake(&self, val: bool) -> bool {
+        let mut guard = self.inner.write();
+        mem::replace(&mut guard.want_handshake, val)
+    }
+
+    pub(super) fn set_should_reset_rr(&self, val: bool) {
+        self.inner.write().should_reset_rr = val;
+    }
+
     fn is_initiator(&self) -> bool {
-        self.is_initiator.load(Ordering::Relaxed)
+        self.inner.read().is_initiator
+    }
+
+    fn set_is_initiator(&self, val: bool) {
+        self.inner.write().is_initiator = val;
     }
 
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     pub(super) fn clear(&self) {
-        let now = Instant::now().duration_since(self.time_started);
-        for t in &self.timers[..] {
+        let mut guard = self.inner.write();
+        let now = Instant::now().duration_since(guard.time_started);
+        for t in &guard.timers[..] {
             t.set(now);
         }
-        self.want_handshake.store(false, Ordering::Relaxed);
-        self.want_keepalive.store(false, Ordering::Relaxed);
-    }
-}
-
-impl Index<TimerName> for Timers {
-    type Output = Timer;
-    fn index(&self, index: TimerName) -> &Timer {
-        &self.timers[index as usize]
+        guard.want_handshake = false;
+        guard.want_keepalive = false;
     }
 }
 
@@ -117,26 +169,32 @@ impl Tunn {
     pub(super) fn timer_tick(&self, timer_name: TimerName) {
         match timer_name {
             TimeLastPacketReceived => {
-                self.timers.want_keepalive.store(true, Ordering::Relaxed);
-                self.timers.want_handshake.store(false, Ordering::Relaxed);
+                self.timers.swap_want_keepalive(true);
+                self.timers.swap_want_handshake(false);
             }
             TimeLastPacketSent => {
-                self.timers.want_handshake.store(true, Ordering::Relaxed);
-                self.timers.want_keepalive.store(false, Ordering::Relaxed);
+                self.timers.swap_want_handshake(true);
+                self.timers.swap_want_keepalive(false);
             }
             _ => {}
         }
 
-        self.timers[timer_name].set(self.timers[TimeCurrent].time());
+        self.timers.with_timers(|timers| {
+            timers[timer_name as usize].set(timers[TimeCurrent as usize].time())
+        });
     }
 
     pub(super) fn timer_tick_session_established(&self, is_initiator: bool, session_idx: usize) {
         self.timer_tick(TimeSessionEstablished);
-        self.timers.session_timers[session_idx % crate::noise::N_SESSIONS]
-            .set(self.timers[TimeCurrent].time());
-        self.timers
-            .is_initiator
-            .store(is_initiator, Ordering::Relaxed)
+
+        self.timers.with_session_timers(|session_timers| {
+            session_timers[session_idx % crate::noise::N_SESSIONS].set(
+                self.timers
+                    .with_timers(|timers| timers[TimeCurrent as usize].time()),
+            )
+        });
+
+        self.timers.set_is_initiator(is_initiator);
     }
 
     // We don't really clear the timers, but we set them to the current time to
@@ -155,7 +213,8 @@ impl Tunn {
     }
 
     fn update_session_timers(&self, time_now: Duration) {
-        let timers = &self.timers;
+        // this is fine because its a leaf fn wrt other timer functions that might use the lock
+        let timers = &self.timers.inner.read();
 
         for (i, t) in timers.session_timers.iter().enumerate() {
             if time_now - t.time() > REJECT_AFTER_TIME {
@@ -175,27 +234,39 @@ impl Tunn {
         let mut keepalive_required = false;
 
         let time = Instant::now();
-        let timers = &self.timers;
 
-        if timers.should_reset_rr {
+        if self.timers.should_reset_rr() {
             self.rate_limiter.reset_count();
         }
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded
         // to a second, as there is no real benefit to having highly accurate timers.
-        let now = time.duration_since(timers.time_started);
-        timers[TimeCurrent].set(now);
+        let now = time.duration_since(self.timers.time_started());
+        self.timers
+            .with_timers(|timers| timers[TimeCurrent as usize].set(now));
 
         self.update_session_timers(now);
 
         // Load timers only once:
-        let session_established = timers[TimeSessionEstablished].time();
-        let handshake_started = timers[TimeLastHandshakeStarted].time();
-        let aut_packet_received = timers[TimeLastPacketReceived].time();
-        let aut_packet_sent = timers[TimeLastPacketSent].time();
-        let data_packet_received = timers[TimeLastDataPacketReceived].time();
-        let data_packet_sent = timers[TimeLastDataPacketSent].time();
-        let persistent_keepalive = timers.persistent_keepalive.load(Ordering::Relaxed);
+        let (
+            session_established,
+            handshake_started,
+            aut_packet_received,
+            aut_packet_sent,
+            data_packet_received,
+            data_packet_sent,
+        ) = self.timers.with_timers(|timers| {
+            (
+                timers[TimeSessionEstablished as usize].time(),
+                timers[TimeLastHandshakeStarted as usize].time(),
+                timers[TimeLastPacketReceived as usize].time(),
+                timers[TimeLastPacketSent as usize].time(),
+                timers[TimeLastDataPacketReceived as usize].time(),
+                timers[TimeLastDataPacketSent as usize].time(),
+            )
+        });
+
+        let persistent_keepalive = self.timers.persistent_keepalive();
 
         {
             let mut handshake = match self.handshake.try_lock() {
@@ -209,7 +280,11 @@ impl Tunn {
 
             // Clear cookie after COOKIE_EXPIRATION_TIME
             if handshake.has_cookie()
-                && now - timers[TimeCookieReceived].time() >= COOKIE_EXPIRATION_TIME
+                && now
+                    - self
+                        .timers
+                        .with_timers(|timers| timers[TimeCookieReceived as usize].time())
+                    >= COOKIE_EXPIRATION_TIME
             {
                 handshake.clear_cookie();
             }
@@ -246,7 +321,7 @@ impl Tunn {
                     handshake_initiation_required = true;
                 }
             } else {
-                if timers.is_initiator() {
+                if self.timers.is_initiator() {
                     // After sending a packet, if the sender was the original initiator
                     // of the handshake and if the current session key is REKEY_AFTER_TIME
                     // ms old, we initiate a new handshake. If the sender was the original
@@ -281,7 +356,7 @@ impl Tunn {
                 // we initiate a new handshake.
                 if data_packet_sent > aut_packet_received
                     && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
-                    && timers.want_handshake.swap(false, Ordering::Relaxed)
+                    && self.timers.swap_want_handshake(false)
                 {
                     tracing::warn!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
@@ -292,7 +367,7 @@ impl Tunn {
                     // to the given peer in KEEPALIVE ms, we send an empty packet.
                     if data_packet_received > aut_packet_sent
                         && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
-                        && timers.want_keepalive.swap(false, Ordering::Relaxed)
+                        && self.timers.swap_want_keepalive(false)
                     {
                         tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                         keepalive_required = true;
@@ -300,7 +375,10 @@ impl Tunn {
 
                     // Persistent KEEPALIVE
                     if persistent_keepalive > 0
-                        && (now - timers[TimePersistentKeepalive].time()
+                        && (now
+                            - self.timers.with_timers(|timers| {
+                                timers[TimePersistentKeepalive as usize].time()
+                            })
                             >= Duration::from_secs(persistent_keepalive as _))
                     {
                         tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
@@ -328,8 +406,10 @@ impl Tunn {
             .read()
             .is_some()
         {
-            let time_current = Instant::now().duration_since(self.timers.time_started);
-            let time_session_established = self.timers[TimeSessionEstablished].time();
+            let time_current = Instant::now().duration_since(self.timers.time_started());
+            let time_session_established = self
+                .timers
+                .with_timers(|timers| timers[TimeSessionEstablished as usize].time());
             let epoch_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
             Some(epoch_time - (time_current - time_session_established))
@@ -339,7 +419,7 @@ impl Tunn {
     }
 
     pub fn persistent_keepalive(&self) -> Option<u16> {
-        let keepalive = self.timers.persistent_keepalive.load(Ordering::Relaxed);
+        let keepalive = self.timers.persistent_keepalive();
 
         if keepalive > 0 {
             Some(keepalive as u16)

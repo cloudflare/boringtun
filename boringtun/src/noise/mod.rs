@@ -172,7 +172,7 @@ impl Tunn {
         static_public: x25519_dalek::PublicKey,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Result<(), WireGuardError> {
-        self.timers.should_reset_rr = rate_limiter.is_none();
+        self.timers.set_should_reset_rr(rate_limiter.is_none());
         self.rate_limiter = rate_limiter.unwrap_or_else(|| {
             Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
         });
@@ -384,8 +384,10 @@ impl Tunn {
             return;
         }
         if self.sessions[cur_idx % N_SESSIONS].read().is_none()
-            || self.timers.session_timers[new_idx % N_SESSIONS].time()
-                >= self.timers.session_timers[cur_idx % N_SESSIONS].time()
+            || self.timers.with_session_timers(|session_timers| {
+                session_timers[new_idx % N_SESSIONS].time()
+                    >= session_timers[cur_idx % N_SESSIONS].time()
+            })
         {
             self.current.store(new_idx, Ordering::SeqCst);
             tracing::debug!(message = "New session", session = new_idx);
