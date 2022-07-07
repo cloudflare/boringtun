@@ -422,7 +422,7 @@ impl TunnInner {
             remote_idx = p.sender_idx
         );
 
-        let (packet, session) = { self.handshake.receive_handshake_initialization(p, dst)? };
+        let (packet, session) = self.handshake.receive_handshake_initialization(p, dst)?;
 
         // Store new session in ring buffer
         let index = session.local_index();
