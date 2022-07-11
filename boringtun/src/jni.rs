@@ -1,6 +1,9 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+// temporary, we need to do some verification around these bindings later
+#![allow(clippy::missing_safety_doc)]
+
 /// JNI bindings for BoringTun library
 use std::os::raw::c_char;
 use std::ptr;
@@ -9,8 +12,6 @@ use jni::objects::{JByteBuffer, JClass, JString};
 use jni::strings::JNIStr;
 use jni::sys::{jbyteArray, jint, jlong, jshort, jstring};
 use jni::JNIEnv;
-
-use std::str::FromStr;
 
 use crate::ffi::new_tunnel;
 use crate::ffi::wireguard_read;
@@ -36,7 +37,7 @@ pub extern "C" fn log_print(_log_string: *const c_char) {
 #[no_mangle]
 #[export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_x25519_1secret_1key"]
 pub extern "C" fn generate_secret_key(env: JNIEnv, _class: JClass) -> jbyteArray {
-    match env.byte_array_from_slice(&x25519_secret_key().as_bytes()) {
+    match env.byte_array_from_slice(&x25519_secret_key().key) {
         Ok(v) => v,
         Err(_) => ptr::null_mut(),
     }
@@ -63,7 +64,7 @@ pub unsafe extern "C" fn generate_public_key1(
         key: std::mem::transmute::<[i8; 32], [u8; 32]>(key_inner),
     };
 
-    match env.byte_array_from_slice(&x25519_public_key(secret_key).as_bytes()) {
+    match env.byte_array_from_slice(&x25519_public_key(secret_key).key) {
         Ok(v) => v,
         Err(_) => ptr::null_mut(),
     }
