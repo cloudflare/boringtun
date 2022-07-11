@@ -19,7 +19,6 @@ jobs:
           toolchain: stable
       - uses: taiki-e/install-action@cargo-hack
       - run: cargo hack check --each-feature
-      - run: RUSTFLAGS="--cfg loom" cargo hack check --each-feature
   clippy:
     strategy:
       matrix:
@@ -30,7 +29,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - run: cargo clippy
+      - uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack clippy --each-feature
   rustfmt:
     strategy:
       matrix:
@@ -54,3 +54,14 @@ jobs:
           toolchain: stable
       - uses: taiki-e/install-action@cargo-hack
       - run: cargo hack test --each-feature
+  integration-tests:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - run: cargo test -- --ignored

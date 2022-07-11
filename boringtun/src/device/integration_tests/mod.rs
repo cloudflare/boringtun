@@ -467,6 +467,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can read from
     fn test_wireguard_get() {
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
@@ -475,6 +476,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can use to set settings
     fn test_wireguard_set() {
         let port = next_port();
@@ -542,6 +544,7 @@ mod tests {
 
     /// Test if wireguard can handle simple ipv4 connections, don't use a connected socket
     #[test]
+    #[ignore]
     fn test_wg_start_ipv4_non_connected() {
         let port = next_port();
         let private_key = StaticSecret::new(OsRng);
@@ -588,6 +591,7 @@ mod tests {
 
     /// Test if wireguard can handle simple ipv4 connections
     #[test]
+    #[ignore]
     fn test_wg_start_ipv4() {
         let port = next_port();
         let private_key = StaticSecret::new(OsRng);
@@ -622,6 +626,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     /// Test if wireguard can handle simple ipv6 connections
     fn test_wg_start_ipv6() {
         let port = next_port();
@@ -657,6 +662,7 @@ mod tests {
 
     /// Test if wireguard can handle connection with an ipv6 endpoint
     #[test]
+    #[ignore]
     #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
     fn test_wg_start_ipv6_endpoint() {
         let port = next_port();
@@ -695,6 +701,7 @@ mod tests {
 
     /// Test if wireguard can handle connection with an ipv6 endpoint
     #[test]
+    #[ignore]
     #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
     fn test_wg_start_ipv6_endpoint_not_connected() {
         let port = next_port();
@@ -744,6 +751,7 @@ mod tests {
 
     /// Test many concurrent connections
     #[test]
+    #[ignore]
     fn test_wg_concurrent() {
         let port = next_port();
         let private_key = StaticSecret::new(OsRng);
@@ -794,6 +802,7 @@ mod tests {
 
     /// Test many concurrent connections
     #[test]
+    #[ignore]
     fn test_wg_concurrent_v6() {
         let port = next_port();
         let private_key = StaticSecret::new(OsRng);
