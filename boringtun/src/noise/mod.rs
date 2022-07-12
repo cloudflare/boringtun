@@ -245,11 +245,7 @@ impl Tunn {
         self.inner.read().time_since_last_handshake()
     }
 
-    pub(crate) fn handle_verified_packet<'a>(
-        &self,
-        packet: Packet,
-        dst: &'a mut [u8],
-    ) -> TunnResult<'a> {
+    pub fn handle_verified_packet<'a>(&self, packet: Packet, dst: &'a mut [u8]) -> TunnResult<'a> {
         self.inner.write().handle_verified_packet(packet, dst)
     }
 
