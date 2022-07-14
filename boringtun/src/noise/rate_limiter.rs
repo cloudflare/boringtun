@@ -135,7 +135,7 @@ impl RateLimiter {
 
         let iv = GenericArray::from_slice(nonce);
 
-        encrypted_cookie.copy_from_slice(&cookie);
+        encrypted_cookie[..16].copy_from_slice(&cookie);
         let tag = cipher
             .encrypt_in_place_detached(iv, mac1, &mut encrypted_cookie[..16])
             .map_err(|_| WireGuardError::DestinationBufferTooSmall)?;
