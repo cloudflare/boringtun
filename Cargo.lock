@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "boringtun"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "aead",
  "base64",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "boringtun-cli"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "boringtun",
  "clap 3.2.8",
