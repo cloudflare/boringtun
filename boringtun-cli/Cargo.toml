@@ -1,11 +1,11 @@
 [package]
 name = "boringtun-cli"
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
-version = "0.5.1"
+version = "0.5.2"
 authors = ["Noah Kennedy <nkennedy@cloudflare.com>", "Andy Grover <agrover@cloudflare.com>", "Jeff Hiner <jhiner@cloudflare.com>"]
 license = "BSD-3-Clause"
 repository = "https://github.com/cloudflare/boringtun"
-documentation = "https://docs.rs/boringtun/0.4.0/boringtun/"
+documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
 edition = "2021"
 
 [dependencies]
