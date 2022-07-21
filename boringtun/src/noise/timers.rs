@@ -308,10 +308,10 @@ impl TunnInner {
     pub(super) fn time_since_last_handshake(&self) -> Option<Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
-            let time_current = Instant::now().duration_since(self.timers.time_started);
-            let time_session_established = self.timers[TimeSessionEstablished];
+            let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
+            let duration_since_session_established = self.timers[TimeSessionEstablished];
 
-            Some(time_current - time_session_established)
+            Some(duration_since_tun_start - duration_since_session_established)
         } else {
             None
         }
