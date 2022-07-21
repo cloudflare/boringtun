@@ -6,7 +6,7 @@ use crate::noise::{TunnInner, TunnResult};
 use std::mem;
 use std::ops::{Index, IndexMut};
 
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
@@ -310,13 +310,8 @@ impl TunnInner {
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
             let time_current = Instant::now().duration_since(self.timers.time_started);
             let time_session_established = self.timers[TimeSessionEstablished];
-            let epoch_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
-            if time_session_established.is_zero() {
-                None
-            } else {
-                epoch_time.checked_sub(time_current - time_session_established)
-            }
+            Some(time_current - time_session_established)
         } else {
             None
         }
