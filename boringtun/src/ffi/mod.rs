@@ -10,6 +10,7 @@ use super::noise::{Tunn, TunnResult};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
+use parking_lot::Mutex;
 use rand_core::OsRng;
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -168,7 +169,7 @@ pub unsafe extern "C" fn new_tunnel(
     preshared_key: *const c_char,
     keep_alive: u16,
     index: u32,
-) -> *mut Tunn {
+) -> *mut Mutex<Tunn> {
     let c_str = CStr::from_ptr(static_private);
     let static_private = match c_str.to_str() {
         Err(_) => return ptr::null_mut(),
@@ -221,7 +222,7 @@ pub unsafe extern "C" fn new_tunnel(
         index,
         None,
     ) {
-        Ok(t) => t,
+        Ok(t) => Box::new(Mutex::new(t)),
         Err(_) => return ptr::null_mut(),
     };
 
@@ -237,7 +238,7 @@ pub unsafe extern "C" fn new_tunnel(
 
 /// Drops the Tunn object
 #[no_mangle]
-pub unsafe extern "C" fn tunnel_free(tunnel: *mut Tunn) {
+pub unsafe extern "C" fn tunnel_free(tunnel: *mut Mutex<Tunn>) {
     Box::from_raw(tunnel);
 }
 
@@ -245,13 +246,13 @@ pub unsafe extern "C" fn tunnel_free(tunnel: *mut Tunn) {
 /// For more details check noise::tunnel_to_network functions.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_write(
-    tunnel: *mut Tunn,
+    tunnel: *const Mutex<Tunn>,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let tunnel = tunnel.as_ref().unwrap();
+    let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
@@ -262,13 +263,13 @@ pub unsafe extern "C" fn wireguard_write(
 /// For more details check noise::network_to_tunnel functions.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_read(
-    tunnel: *mut Tunn,
+    tunnel: *const Mutex<Tunn>,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let tunnel = tunnel.as_ref().unwrap();
+    let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
@@ -279,11 +280,11 @@ pub unsafe extern "C" fn wireguard_read(
 /// Recommended interval: 100ms.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_tick(
-    tunnel: *mut Tunn,
+    tunnel: *const Mutex<Tunn>,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let tunnel = tunnel.as_ref().unwrap();
+    let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
     wireguard_result::from(tunnel.update_timers(dst))
@@ -292,11 +293,11 @@ pub unsafe extern "C" fn wireguard_tick(
 /// Force the tunnel to initiate a new handshake, dst buffer must be at least 148 byte long.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_force_handshake(
-    tunnel: *mut Tunn,
+    tunnel: *const Mutex<Tunn>,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let tunnel = tunnel.as_ref().unwrap();
+    let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
     wireguard_result::from(tunnel.format_handshake_initiation(dst, true))
@@ -307,8 +308,8 @@ pub unsafe extern "C" fn wireguard_force_handshake(
 /// Number of data bytes encapsulated
 /// Number of data bytes decapsulated
 #[no_mangle]
-pub unsafe extern "C" fn wireguard_stats(tunnel: *mut Tunn) -> stats {
-    let tunnel = tunnel.as_ref().unwrap();
+pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<Tunn>) -> stats {
+    let tunnel = tunnel.as_ref().unwrap().lock();
     let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt) = tunnel.stats();
     stats {
         time_since_last_handshake: time.map(|t| t.as_secs() as i64).unwrap_or(-1),
