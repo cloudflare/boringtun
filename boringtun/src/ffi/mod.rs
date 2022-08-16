@@ -24,7 +24,7 @@ use std::panic;
 use std::ptr;
 use std::ptr::null_mut;
 use std::slice;
-use std::sync::{Mutex, Once};
+use std::sync::Once;
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -210,7 +210,7 @@ pub unsafe extern "C" fn set_logging_function(
 
     let subscriber = fmt()
         .event_format(format)
-        .with_writer(Mutex::new(writer))
+        .with_writer(std::sync::Mutex::new(writer))
         .with_max_level(tracing::Level::TRACE)
         .with_ansi(false)
         .finish();
