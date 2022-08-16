@@ -12,9 +12,9 @@ use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
 use parking_lot::Mutex;
 use rand_core::OsRng;
-use x25519_dalek::{PublicKey, StaticSecret};
 use tracing;
 use tracing_subscriber::fmt;
+use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::serialization::KeyBytes;
 use std::ffi::{CStr, CString};
@@ -173,9 +173,7 @@ impl Write for FFIFunctionPointerWriter {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         let out_str = String::from_utf8_lossy(buf).to_string();
         let c_string = CString::new(format!("{}", out_str)).unwrap();
-        unsafe {
-            (self.log_func)(c_string.as_ptr())
-        }
+        unsafe { (self.log_func)(c_string.as_ptr()) }
         Ok(buf.len())
     }
 
@@ -191,22 +189,22 @@ impl Write for FFIFunctionPointerWriter {
 /// Returns false on failure.
 #[no_mangle]
 pub unsafe extern "C" fn set_logging_function(
-    log_func: unsafe extern "C" fn(*const c_char)
+    log_func: unsafe extern "C" fn(*const c_char),
 ) -> bool {
     let writer = FFIFunctionPointerWriter { log_func };
     let format = fmt::format()
-                    // don't include levels in formatted output
-                    .with_level(false)
-                    // don't include targets
-                    .with_target(false)
-                    // don't 'include the thread ID of the current thread
-                    .with_thread_ids(false)
-                    // don't 'include the name of the current thread
-                    .with_thread_names(false)
-                    // use the `Compact` formatting style.
-                    .compact()
-                    // disable terminal escape codes
-                    .with_ansi(false);
+        // don't include levels in formatted output
+        .with_level(false)
+        // don't include targets
+        .with_target(false)
+        // don't 'include the thread ID of the current thread
+        .with_thread_ids(false)
+        // don't 'include the name of the current thread
+        .with_thread_names(false)
+        // use the `Compact` formatting style.
+        .compact()
+        // disable terminal escape codes
+        .with_ansi(false);
 
     let subscriber = fmt()
         .event_format(format)
