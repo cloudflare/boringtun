@@ -13,15 +13,18 @@ use libc::{raise, SIGSEGV};
 use parking_lot::Mutex;
 use rand_core::OsRng;
 use x25519_dalek::{PublicKey, StaticSecret};
+use tracing;
+use tracing_subscriber::fmt;
 
 use crate::serialization::KeyBytes;
 use std::ffi::{CStr, CString};
+use std::io::Write;
 use std::os::raw::c_char;
 use std::panic;
 use std::ptr;
 use std::ptr::null_mut;
 use std::slice;
-use std::sync::Once;
+use std::sync::{Mutex, Once};
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -158,6 +161,65 @@ pub unsafe extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> 
     } else {
         0
     }
+}
+
+/// Custom tracing_subscriber writer to an external function pointer
+struct FFIFunctionPointerWriter {
+    log_func: unsafe extern "C" fn(*const c_char),
+}
+
+/// Implements Write trait for use with tracing_subscriber
+impl Write for FFIFunctionPointerWriter {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+        let out_str = String::from_utf8_lossy(buf).to_string();
+        let c_string = CString::new(format!("{}", out_str)).unwrap();
+        unsafe {
+            (self.log_func)(c_string.as_ptr())
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        // no-op
+        Ok(())
+    }
+}
+
+/// Sets the default tracing_subscriber to write to log_func.
+/// Uses Compact format without level, target, thread ids, thread names, or ansi control characters.
+/// Subscribes to TRACE level events.
+/// Returns false on failure.
+#[no_mangle]
+pub unsafe extern "C" fn set_logging_function(
+    log_func: unsafe extern "C" fn(*const c_char)
+) -> bool {
+    let writer = FFIFunctionPointerWriter { log_func };
+    let format = fmt::format()
+                    // don't include levels in formatted output
+                    .with_level(false)
+                    // don't include targets
+                    .with_target(false)
+                    // don't 'include the thread ID of the current thread
+                    .with_thread_ids(false)
+                    // don't 'include the name of the current thread
+                    .with_thread_names(false)
+                    // use the `Compact` formatting style.
+                    .compact()
+                    // disable terminal escape codes
+                    .with_ansi(false);
+
+    let subscriber = fmt()
+        .event_format(format)
+        .with_writer(Mutex::new(writer))
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .finish();
+
+    if let Ok(()) = tracing::subscriber::set_global_default(subscriber) {
+        return true;
+    }
+
+    return false;
 }
 
 /// Allocate a new tunnel, return NULL on failure.

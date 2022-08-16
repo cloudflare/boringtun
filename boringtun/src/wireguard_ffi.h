@@ -4,6 +4,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 struct wireguard_tunnel; // This corresponds to the Rust type
 
@@ -55,6 +56,14 @@ void x25519_key_to_str_free(const char *key_str);
 // Check if a null terminated string represents a valid x25519 key
 // Returns 0 if not
 int check_base64_encoded_x25519_key(const char *key);
+
+/**
+ Sets the default tracing_subscriber to write to log_func.
+ Uses Compact format without level, target, thread ids, thread names, or ansi control characters.
+ Subscribes to TRACE level events.
+ Returns false on failure.
+*/
+bool set_logging_function(void (*log_func)(const char *));
 
 // Allocate a new tunnel
 struct wireguard_tunnel *new_tunnel(const char *static_private,
