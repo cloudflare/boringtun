@@ -176,8 +176,10 @@ impl Write for FFIFunctionPointerWriter {
             unsafe { (self.log_func)(c_string.as_ptr()) }
             Ok(buf.len())
         } else {
-            Err(Error::new(ErrorKind::Other, "Failed to create CString from buffer."))
-
+            Err(Error::new(
+                ErrorKind::Other,
+                "Failed to create CString from buffer.",
+            ))
         }
     }
 
@@ -226,8 +228,9 @@ pub unsafe extern "C" fn set_logging_function(
             .with_writer(std::sync::Mutex::new(writer))
             .with_max_level(tracing::Level::TRACE)
             .with_ansi(false)
-            .try_init() {
-                return true
+            .try_init()
+        {
+            return true;
         }
 
         return false;
