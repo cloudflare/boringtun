@@ -223,12 +223,13 @@ pub unsafe extern "C" fn set_logging_function(
             // disable terminal escape codes
             .with_ansi(false);
 
-        if let Ok(()) = fmt()
+        if fmt()
             .event_format(format)
             .with_writer(std::sync::Mutex::new(writer))
             .with_max_level(tracing::Level::TRACE)
             .with_ansi(false)
             .try_init()
+            .is_ok()
         {
             return true;
         }
