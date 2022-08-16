@@ -18,7 +18,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::serialization::KeyBytes;
 use std::ffi::{CStr, CString};
-use std::io::Write;
+use std::io::{Error, ErrorKind, Write};
 use std::os::raw::c_char;
 use std::panic;
 use std::ptr;
@@ -172,9 +172,13 @@ struct FFIFunctionPointerWriter {
 impl Write for FFIFunctionPointerWriter {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         let out_str = String::from_utf8_lossy(buf).to_string();
-        let c_string = CString::new(format!("{}", out_str)).unwrap();
-        unsafe { (self.log_func)(c_string.as_ptr()) }
-        Ok(buf.len())
+        if let Ok(c_string) = CString::new(out_str) {
+            unsafe { (self.log_func)(c_string.as_ptr()) }
+            Ok(buf.len())
+        } else {
+            Err(Error::new(ErrorKind::Other, "Failed to create CString from buffer."))
+
+        }
     }
 
     fn flush(&mut self) -> Result<(), std::io::Error> {
@@ -183,41 +187,56 @@ impl Write for FFIFunctionPointerWriter {
     }
 }
 
-/// Sets the default tracing_subscriber to write to log_func.
+/// Sets the default tracing_subscriber to write to `log_func`.
+///
 /// Uses Compact format without level, target, thread ids, thread names, or ansi control characters.
 /// Subscribes to TRACE level events.
+///
+/// This function should only be called once as setting the default tracing_subscriber
+/// more than once will result in an error.
+///
 /// Returns false on failure.
+///
+/// # Safety
+///
+/// `c_char` will be freed by the library after calling `log_func`. If the value needs
+/// to be stored then `log_func` needs to create a copy, e.g. `strcpy`.
 #[no_mangle]
 pub unsafe extern "C" fn set_logging_function(
     log_func: unsafe extern "C" fn(*const c_char),
 ) -> bool {
-    let writer = FFIFunctionPointerWriter { log_func };
-    let format = fmt::format()
-        // don't include levels in formatted output
-        .with_level(false)
-        // don't include targets
-        .with_target(false)
-        // don't 'include the thread ID of the current thread
-        .with_thread_ids(false)
-        // don't 'include the name of the current thread
-        .with_thread_names(false)
-        // use the `Compact` formatting style.
-        .compact()
-        // disable terminal escape codes
-        .with_ansi(false);
+    let result = std::panic::catch_unwind(|| -> bool {
+        let writer = FFIFunctionPointerWriter { log_func };
+        let format = fmt::format()
+            // don't include levels in formatted output
+            .with_level(false)
+            // don't include targets
+            .with_target(false)
+            // don't 'include the thread ID of the current thread
+            .with_thread_ids(false)
+            // don't 'include the name of the current thread
+            .with_thread_names(false)
+            // use the `Compact` formatting style.
+            .compact()
+            // disable terminal escape codes
+            .with_ansi(false);
 
-    let subscriber = fmt()
-        .event_format(format)
-        .with_writer(std::sync::Mutex::new(writer))
-        .with_max_level(tracing::Level::TRACE)
-        .with_ansi(false)
-        .finish();
+        if let Ok(()) = fmt()
+            .event_format(format)
+            .with_writer(std::sync::Mutex::new(writer))
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .try_init() {
+                return true
+        }
 
-    if let Ok(()) = tracing::subscriber::set_global_default(subscriber) {
-        return true;
+        return false;
+    });
+    if let Ok(value) = result {
+        return value;
+    } else {
+        return false;
     }
-
-    return false;
 }
 
 /// Allocate a new tunnel, return NULL on failure.

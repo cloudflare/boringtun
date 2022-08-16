@@ -57,12 +57,20 @@ void x25519_key_to_str_free(const char *key_str);
 // Returns 0 if not
 int check_base64_encoded_x25519_key(const char *key);
 
-/**
- Sets the default tracing_subscriber to write to log_func.
- Uses Compact format without level, target, thread ids, thread names, or ansi control characters.
- Subscribes to TRACE level events.
- Returns false on failure.
-*/
+/// Sets the default tracing_subscriber to write to `log_func`.
+///
+/// Uses Compact format without level, target, thread ids, thread names, or ansi control characters.
+/// Subscribes to TRACE level events.
+///
+/// This function should only be called once as setting the default tracing_subscriber
+/// more than once will result in an error.
+///
+/// Returns false on failure.
+///
+/// # Safety
+///
+/// `c_char` will be freed by the library after calling `log_func`. If the value needs
+/// to be stored then `log_func` needs to create a copy, e.g. `strcpy`.
 bool set_logging_function(void (*log_func)(const char *));
 
 // Allocate a new tunnel
