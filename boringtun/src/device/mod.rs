@@ -25,11 +25,11 @@ pub mod tun;
 #[path = "tun_linux.rs"]
 pub mod tun;
 
+pub mod registry;
 #[cfg(unix)]
 #[path = "udp_unix.rs"]
 pub mod udp;
 
-use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::os::unix::io::AsRawFd;
@@ -49,6 +49,7 @@ use poll::{EventPoll, EventRef, WaitResult};
 use tun::{errno, errno_str, TunSocket};
 use udp::UDPSocket;
 
+use crate::device::registry::Registry;
 use dev_lock::{Lock, LockReadGuard};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
@@ -74,7 +75,7 @@ pub enum Error {
     Timer(String),
     IfaceRead(i32),
     DropPrivileges(String),
-    ApiSocket(std::io::Error),
+    ApiSocket(io::Error),
 }
 
 // What the event loop should do after a handler returns
@@ -85,10 +86,11 @@ enum Action {
 }
 
 // Event handler function
-type Handler = Box<dyn Fn(&mut LockReadGuard<Device>, &mut ThreadData) -> Action + Send + Sync>;
+type Handler<R> =
+    Box<dyn Fn(&mut LockReadGuard<Device<R>>, &mut ThreadData) -> Action + Send + Sync>;
 
-pub struct DeviceHandle {
-    device: Arc<Lock<Device>>, // The interface this handle owns
+pub struct DeviceHandle<R: Registry + Send + Sync + 'static> {
+    device: Arc<Lock<Device<R>>>, // The interface this handle owns
     threads: Vec<JoinHandle<()>>,
 }
 
@@ -115,9 +117,9 @@ impl Default for DeviceConfig {
     }
 }
 
-pub struct Device {
+pub struct Device<R: Registry + Send + Sync + 'static> {
     key_pair: Option<(x25519_dalek::StaticSecret, x25519_dalek::PublicKey)>,
-    queue: Arc<EventPoll<Handler>>,
+    queue: Arc<EventPoll<Handler<R>>>,
 
     listen_port: u16,
     fwmark: Option<u32>,
@@ -129,10 +131,7 @@ pub struct Device {
     yield_notice: Option<EventRef>,
     exit_notice: Option<EventRef>,
 
-    peers: HashMap<x25519_dalek::PublicKey, Arc<Mutex<Peer>>>,
-    peers_by_ip: AllowedIps<Arc<Mutex<Peer>>>,
-    peers_by_idx: HashMap<u32, Arc<Mutex<Peer>>>,
-    next_index: u32,
+    registry: R,
 
     config: DeviceConfig,
 
@@ -152,10 +151,10 @@ struct ThreadData {
     dst_buf: [u8; MAX_UDP_SIZE],
 }
 
-impl DeviceHandle {
-    pub fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
+impl<R: Registry + Send + Sync + 'static> DeviceHandle<R> {
+    pub fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle<R>, Error> {
         let n_threads = config.n_threads;
-        let mut wg_interface = Device::new(name, config)?;
+        let mut wg_interface = Device::<R>::new(name, config)?;
         wg_interface.open_listen_socket(0)?; // Start listening on a random port
 
         let interface_lock = Arc::new(Lock::new(wg_interface));
@@ -188,7 +187,7 @@ impl DeviceHandle {
         }
     }
 
-    fn event_loop(_i: usize, device: &Lock<Device>) {
+    fn event_loop(_i: usize, device: &Lock<Device<R>>) {
         #[cfg(target_os = "linux")]
         let mut thread_local = ThreadData {
             src_buf: [0u8; MAX_UDP_SIZE],
@@ -258,32 +257,16 @@ impl DeviceHandle {
     }
 }
 
-impl Drop for DeviceHandle {
+impl<R: Registry + Send + Sync + 'static> Drop for DeviceHandle<R> {
     fn drop(&mut self) {
         self.device.read().trigger_exit();
         self.clean();
     }
 }
 
-impl Device {
-    fn next_index(&mut self) -> u32 {
-        let next_index = self.next_index;
-        self.next_index += 1;
-        assert!(next_index < (1 << 24), "Too many peers created");
-        next_index
-    }
-
+impl<R: Registry + Send + Sync + 'static> Device<R> {
     fn remove_peer(&mut self, pub_key: &x25519_dalek::PublicKey) {
-        if let Some(peer) = self.peers.remove(pub_key) {
-            // Found a peer to remove, now purge all references to it:
-            {
-                let p = peer.lock();
-                p.shutdown_endpoint(); // close open udp socket and free the closure
-                self.peers_by_idx.remove(&p.index());
-            }
-            self.peers_by_ip
-                .remove(&|p: &Arc<Mutex<Peer>>| Arc::ptr_eq(&peer, p));
-
+        if self.registry.remove(pub_key).is_some() {
             tracing::info!("Peer removed");
         }
     }
@@ -305,12 +288,12 @@ impl Device {
         }
 
         // Update an existing peer
-        if self.peers.get(&pub_key).is_some() {
+        if self.registry.get(&pub_key).is_some() {
             // We already have a peer, we need to merge the existing config into the newly created one
             panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
         }
 
-        let next_index = self.next_index();
+        let next_index = self.registry.next_index();
         let device_key_pair = self
             .key_pair
             .as_ref()
@@ -329,19 +312,13 @@ impl Device {
         let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);
 
         let peer = Arc::new(Mutex::new(peer));
-        self.peers.insert(pub_key, Arc::clone(&peer));
-        self.peers_by_idx.insert(next_index, Arc::clone(&peer));
-
-        for AllowedIP { addr, cidr } in allowed_ips {
-            self.peers_by_ip
-                .insert(*addr, *cidr as _, Arc::clone(&peer));
-        }
+        self.registry.insert(pub_key, peer, allowed_ips);
 
         tracing::info!("Peer added");
     }
 
-    pub fn new(name: &str, config: DeviceConfig) -> Result<Device, Error> {
-        let poll = EventPoll::<Handler>::new()?;
+    pub fn new(name: &str, config: DeviceConfig) -> Result<Device<R>, Error> {
+        let poll = EventPoll::<Handler<R>>::new()?;
 
         // Create a tunnel device
         let iface = Arc::new(TunSocket::new(name)?.set_non_blocking()?);
@@ -361,10 +338,7 @@ impl Device {
             fwmark: Default::default(),
             key_pair: Default::default(),
             listen_port: Default::default(),
-            next_index: Default::default(),
-            peers: Default::default(),
-            peers_by_idx: Default::default(),
-            peers_by_ip: AllowedIps::new(),
+            registry: Default::default(),
             udp4: Default::default(),
             udp6: Default::default(),
             cleanup_paths: Default::default(),
@@ -411,7 +385,7 @@ impl Device {
             unsafe { self.queue.clear_event_by_fd(s.as_raw_fd()) };
         }
 
-        for peer in self.peers.values() {
+        for (_, peer) in self.registry.iter() {
             peer.lock().shutdown_endpoint();
         }
 
@@ -459,7 +433,7 @@ impl Device {
 
         let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
 
-        for peer in self.peers.values_mut() {
+        for (_, peer) in self.registry.iter_mut() {
             let mut peer_mut = peer.lock();
 
             if peer_mut
@@ -499,7 +473,7 @@ impl Device {
         }
 
         // Then on all currently connected sockets
-        for peer in self.peers.values() {
+        for (_, peer) in self.registry.iter() {
             if let Some(ref sock) = peer.lock().endpoint().conn {
                 sock.set_fwmark(mark)?
             }
@@ -509,9 +483,7 @@ impl Device {
     }
 
     fn clear_peers(&mut self) {
-        self.peers.clear();
-        self.peers_by_idx.clear();
-        self.peers_by_ip.clear();
+        self.registry.clear();
     }
 
     fn register_notifiers(&mut self) -> Result<(), Error> {
@@ -544,15 +516,13 @@ impl Device {
         self.queue.new_periodic_event(
             // Execute the timed function of every peer in the list
             Box::new(|d, t| {
-                let peer_map = &d.peers;
-
                 let (udp4, udp6) = match (d.udp4.as_ref(), d.udp6.as_ref()) {
                     (Some(udp4), Some(udp6)) => (udp4, udp6),
                     _ => return Action::Continue,
                 };
 
                 // Go over each peer and invoke the timer function
-                for peer in peer_map.values() {
+                for (_, peer) in d.registry.iter() {
                     let mut p = peer.lock();
                     let endpoint_addr = match p.endpoint().addr {
                         Some(addr) => addr,
@@ -624,13 +594,13 @@ impl Device {
                             parse_handshake_anon(private_key, public_key, p)
                                 .ok()
                                 .and_then(|hh| {
-                                    d.peers
+                                    d.registry
                                         .get(&x25519_dalek::PublicKey::from(hh.peer_static_public))
                                 })
                         }
-                        Packet::HandshakeResponse(p) => d.peers_by_idx.get(&(p.receiver_idx >> 8)),
-                        Packet::PacketCookieReply(p) => d.peers_by_idx.get(&(p.receiver_idx >> 8)),
-                        Packet::PacketData(p) => d.peers_by_idx.get(&(p.receiver_idx >> 8)),
+                        Packet::HandshakeResponse(p) => d.registry.get_peer_at(p.receiver_idx >> 8),
+                        Packet::PacketCookieReply(p) => d.registry.get_peer_at(p.receiver_idx >> 8),
+                        Packet::PacketData(p) => d.registry.get_peer_at(p.receiver_idx >> 8),
                     };
 
                     let peer = match peer {
@@ -678,7 +648,7 @@ impl Device {
                     p.set_endpoint(addr);
                     if d.config.use_connected_socket {
                         if let Ok(sock) = p.connect_endpoint(d.listen_port, d.fwmark) {
-                            d.register_conn_handler(Arc::clone(peer), sock, ip_addr)
+                            d.register_conn_handler(peer.clone(), sock, ip_addr)
                                 .unwrap();
                         }
                     }
@@ -769,7 +739,7 @@ impl Device {
                 let udp4 = d.udp4.as_ref().expect("Not connected");
                 let udp6 = d.udp6.as_ref().expect("Not connected");
 
-                let peers = &d.peers_by_ip;
+                let peers = d.registry.get_by_allowed_ip();
                 for _ in 0..MAX_ITR {
                     let src = match iface.read(&mut t.src_buf[..mtu]) {
                         Ok(src) => src,

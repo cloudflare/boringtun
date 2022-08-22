@@ -4,6 +4,7 @@
 use super::dev_lock::LockReadGuard;
 use super::drop_privileges::get_saved_ids;
 use super::{AllowedIP, Device, Error, SocketAddr};
+use crate::device::registry::Registry;
 use crate::device::Action;
 use crate::serialization::KeyBytes;
 use hex::encode as encode_hex;
@@ -33,7 +34,7 @@ fn create_sock_dir() {
     }
 }
 
-impl Device {
+impl<R: Registry + Send + Sync + 'static> Device<R> {
     /// Register the api handler for this Device. The api handler receives stream connections on a Unix socket
     /// with a known path: /var/run/wireguard/{tun_name}.sock.
     pub fn register_api_handler(&mut self) -> Result<(), Error> {
@@ -153,7 +154,10 @@ impl Device {
 }
 
 #[allow(unused_must_use)]
-fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
+fn api_get<R: Registry + Send + Sync + 'static>(
+    writer: &mut BufWriter<&UnixStream>,
+    d: &Device<R>,
+) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
         writeln!(writer, "own_public_key={}", encode_hex(k.1.as_bytes()));
@@ -167,7 +171,7 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
         writeln!(writer, "fwmark={}", fwmark);
     }
 
-    for (k, p) in d.peers.iter() {
+    for (k, p) in d.registry.iter() {
         let p = p.lock();
         writeln!(writer, "public_key={}", encode_hex(k.as_bytes()));
 
@@ -200,7 +204,10 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
     0
 }
 
-fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -> i32 {
+fn api_set<R: Registry + Send + Sync + 'static>(
+    reader: &mut BufReader<&UnixStream>,
+    d: &mut LockReadGuard<Device<R>>,
+) -> i32 {
     d.try_writeable(
         |device| device.trigger_yield(),
         |device| {
@@ -270,9 +277,9 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
     .unwrap_or(EIO)
 }
 
-fn api_set_peer(
+fn api_set_peer<R: Registry + Send + Sync + 'static>(
     reader: &mut BufReader<&UnixStream>,
-    d: &mut Device,
+    d: &mut Device<R>,
     pub_key: x25519_dalek::PublicKey,
 ) -> i32 {
     let mut cmd = String::new();
