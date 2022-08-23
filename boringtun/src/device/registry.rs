@@ -13,6 +13,15 @@ pub trait Registry: Default {
         peer: Arc<Mutex<Peer>>,
         allowed_ips: &[AllowedIP],
     );
+    /// Returns a new peer candidate as defined by the implementing registry
+    fn new_candidate(&self, _public_key: &x25519_dalek::PublicKey) -> Option<PeerCandidate> {
+        None
+    }
+
+    /// Register the candidate typically resulting in the candidate becoming a full peer.
+    fn register_candidate(&self, _candidate: PeerCandidate) {
+        unimplemented!()
+    }
 
     /// Get a registered peer by its public key
     fn get(&self, public_key: &x25519_dalek::PublicKey) -> Option<Arc<Mutex<Peer>>>;
@@ -38,6 +47,12 @@ pub trait Registry: Default {
 
     /// Get the next available peer index
     fn next_index(&mut self) -> u32;
+}
+
+pub struct PeerCandidate {
+    pub public_key: x25519_dalek::PublicKey,
+    pub allowed_ips: Vec<AllowedIP>,
+    pub keepalive: u16,
 }
 
 pub struct InMemoryRegistry {

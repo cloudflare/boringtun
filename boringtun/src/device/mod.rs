@@ -570,6 +570,8 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
         self.queue.new_event(
             udp.as_raw_fd(),
             Box::new(move |d, t| {
+                let mut candidate_peer = None;
+
                 // Handler that handles anonymous packets over UDP
                 let mut iter = MAX_ITR;
                 let (private_key, public_key) = d.key_pair.as_ref().expect("Key not set");
@@ -594,8 +596,14 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
                             parse_handshake_anon(private_key, public_key, p)
                                 .ok()
                                 .and_then(|hh| {
-                                    d.registry
-                                        .get(&x25519_dalek::PublicKey::from(hh.peer_static_public))
+                                    let pub_key =
+                                        x25519_dalek::PublicKey::from(hh.peer_static_public);
+
+                                    let peer = d.registry.get(&pub_key);
+                                    if peer.is_none() {
+                                        candidate_peer = d.registry.new_candidate(&pub_key);
+                                    }
+                                    peer
                                 })
                         }
                         Packet::HandshakeResponse(p) => d.registry.get_peer_at(p.receiver_idx >> 8),
@@ -657,6 +665,28 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
                     if iter == 0 {
                         break;
                     }
+                }
+
+                if let Some(candidate_peer) = candidate_peer {
+                    d.try_writeable(
+                        |device| device.trigger_yield(),
+                        |device| {
+                            device.cancel_yield();
+
+                            // Add the peer candidate to the device
+                            device.update_peer(
+                                candidate_peer.public_key.clone(),
+                                false,
+                                false,
+                                None,
+                                candidate_peer.allowed_ips.as_slice(),
+                                Some(candidate_peer.keepalive),
+                                None,
+                            );
+
+                            device.registry.register_candidate(candidate_peer);
+                        },
+                    );
                 }
                 Action::Continue
             }),
