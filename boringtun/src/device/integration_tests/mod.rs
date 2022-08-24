@@ -5,7 +5,7 @@
 // Those tests require docker and sudo privileges to run
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
-    use crate::device::registry::{InMemoryRegistry, Registry};
+    use crate::device::registry::InMemoryRegistry;
     use crate::device::{DeviceConfig, DeviceHandle};
     use base64::encode as base64encode;
     use hex::encode;
@@ -279,7 +279,7 @@ mod tests {
         fn init_with_config(addr_v4: IpAddr, addr_v6: IpAddr, config: DeviceConfig) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let _device = DeviceHandle::new(&name, config, InMemoryRegistry::default()).unwrap();
+            let _device = DeviceHandle::<InMemoryRegistry>::new(&name, config).unwrap();
             WGHandle {
                 _device,
                 name,

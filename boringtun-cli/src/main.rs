@@ -154,16 +154,15 @@ fn main() {
         use_multi_queue: !matches.is_present("disable-multi-queue"),
     };
 
-    let mut device_handle: DeviceHandle<InMemoryRegistry> =
-        match DeviceHandle::new(tun_name, config, InMemoryRegistry::default()) {
-            Ok(d) => d,
-            Err(e) => {
-                // Notify parent that tunnel initialization failed
-                tracing::error!(message = "Failed to initialize tunnel", error=?e);
-                sock1.send(&[0]).unwrap();
-                exit(1);
-            }
-        };
+    let mut device_handle = match DeviceHandle::<InMemoryRegistry>::new(tun_name, config) {
+        Ok(d) => d,
+        Err(e) => {
+            // Notify parent that tunnel initialization failed
+            tracing::error!(message = "Failed to initialize tunnel", error=?e);
+            sock1.send(&[0]).unwrap();
+            exit(1);
+        }
+    };
 
     if !matches.is_present("disable-drop-privileges") {
         if let Err(e) = drop_privileges() {

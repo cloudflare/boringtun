@@ -49,7 +49,7 @@ use poll::{EventPoll, EventRef, WaitResult};
 use tun::{errno, errno_str, TunSocket};
 use udp::UDPSocket;
 
-use crate::device::registry::Registry;
+use crate::device::registry::{InMemoryRegistry, Registry};
 use dev_lock::{Lock, LockReadGuard};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
@@ -92,6 +92,12 @@ type Handler<R> =
 pub struct DeviceHandle<R: Registry + Send + Sync + 'static> {
     device: Arc<Lock<Device<R>>>, // The interface this handle owns
     threads: Vec<JoinHandle<()>>,
+}
+
+pub struct DeviceHandleBuilder<R: Registry + Send + Sync + 'static> {
+    name: String,
+    config: DeviceConfig,
+    registry: Option<R>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -152,26 +158,21 @@ struct ThreadData {
 }
 
 impl<R: Registry + Send + Sync + 'static> DeviceHandle<R> {
-    pub fn new(name: &str, config: DeviceConfig, registry: R) -> Result<DeviceHandle<R>, Error> {
-        let n_threads = config.n_threads;
-        let mut wg_interface = Device::<R>::new(name, config, registry)?;
-        wg_interface.open_listen_socket(0)?; // Start listening on a random port
-
-        let interface_lock = Arc::new(Lock::new(wg_interface));
-
-        let mut threads = vec![];
-
-        for i in 0..n_threads {
-            threads.push({
-                let dev = Arc::clone(&interface_lock);
-                thread::spawn(move || DeviceHandle::event_loop(i, &dev))
-            });
+    pub fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle<InMemoryRegistry>, Error> {
+        DeviceHandleBuilder {
+            name: name.to_string(),
+            config,
+            registry: Some(InMemoryRegistry::default()),
         }
+        .build()
+    }
 
-        Ok(DeviceHandle {
-            device: interface_lock,
-            threads,
-        })
+    pub fn builder(name: &str, config: DeviceConfig) -> DeviceHandleBuilder<R> {
+        DeviceHandleBuilder::<R> {
+            name: name.to_string(),
+            config,
+            registry: None,
+        }
     }
 
     pub fn wait(&mut self) {
@@ -254,6 +255,38 @@ impl<R: Registry + Send + Sync + 'static> DeviceHandle<R> {
                 }
             }
         }
+    }
+}
+
+impl<R: Registry + Send + Sync + 'static> DeviceHandleBuilder<R> {
+    pub fn with_registry(self, registry: R) -> Self {
+        Self {
+            registry: Some(registry),
+            ..self
+        }
+    }
+
+    pub fn build(self) -> Result<DeviceHandle<R>, Error> {
+        let n_threads = self.config.n_threads;
+        let mut wg_interface =
+            Device::new(&self.name, self.config, self.registry.expect("registry"))?;
+        wg_interface.open_listen_socket(0)?; // Start listening on a random port
+
+        let interface_lock = Arc::new(Lock::new(wg_interface));
+
+        let mut threads = vec![];
+
+        for i in 0..n_threads {
+            threads.push({
+                let dev = Arc::clone(&interface_lock);
+                thread::spawn(move || DeviceHandle::event_loop(i, &dev))
+            });
+        }
+
+        Ok(DeviceHandle {
+            device: interface_lock,
+            threads,
+        })
     }
 }
 
