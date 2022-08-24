@@ -1,11 +1,13 @@
 use crate::device::allowed_ips::AllowedIps;
 use crate::device::peer::{AllowedIP, Peer};
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::hash_map::{Iter, IterMut};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub trait Registry: Default {
+#[async_trait]
+pub trait Registry {
     /// Register a new peer with the registry
     fn insert(
         &mut self,
@@ -13,13 +15,14 @@ pub trait Registry: Default {
         peer: Arc<Mutex<Peer>>,
         allowed_ips: &[AllowedIP],
     );
+
     /// Returns a new peer candidate as defined by the implementing registry
-    fn new_candidate(&self, _public_key: &x25519_dalek::PublicKey) -> Option<PeerCandidate> {
+    async fn new_candidate(&self, _public_key: &x25519_dalek::PublicKey) -> Option<PeerCandidate> {
         None
     }
 
     /// Register the candidate typically resulting in the candidate becoming a full peer.
-    fn register_candidate(&self, _candidate: PeerCandidate) {
+    async fn register_candidate(&self, _candidate: PeerCandidate) {
         unimplemented!()
     }
 
@@ -114,6 +117,7 @@ impl Registry for InMemoryRegistry {
                 p.shutdown_endpoint();
                 self.peers_by_idx.remove(&p.index());
             }
+
             self.peers_by_ip
                 .remove(&|p: &Arc<Mutex<Peer>>| Arc::ptr_eq(&peer, p));
 

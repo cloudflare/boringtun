@@ -152,9 +152,9 @@ struct ThreadData {
 }
 
 impl<R: Registry + Send + Sync + 'static> DeviceHandle<R> {
-    pub fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle<R>, Error> {
+    pub fn new(name: &str, config: DeviceConfig, registry: R) -> Result<DeviceHandle<R>, Error> {
         let n_threads = config.n_threads;
-        let mut wg_interface = Device::<R>::new(name, config)?;
+        let mut wg_interface = Device::<R>::new(name, config, registry)?;
         wg_interface.open_listen_socket(0)?; // Start listening on a random port
 
         let interface_lock = Arc::new(Lock::new(wg_interface));
@@ -317,7 +317,7 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
         tracing::info!("Peer added");
     }
 
-    pub fn new(name: &str, config: DeviceConfig) -> Result<Device<R>, Error> {
+    pub fn new(name: &str, config: DeviceConfig, registry: R) -> Result<Device<R>, Error> {
         let poll = EventPoll::<Handler<R>>::new()?;
 
         // Create a tunnel device
@@ -338,7 +338,7 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
             fwmark: Default::default(),
             key_pair: Default::default(),
             listen_port: Default::default(),
-            registry: Default::default(),
+            registry,
             udp4: Default::default(),
             udp6: Default::default(),
             cleanup_paths: Default::default(),
@@ -601,7 +601,10 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
 
                                     let peer = d.registry.get(&pub_key);
                                     if peer.is_none() {
-                                        candidate_peer = d.registry.new_candidate(&pub_key);
+                                        futures::executor::block_on(async {
+                                            candidate_peer =
+                                                d.registry.new_candidate(&pub_key).await;
+                                        });
                                     }
                                     peer
                                 })
@@ -684,7 +687,9 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
                                 None,
                             );
 
-                            device.registry.register_candidate(candidate_peer);
+                            futures::executor::block_on(
+                                device.registry.register_candidate(candidate_peer),
+                            );
                         },
                     );
                 }

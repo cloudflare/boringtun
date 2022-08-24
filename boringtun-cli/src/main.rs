@@ -155,7 +155,7 @@ fn main() {
     };
 
     let mut device_handle: DeviceHandle<InMemoryRegistry> =
-        match DeviceHandle::new(tun_name, config) {
+        match DeviceHandle::new(tun_name, config, InMemoryRegistry::default()) {
             Ok(d) => d,
             Err(e) => {
                 // Notify parent that tunnel initialization failed
