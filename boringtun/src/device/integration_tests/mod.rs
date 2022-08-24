@@ -58,8 +58,8 @@ mod tests {
     }
 
     /// Represents a single WireGuard interface on local machine
-    struct WGHandle<R: Registry + Send + Sync + 'static> {
-        _device: DeviceHandle<R>,
+    struct WGHandle {
+        _device: DeviceHandle<InMemoryRegistry>,
         name: String,
         addr_v4: IpAddr,
         addr_v6: IpAddr,
@@ -258,10 +258,10 @@ mod tests {
         }
     }
 
-    impl<R: Registry + Send + Sync + 'static> WGHandle<R> {
+    impl WGHandle {
         /// Create a new interface for the tunnel with the given address
-        fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle<R> {
-            WGHandle::<R>::init_with_config(
+        fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
+            WGHandle::init_with_config(
                 addr_v4,
                 addr_v6,
                 DeviceConfig {
@@ -276,7 +276,7 @@ mod tests {
         }
 
         /// Create a new interface for the tunnel with the given address
-        fn init_with_config(addr_v4: IpAddr, addr_v6: IpAddr, config: DeviceConfig) -> WGHandle<R> {
+        fn init_with_config(addr_v4: IpAddr, addr_v6: IpAddr, config: DeviceConfig) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
             let _device = DeviceHandle::new(&name, config, InMemoryRegistry::default()).unwrap();
@@ -471,10 +471,7 @@ mod tests {
     #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can read from
     fn test_wireguard_get() {
-        let wg = WGHandle::<InMemoryRegistry>::init(
-            "192.0.2.0".parse().unwrap(),
-            "::2".parse().unwrap(),
-        );
+        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
         let response = wg.wg_get();
         assert!(response.ends_with("errno=0\n\n"));
     }
@@ -487,10 +484,7 @@ mod tests {
         let private_key = StaticSecret::new(OsRng);
         let own_public_key = PublicKey::from(&private_key);
 
-        let wg = WGHandle::<InMemoryRegistry>::init(
-            "192.0.2.0".parse().unwrap(),
-            "::2".parse().unwrap(),
-        );
+        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
         assert!(wg.wg_get().ends_with("errno=0\n\n"));
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -559,7 +553,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::<InMemoryRegistry>::init_with_config(
+        let mut wg = WGHandle::init_with_config(
             addr_v4,
             addr_v6,
             DeviceConfig {
@@ -606,7 +600,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::<InMemoryRegistry>::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -642,7 +636,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::<InMemoryRegistry>::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -678,7 +672,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::<InMemoryRegistry>::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -717,7 +711,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::<InMemoryRegistry>::init_with_config(
+        let mut wg = WGHandle::init_with_config(
             addr_v4,
             addr_v6,
             DeviceConfig {
@@ -766,7 +760,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::<InMemoryRegistry>::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -817,7 +811,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::<InMemoryRegistry>::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
