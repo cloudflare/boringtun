@@ -34,7 +34,7 @@ fn create_sock_dir() {
     }
 }
 
-impl<R: Registry + Send + Sync + 'static> Device<R> {
+impl<R: Registry> Device<R> {
     /// Register the api handler for this Device. The api handler receives stream connections on a Unix socket
     /// with a known path: /var/run/wireguard/{tun_name}.sock.
     pub fn register_api_handler(&mut self) -> Result<(), Error> {
@@ -154,10 +154,7 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
 }
 
 #[allow(unused_must_use)]
-fn api_get<R: Registry + Send + Sync + 'static>(
-    writer: &mut BufWriter<&UnixStream>,
-    d: &Device<R>,
-) -> i32 {
+fn api_get<R: Registry>(writer: &mut BufWriter<&UnixStream>, d: &Device<R>) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
         writeln!(writer, "own_public_key={}", encode_hex(k.1.as_bytes()));
@@ -204,7 +201,7 @@ fn api_get<R: Registry + Send + Sync + 'static>(
     0
 }
 
-fn api_set<R: Registry + Send + Sync + 'static>(
+fn api_set<R: Registry>(
     reader: &mut BufReader<&UnixStream>,
     d: &mut LockReadGuard<Device<R>>,
 ) -> i32 {
@@ -277,7 +274,7 @@ fn api_set<R: Registry + Send + Sync + 'static>(
     .unwrap_or(EIO)
 }
 
-fn api_set_peer<R: Registry + Send + Sync + 'static>(
+fn api_set_peer<R: Registry>(
     reader: &mut BufReader<&UnixStream>,
     d: &mut Device<R>,
     pub_key: x25519_dalek::PublicKey,

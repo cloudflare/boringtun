@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use boringtun::device::drop_privileges::drop_privileges;
-use boringtun::device::registry::InMemoryRegistry;
 use boringtun::device::{DeviceConfig, DeviceHandle};
 use clap::{Arg, Command};
 use daemonize::Daemonize;
@@ -154,7 +153,7 @@ fn main() {
         use_multi_queue: !matches.is_present("disable-multi-queue"),
     };
 
-    let mut device_handle = match DeviceHandle::<InMemoryRegistry>::new(tun_name, config) {
+    let mut device_handle = match DeviceHandle::<()>::new(tun_name, config) {
         Ok(d) => d,
         Err(e) => {
             // Notify parent that tunnel initialization failed

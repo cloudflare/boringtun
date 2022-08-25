@@ -279,7 +279,7 @@ mod tests {
         fn init_with_config(addr_v4: IpAddr, addr_v6: IpAddr, config: DeviceConfig) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let _device = DeviceHandle::<InMemoryRegistry>::new(&name, config).unwrap();
+            let _device = DeviceHandle::<()>::new(&name, config).unwrap();
             WGHandle {
                 _device,
                 name,

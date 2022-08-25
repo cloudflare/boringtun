@@ -49,7 +49,7 @@ use poll::{EventPoll, EventRef, WaitResult};
 use tun::{errno, errno_str, TunSocket};
 use udp::UDPSocket;
 
-use crate::device::registry::{InMemoryRegistry, Registry};
+use crate::device::registry::{InMemoryRegistry, Registry, RegistryPeer};
 use dev_lock::{Lock, LockReadGuard};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
@@ -89,12 +89,12 @@ enum Action {
 type Handler<R> =
     Box<dyn Fn(&mut LockReadGuard<Device<R>>, &mut ThreadData) -> Action + Send + Sync>;
 
-pub struct DeviceHandle<R: Registry + Send + Sync + 'static> {
+pub struct DeviceHandle<R: Registry> {
     device: Arc<Lock<Device<R>>>, // The interface this handle owns
     threads: Vec<JoinHandle<()>>,
 }
 
-pub struct DeviceHandleBuilder<R: Registry + Send + Sync + 'static> {
+pub struct DeviceHandleBuilder<R: Registry> {
     name: String,
     config: DeviceConfig,
     registry: Option<R>,
@@ -123,7 +123,7 @@ impl Default for DeviceConfig {
     }
 }
 
-pub struct Device<R: Registry + Send + Sync + 'static> {
+pub struct Device<R: Registry> {
     key_pair: Option<(x25519_dalek::StaticSecret, x25519_dalek::PublicKey)>,
     queue: Arc<EventPoll<Handler<R>>>,
 
@@ -157,7 +157,17 @@ struct ThreadData {
     dst_buf: [u8; MAX_UDP_SIZE],
 }
 
-impl<R: Registry + Send + Sync + 'static> DeviceHandle<R> {
+impl<R: Registry> DeviceHandle<R> {
+    /// Create a new handle with a device which uses an
+    /// [InMemoryRegistry](crate::device::registry::InMemoryRegistry). A unit implementation
+    /// of [Registry](crate::device::registry::Registry) is provided to simplify method invocation.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use boringtun::device::{DeviceConfig, DeviceHandle};
+    /// let result = DeviceHandle::<()>::new("utun", DeviceConfig::default());
+    /// ```
     pub fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle<InMemoryRegistry>, Error> {
         DeviceHandleBuilder {
             name: name.to_string(),
@@ -258,7 +268,7 @@ impl<R: Registry + Send + Sync + 'static> DeviceHandle<R> {
     }
 }
 
-impl<R: Registry + Send + Sync + 'static> DeviceHandleBuilder<R> {
+impl<R: Registry> DeviceHandleBuilder<R> {
     pub fn with_registry(self, registry: R) -> Self {
         Self {
             registry: Some(registry),
@@ -290,14 +300,14 @@ impl<R: Registry + Send + Sync + 'static> DeviceHandleBuilder<R> {
     }
 }
 
-impl<R: Registry + Send + Sync + 'static> Drop for DeviceHandle<R> {
+impl<R: Registry> Drop for DeviceHandle<R> {
     fn drop(&mut self) {
         self.device.read().trigger_exit();
         self.clean();
     }
 }
 
-impl<R: Registry + Send + Sync + 'static> Device<R> {
+impl<R: Registry> Device<R> {
     fn remove_peer(&mut self, pub_key: &x25519_dalek::PublicKey) {
         if self.registry.remove(pub_key).is_some() {
             tracing::info!("Peer removed");
@@ -321,7 +331,7 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
         }
 
         // Update an existing peer
-        if self.registry.get(&pub_key).is_some() {
+        if let RegistryPeer::Peer(_) = self.registry.get(&pub_key) {
             // We already have a peer, we need to merge the existing config into the newly created one
             panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
         }
@@ -603,13 +613,11 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
         self.queue.new_event(
             udp.as_raw_fd(),
             Box::new(move |d, t| {
-                let mut candidate_peer = None;
-
                 // Handler that handles anonymous packets over UDP
                 let mut iter = MAX_ITR;
-                let (private_key, public_key) = d.key_pair.as_ref().expect("Key not set");
 
-                let rate_limiter = d.rate_limiter.as_ref().unwrap();
+                let (private_key, public_key) = d.key_pair.as_ref().cloned().expect("Key not set");
+                let rate_limiter = d.rate_limiter.as_ref().cloned().unwrap();
 
                 // Loop while we have packets on the anonymous connection
                 while let Ok((addr, packet)) = udp.recvfrom(&mut t.src_buf[..]) {
@@ -626,20 +634,36 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
 
                     let peer = match &parsed_packet {
                         Packet::HandshakeInit(p) => {
-                            parse_handshake_anon(private_key, public_key, p)
+                            parse_handshake_anon(&private_key, &public_key, p)
                                 .ok()
                                 .and_then(|hh| {
                                     let pub_key =
                                         x25519_dalek::PublicKey::from(hh.peer_static_public);
 
-                                    let peer = d.registry.get(&pub_key);
-                                    if peer.is_none() {
-                                        futures::executor::block_on(async {
-                                            candidate_peer =
-                                                d.registry.new_candidate(&pub_key).await;
-                                        });
-                                    }
-                                    peer
+                                    d.try_writeable(
+                                        |d| d.trigger_yield(),
+                                        |d| {
+                                            d.cancel_yield();
+                                            match d.registry.get(&pub_key) {
+                                                RegistryPeer::Peer(peer) => Some(peer),
+                                                RegistryPeer::Candidate(peer_candidate) => {
+                                                    d.update_peer(
+                                                        peer_candidate.public_key.clone(),
+                                                        false,
+                                                        false,
+                                                        None,
+                                                        peer_candidate.allowed_ips.as_slice(),
+                                                        peer_candidate.keepalive,
+                                                        None,
+                                                    );
+
+                                                    d.registry.get(&pub_key).into()
+                                                }
+                                                RegistryPeer::None => None,
+                                            }
+                                        },
+                                    )
+                                    .flatten()
                                 })
                         }
                         Packet::HandshakeResponse(p) => d.registry.get_peer_at(p.receiver_idx >> 8),
@@ -701,30 +725,6 @@ impl<R: Registry + Send + Sync + 'static> Device<R> {
                     if iter == 0 {
                         break;
                     }
-                }
-
-                if let Some(candidate_peer) = candidate_peer {
-                    d.try_writeable(
-                        |device| device.trigger_yield(),
-                        |device| {
-                            device.cancel_yield();
-
-                            // Add the peer candidate to the device
-                            device.update_peer(
-                                candidate_peer.public_key.clone(),
-                                false,
-                                false,
-                                None,
-                                candidate_peer.allowed_ips.as_slice(),
-                                Some(candidate_peer.keepalive),
-                                None,
-                            );
-
-                            futures::executor::block_on(
-                                device.registry.register_candidate(candidate_peer),
-                            );
-                        },
-                    );
                 }
                 Action::Continue
             }),

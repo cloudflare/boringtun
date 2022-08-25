@@ -1,13 +1,12 @@
 use crate::device::allowed_ips::AllowedIps;
 use crate::device::peer::{AllowedIP, Peer};
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::hash_map::{Iter, IterMut};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[async_trait]
-pub trait Registry {
+/// Representation of a Peer registry.
+pub trait Registry: Send + Sync + 'static {
     /// Register a new peer with the registry
     fn insert(
         &mut self,
@@ -16,18 +15,8 @@ pub trait Registry {
         allowed_ips: &[AllowedIP],
     );
 
-    /// Returns a new peer candidate as defined by the implementing registry
-    async fn new_candidate(&self, _public_key: &x25519_dalek::PublicKey) -> Option<PeerCandidate> {
-        None
-    }
-
-    /// Register the candidate typically resulting in the candidate becoming a full peer.
-    async fn register_candidate(&self, _candidate: PeerCandidate) {
-        unimplemented!()
-    }
-
-    /// Get a registered peer by its public key
-    fn get(&self, public_key: &x25519_dalek::PublicKey) -> Option<Arc<Mutex<Peer>>>;
+    /// Get a registry peer by its public key
+    fn get(&mut self, public_key: &x25519_dalek::PublicKey) -> RegistryPeer;
 
     /// Get the trie of IP/cidr addresses with the associated peer
     fn get_by_allowed_ip(&self) -> &AllowedIps<Arc<Mutex<Peer>>>;
@@ -52,12 +41,34 @@ pub trait Registry {
     fn next_index(&mut self) -> u32;
 }
 
+/// Encapsulates a peer type defined in the registry
+pub enum RegistryPeer {
+    /// A candidate created by the registry but not yet full initialized
+    Candidate(PeerCandidate),
+    /// A full fledged peer
+    Peer(Arc<Mutex<Peer>>),
+    None,
+}
+
+impl From<RegistryPeer> for Option<Arc<Mutex<Peer>>> {
+    fn from(c: RegistryPeer) -> Self {
+        match c {
+            RegistryPeer::Peer(peer) => Some(peer),
+            _ => None,
+        }
+    }
+}
+
+/// A peer candidate which has been staged in the registry but does not yet have a full
+/// [Peer](crate::device::peer::Peer) representation within the registry
+#[derive(Clone)]
 pub struct PeerCandidate {
     pub public_key: x25519_dalek::PublicKey,
     pub allowed_ips: Vec<AllowedIP>,
-    pub keepalive: u16,
+    pub keepalive: Option<u16>,
 }
 
+/// An in memory registry.
 pub struct InMemoryRegistry {
     next_index: u32,
     peers: HashMap<x25519_dalek::PublicKey, Arc<Mutex<Peer>>>,
@@ -90,8 +101,12 @@ impl Registry for InMemoryRegistry {
         }
     }
 
-    fn get(&self, public_key: &x25519_dalek::PublicKey) -> Option<Arc<Mutex<Peer>>> {
-        self.peers.get(public_key).cloned()
+    fn get(&mut self, public_key: &x25519_dalek::PublicKey) -> RegistryPeer {
+        self.peers
+            .get(public_key)
+            .cloned()
+            .map(|peer| RegistryPeer::Peer(peer))
+            .unwrap_or(RegistryPeer::None)
     }
 
     fn get_by_allowed_ip(&self) -> &AllowedIps<Arc<Mutex<Peer>>> {
@@ -136,5 +151,43 @@ impl Registry for InMemoryRegistry {
         self.next_index += 1;
         assert!(next < (1 << 24), "Too many peers created");
         next
+    }
+}
+
+impl Registry for () {
+    fn insert(&mut self, _: x25519_dalek::PublicKey, _: Arc<Mutex<Peer>>, _: &[AllowedIP]) {
+        unimplemented!();
+    }
+
+    fn get(&mut self, _: &x25519_dalek::PublicKey) -> RegistryPeer {
+        unimplemented!();
+    }
+
+    fn get_by_allowed_ip(&self) -> &AllowedIps<Arc<Mutex<Peer>>> {
+        unimplemented!();
+    }
+
+    fn get_peer_at(&self, _: u32) -> Option<Arc<Mutex<Peer>>> {
+        unimplemented!();
+    }
+
+    fn iter(&self) -> Iter<x25519_dalek::PublicKey, Arc<Mutex<Peer>>> {
+        unimplemented!();
+    }
+
+    fn iter_mut(&mut self) -> IterMut<x25519_dalek::PublicKey, Arc<Mutex<Peer>>> {
+        unimplemented!();
+    }
+
+    fn remove(&mut self, _: &x25519_dalek::PublicKey) -> Option<Arc<Mutex<Peer>>> {
+        unimplemented!();
+    }
+
+    fn clear(&mut self) {
+        unimplemented!();
+    }
+
+    fn next_index(&mut self) -> u32 {
+        unimplemented!();
     }
 }
