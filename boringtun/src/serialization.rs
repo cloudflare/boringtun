@@ -1,4 +1,4 @@
-pub(crate) struct KeyBytes(pub [u8; 32]);
+pub struct KeyBytes(pub [u8; 32]);
 
 impl std::str::FromStr for KeyBytes {
     type Err = &'static str;
@@ -29,5 +29,11 @@ impl std::str::FromStr for KeyBytes {
         }
 
         Ok(KeyBytes(internal))
+    }
+}
+
+impl From<KeyBytes> for x25519_dalek::PublicKey {
+    fn from(key_bytes: KeyBytes) -> Self {
+        Self::from(key_bytes.0)
     }
 }

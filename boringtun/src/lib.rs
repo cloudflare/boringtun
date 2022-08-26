@@ -15,4 +15,4 @@ pub mod noise;
 #[cfg(feature = "jni-bindings")]
 pub mod jni;
 
-pub(crate) mod serialization;
+pub mod serialization;

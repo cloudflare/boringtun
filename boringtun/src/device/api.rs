@@ -253,13 +253,7 @@ fn api_set<R: Registry>(
                         },
                         "public_key" => match val.parse::<KeyBytes>() {
                             // Indicates a new peer section
-                            Ok(key_bytes) => {
-                                return api_set_peer(
-                                    reader,
-                                    device,
-                                    x25519_dalek::PublicKey::from(key_bytes.0),
-                                )
-                            }
+                            Ok(key_bytes) => return api_set_peer(reader, device, key_bytes.into()),
                             Err(_) => return EINVAL,
                         },
                         _ => return EINVAL,
