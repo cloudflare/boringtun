@@ -1,6 +1,7 @@
 use crate::device::allowed_ips::AllowedIps;
 use crate::device::peer::{AllowedIP, Peer};
 use parking_lot::Mutex;
+use rand_core::{OsRng, RngCore};
 use std::collections::hash_map::{Iter, IterMut};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -70,7 +71,7 @@ pub struct PeerCandidate {
 
 /// An in memory registry.
 pub struct InMemoryRegistry {
-    next_index: u32,
+    next_index: IndexLfsr,
     peers: HashMap<x25519_dalek::PublicKey, Arc<Mutex<Peer>>>,
     peers_by_ip: AllowedIps<Arc<Mutex<Peer>>>,
     peers_by_idx: HashMap<u32, Arc<Mutex<Peer>>>,
@@ -105,7 +106,7 @@ impl Registry for InMemoryRegistry {
         self.peers
             .get(public_key)
             .cloned()
-            .map(|peer| RegistryPeer::Peer(peer))
+            .map(RegistryPeer::Peer)
             .unwrap_or(RegistryPeer::None)
     }
 
@@ -147,10 +148,7 @@ impl Registry for InMemoryRegistry {
     }
 
     fn next_index(&mut self) -> u32 {
-        let next = self.next_index;
-        self.next_index += 1;
-        assert!(next < (1 << 24), "Too many peers created");
-        next
+        self.next_index.next()
     }
 }
 
@@ -189,5 +187,54 @@ impl Registry for () {
 
     fn next_index(&mut self) -> u32 {
         unimplemented!();
+    }
+}
+
+/// A basic linear-feedback shift register implemented as xorshift, used to
+/// distribute peer indexes across the 24-bit address space reserved for peer
+/// identification.
+/// The purpose is to obscure the total number of peers using the system and to
+/// ensure it requires a non-trivial amount of processing power and/or samples
+/// to guess other peers' indices. Anything more ambitious than this is wasted
+/// with only 24 bits of space.
+struct IndexLfsr {
+    initial: u32,
+    lfsr: u32,
+    mask: u32,
+}
+
+impl IndexLfsr {
+    /// Generate a random 24-bit nonzero integer
+    fn random_index() -> u32 {
+        const LFSR_MAX: u32 = 0xffffff; // 24-bit seed
+        loop {
+            let i = OsRng.next_u32() & LFSR_MAX;
+            if i > 0 {
+                // LFSR seed must be non-zero
+                return i;
+            }
+        }
+    }
+
+    /// Generate the next value in the pseudorandom sequence
+    fn next(&mut self) -> u32 {
+        // 24-bit polynomial for randomness. This is arbitrarily chosen to
+        // inject bitflips into the value.
+        const LFSR_POLY: u32 = 0xd80000; // 24-bit polynomial
+        let value = self.lfsr - 1; // lfsr will never have value of 0
+        self.lfsr = (self.lfsr >> 1) ^ ((0u32.wrapping_sub(self.lfsr & 1u32)) & LFSR_POLY);
+        assert!(self.lfsr != self.initial, "Too many peers created");
+        value ^ self.mask
+    }
+}
+
+impl Default for IndexLfsr {
+    fn default() -> Self {
+        let seed = Self::random_index();
+        IndexLfsr {
+            initial: seed,
+            lfsr: seed,
+            mask: Self::random_index(),
+        }
     }
 }

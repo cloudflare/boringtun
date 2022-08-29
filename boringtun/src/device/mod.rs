@@ -648,7 +648,7 @@ impl<R: Registry> Device<R> {
                                                 RegistryPeer::Peer(peer) => Some(peer),
                                                 RegistryPeer::Candidate(peer_candidate) => {
                                                     d.update_peer(
-                                                        peer_candidate.public_key.clone(),
+                                                        peer_candidate.public_key,
                                                         false,
                                                         false,
                                                         None,
