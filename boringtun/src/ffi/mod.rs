@@ -7,6 +7,7 @@
 
 //! C bindings for the BoringTun library
 use super::noise::{Tunn, TunnResult};
+use crate::x25519::{PublicKey, StaticSecret};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
@@ -14,7 +15,6 @@ use parking_lot::Mutex;
 use rand_core::OsRng;
 use tracing;
 use tracing_subscriber::fmt;
-use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::serialization::KeyBytes;
 use std::ffi::{CStr, CString};
