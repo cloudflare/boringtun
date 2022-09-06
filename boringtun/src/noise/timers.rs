@@ -8,10 +8,10 @@ use std::ops::{Index, IndexMut};
 
 use std::time::Duration;
 
-#[cfg(test)]
+#[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 
-#[cfg(not(test))]
+#[cfg(not(feature = "mock-instant"))]
 use std::time::Instant;
 
 // Some constants, represent time in seconds

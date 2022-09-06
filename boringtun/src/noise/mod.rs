@@ -590,6 +590,7 @@ impl Tunn {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "mock-instant")]
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
 
     use super::*;
@@ -678,6 +679,7 @@ mod tests {
         packet
     }
 
+    #[cfg(feature = "mock-instant")]
     fn update_timer_results_in_handshake(tun: &mut Tunn) {
         let mut dst = vec![0u8; 2048];
         let result = tun.update_timers(&mut dst);
@@ -732,6 +734,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "mock-instant")]
     fn new_handshake_after_two_mins() {
         let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
         let mut my_dst = [0u8; 1024];
@@ -755,6 +758,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "mock-instant")]
     fn handshake_no_resp_rekey_timeout() {
         let (mut my_tun, _their_tun) = create_two_tuns();
 

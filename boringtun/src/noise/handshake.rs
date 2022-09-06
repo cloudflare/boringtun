@@ -11,11 +11,11 @@ use chacha20poly1305::XChaCha20Poly1305;
 use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
-#[cfg(not(test))]
+#[cfg(not(feature = "mock-instant"))]
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
-#[cfg(test)]
+#[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 
 pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
