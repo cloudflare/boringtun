@@ -6,14 +6,20 @@ use crate::noise::{Tunn, TunnResult};
 use std::mem;
 use std::ops::{Index, IndexMut};
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+#[cfg(feature = "mock-instant")]
+use mock_instant::Instant;
+
+#[cfg(not(feature = "mock-instant"))]
+use std::time::Instant;
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
-const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
+pub(crate) const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
 const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
 const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
-const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
 
