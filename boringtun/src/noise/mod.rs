@@ -587,3 +587,208 @@ impl Tunn {
         (time, tx_bytes, rx_bytes, loss, rtt)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
+
+    use super::*;
+    use rand_core::{OsRng, RngCore};
+
+    fn create_two_tuns() -> (Tunn, Tunn) {
+        let my_secret_key = x25519_dalek::StaticSecret::new(OsRng);
+        let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
+        let my_idx = OsRng.next_u32();
+
+        let their_secret_key = x25519_dalek::StaticSecret::new(OsRng);
+        let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
+        let their_idx = OsRng.next_u32();
+
+        let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None).unwrap();
+
+        let their_tun =
+            Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None).unwrap();
+
+        (my_tun, their_tun)
+    }
+
+    fn create_handshake_init(tun: &mut Tunn) -> Vec<u8> {
+        let mut dst = vec![0u8; 2048];
+        let handshake_init = tun.format_handshake_initiation(&mut dst, false);
+        assert!(matches!(handshake_init, TunnResult::WriteToNetwork(_)));
+        let handshake_init = if let TunnResult::WriteToNetwork(sent) = handshake_init {
+            sent
+        } else {
+            unreachable!();
+        };
+
+        handshake_init.into()
+    }
+
+    fn create_handshake_response(tun: &mut Tunn, handshake_init: &[u8]) -> Vec<u8> {
+        let mut dst = vec![0u8; 2048];
+        let handshake_resp = tun.decapsulate(None, &handshake_init, &mut dst);
+        assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
+
+        let handshake_resp = if let TunnResult::WriteToNetwork(sent) = handshake_resp {
+            sent
+        } else {
+            unreachable!();
+        };
+
+        handshake_resp.into()
+    }
+
+    fn parse_handshake_resp(tun: &mut Tunn, handshake_resp: &[u8]) -> Vec<u8> {
+        let mut dst = vec![0u8; 2048];
+        let keepalive = tun.decapsulate(None, &handshake_resp, &mut dst);
+        assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
+
+        let keepalive = if let TunnResult::WriteToNetwork(sent) = keepalive {
+            sent
+        } else {
+            unreachable!();
+        };
+
+        keepalive.into()
+    }
+
+    fn parse_keepalive(tun: &mut Tunn, keepalive: &[u8]) {
+        let mut dst = vec![0u8; 2048];
+        let keepalive = tun.decapsulate(None, &keepalive, &mut dst);
+        assert!(matches!(keepalive, TunnResult::Done));
+    }
+
+    fn create_two_tuns_and_handshake() -> (Tunn, Tunn) {
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        let init = create_handshake_init(&mut my_tun);
+        let resp = create_handshake_response(&mut their_tun, &init);
+        let keepalive = parse_handshake_resp(&mut my_tun, &resp);
+        parse_keepalive(&mut their_tun, &keepalive);
+
+        (my_tun, their_tun)
+    }
+
+    fn create_ipv4_udp_packet() -> Vec<u8> {
+        let header =
+            etherparse::PacketBuilder::ipv4([192, 168, 1, 2], [192, 168, 1, 3], 5).udp(5678, 23);
+        let payload = [0, 1, 2, 3];
+        let mut packet = Vec::<u8>::with_capacity(header.size(payload.len()));
+        header.write(&mut packet, &payload).unwrap();
+        packet
+    }
+
+    fn update_timer_results_in_handshake(tun: &mut Tunn) {
+        let mut dst = vec![0u8; 2048];
+        let result = tun.update_timers(&mut dst);
+        assert!(matches!(result, TunnResult::WriteToNetwork(_)));
+        let packet_data = if let TunnResult::WriteToNetwork(data) = result {
+            data
+        } else {
+            unreachable!();
+        };
+        let packet = Tunn::parse_incoming_packet(&packet_data).unwrap();
+        assert!(matches!(packet, Packet::HandshakeInit(_)));
+    }
+
+    #[test]
+    fn create_two_tunnels_linked_to_eachother() {
+        let (_my_tun, _their_tun) = create_two_tuns();
+    }
+
+    #[test]
+    fn handshake_init() {
+        let (mut my_tun, _their_tun) = create_two_tuns();
+        let init = create_handshake_init(&mut my_tun);
+        let packet = Tunn::parse_incoming_packet(&init).unwrap();
+        assert!(matches!(packet, Packet::HandshakeInit(_)));
+    }
+
+    #[test]
+    fn handshake_init_and_response() {
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        let init = create_handshake_init(&mut my_tun);
+        let resp = create_handshake_response(&mut their_tun, &init);
+        let packet = Tunn::parse_incoming_packet(&resp).unwrap();
+        assert!(matches!(packet, Packet::HandshakeResponse(_)));
+    }
+
+    #[test]
+    fn full_handshake() {
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        let init = create_handshake_init(&mut my_tun);
+        let resp = create_handshake_response(&mut their_tun, &init);
+        let keepalive = parse_handshake_resp(&mut my_tun, &resp);
+        let packet = Tunn::parse_incoming_packet(&keepalive).unwrap();
+        assert!(matches!(packet, Packet::PacketData(_)));
+    }
+
+    #[test]
+    fn full_handshake_plus_timers() {
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
+        // Time has not yet advanced so their is nothing to do
+        assert!(matches!(my_tun.update_timers(&mut []), TunnResult::Done));
+        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
+    }
+
+    #[test]
+    fn new_handshake_after_two_mins() {
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
+        let mut my_dst = [0u8; 1024];
+
+        // Advance time 1 second and "send" 1 packet so that we send a handshake
+        // after the timeout
+        mock_instant::MockClock::advance(Duration::from_secs(1));
+        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
+        assert!(matches!(
+            my_tun.update_timers(&mut my_dst),
+            TunnResult::Done
+        ));
+        let sent_packet_buf = create_ipv4_udp_packet();
+        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
+
+        //Advance to timeout
+        mock_instant::MockClock::advance(REKEY_AFTER_TIME);
+        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
+        update_timer_results_in_handshake(&mut my_tun);
+    }
+
+    #[test]
+    fn handshake_no_resp_rekey_timeout() {
+        let (mut my_tun, _their_tun) = create_two_tuns();
+
+        let init = create_handshake_init(&mut my_tun);
+        let packet = Tunn::parse_incoming_packet(&init).unwrap();
+        assert!(matches!(packet, Packet::HandshakeInit(_)));
+
+        mock_instant::MockClock::advance(REKEY_TIMEOUT);
+        update_timer_results_in_handshake(&mut my_tun)
+    }
+
+    #[test]
+    fn one_ip_packet() {
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
+        let mut my_dst = [0u8; 1024];
+        let mut their_dst = [0u8; 1024];
+
+        let sent_packet_buf = create_ipv4_udp_packet();
+
+        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
+        let data = if let TunnResult::WriteToNetwork(sent) = data {
+            sent
+        } else {
+            unreachable!();
+        };
+
+        let data = their_tun.decapsulate(None, data, &mut their_dst);
+        assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
+        let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv, _addr) = data {
+            recv
+        } else {
+            unreachable!();
+        };
+        assert_eq!(sent_packet_buf, recv_packet_buf);
+    }
+}
