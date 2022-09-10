@@ -1,5 +1,5 @@
 [workspace]
-members = ["boringtun", "boringtun-cli"]
+members = ["boringtun", "boringtun-cli", "sleepyinstant"]
 
 [profile.release]
 lto = true        # Enable full link-time optimization.

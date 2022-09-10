@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(not(feature = "mock-instant"))]
-use std::time::Instant;
+use sleepyinstant::Instant;
 
 use aead::generic_array::GenericArray;
 use aead::{AeadInPlace, KeyInit};
