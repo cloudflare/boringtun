@@ -4,14 +4,14 @@
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
+#[cfg(not(feature = "mock-instant"))]
+use crate::sleepyinstant::Instant;
 use aead::{Aead, Payload};
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
 use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
-#[cfg(not(feature = "mock-instant"))]
-use sleepyinstant::Instant;
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime};
 

@@ -91,11 +91,10 @@ dependencies = [
  "jni",
  "libc",
  "mock_instant",
- "nix 0.24.1",
+ "nix",
  "parking_lot",
  "rand_core 0.6.3",
  "ring",
- "sleepyinstant",
  "tracing",
  "tracing-subscriber",
  "untrusted 0.9.0",
@@ -657,18 +656,6 @@ checksum = "717e29a243b81f8130e31e24e04fb151b04a44b5a7d05370935f7d937e9de06d"
 
 [[package]]
 name = "nix"
-version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f17df307904acd05aa8e32e97bb20f2a0df1728bbc2d771ae8f9a90463441e9"
-dependencies = [
- "bitflags",
- "cfg-if",
- "libc",
- "memoffset",
-]
-
-[[package]]
-name = "nix"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e322c04a9e3440c327fca7b6c8a63e6890a32fa2ad689db972425f07e0d22abb"
@@ -985,13 +972,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "900fba806f70c630b0a382d0d825e17a0f19fcd059a2ade1ff237bcddf446b31"
 dependencies = [
  "lazy_static",
-]
-
-[[package]]
-name = "sleepyinstant"
-version = "0.1.0"
-dependencies = [
- "nix 0.25.0",
 ]
 
 [[package]]
