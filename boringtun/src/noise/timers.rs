@@ -12,7 +12,7 @@ use std::time::Duration;
 use mock_instant::Instant;
 
 #[cfg(not(feature = "mock-instant"))]
-use std::time::Instant;
+use crate::sleepyinstant::Instant;
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14

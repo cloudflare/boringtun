@@ -10,9 +10,11 @@ pub mod device;
 
 #[cfg(feature = "ffi-bindings")]
 pub mod ffi;
-pub mod noise;
-
 #[cfg(feature = "jni-bindings")]
 pub mod jni;
+pub mod noise;
+
+#[cfg(not(feature = "mock-instant"))]
+pub(crate) mod sleepyinstant;
 
 pub(crate) mod serialization;
