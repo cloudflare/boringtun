@@ -4,13 +4,14 @@
 use std::time::Duration;
 
 #[cfg(target_os = "windows")]
-mod inner {
-    use std::time::Instant;
-}
+mod windows;
+#[cfg(target_os = "windows")]
+use windows as inner;
 
 #[cfg(unix)]
-#[path = "unix.rs"]
-mod inner;
+mod unix;
+#[cfg(unix)]
+use unix as inner;
 
 /// A measurement of a monotonically nondecreasing clock.
 /// Opaque and useful only with [`Duration`].
@@ -33,20 +34,6 @@ mod inner;
 /// The size of an `Instant` struct may vary depending on the target operating
 /// system.
 ///
-/// Example:
-///
-/// ```no_run
-/// use std::time::Duration;
-/// use std::thread::sleep;
-/// use sleepyinstant::Instant;
-///
-/// let now = Instant::now();
-///
-/// // we sleep for 2 seconds
-/// sleep(Duration::new(2, 0));
-/// // it prints '2'
-/// println!("{}", now.elapsed().as_secs());
-/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Instant {
     t: inner::Instant,
@@ -54,14 +41,6 @@ pub struct Instant {
 
 impl Instant {
     /// Returns an instant corresponding to "now".
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use sleepyinstant::Instant;
-    ///
-    /// let now = Instant::now();
-    /// ```
     pub fn now() -> Self {
         Self {
             t: inner::Instant::now(),
@@ -74,38 +53,11 @@ impl Instant {
     /// # Panics
     ///
     /// panics when `earlier` was later than `self`.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::time::Duration;
-    /// use std::thread::sleep;
-    /// use sleepyinstant::Instant;
-    ///
-    /// let now = Instant::now();
-    /// sleep(Duration::new(1, 0));
-    /// let new_now = Instant::now();
-    /// println!("{:?}", new_now.duration_since(now));
-    /// println!("{:?}", now.duration_since(new_now)); // 0ns
-    /// ```
     pub fn duration_since(&self, earlier: Instant) -> Duration {
         self.t.duration_since(earlier.t)
     }
 
     /// Returns the amount of time elapsed since this instant was created.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::time::Duration;
-    /// use std::thread::sleep;
-    /// use sleepyinstant::Instant;
-    ///
-    /// let instant = Instant::now();
-    /// let three_secs = Duration::from_secs(3);
-    /// sleep(three_secs);
-    /// assert!(instant.elapsed() >= three_secs);
-    /// ```
     pub fn elapsed(&self) -> Duration {
         Self::now().duration_since(*self)
     }

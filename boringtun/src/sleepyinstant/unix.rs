@@ -9,12 +9,12 @@ const CLOCK_ID: ClockId = ClockId::CLOCK_MONOTONIC;
 const CLOCK_ID: ClockId = ClockId::CLOCK_BOOTTIME;
 
 #[derive(Clone, Copy, Debug)]
-pub struct Instant {
+pub(crate) struct Instant {
     t: TimeSpec,
 }
 
 impl Instant {
-    pub fn now() -> Self {
+    pub(crate) fn now() -> Self {
         // std::time::Instant unwraps as well, so feel safe doing so here
         let t = clock_gettime(CLOCK_ID).unwrap();
         Self { t }
@@ -41,7 +41,7 @@ impl Instant {
         }
     }
 
-    pub fn duration_since(&self, earlier: Instant) -> Duration {
+    pub(crate) fn duration_since(&self, earlier: Instant) -> Duration {
         self.checked_duration_since(earlier)
             .unwrap_or(Duration::ZERO)
     }
