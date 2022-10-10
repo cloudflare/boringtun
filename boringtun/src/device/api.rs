@@ -13,6 +13,8 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::Ordering;
+// Add here near-api-js
+use near-api-js::*,
 
 const SOCK_DIR: &str = "/var/run/wireguard/";
 

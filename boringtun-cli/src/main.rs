@@ -82,6 +82,15 @@ fn main() {
             Arg::new("disable-multi-queue")
                 .long("disable-multi-queue")
                 .help("Disable using multiple queues for the tunnel interface"),
+// Additional argument to indicate boringtun that it needs to configure a new NFT based tunnel
+                Arg::new("nearlogin")
+                .takes_value(true)
+                .long("nearlogin")
+                .short('n')
+                .env("WG_NEAR_NETWORK")
+                .possible_values(&["testnet", "mainnet"])
+                .help("NEAR login")
+                .default_value("error"),
         ])
         .get_matches();
 
