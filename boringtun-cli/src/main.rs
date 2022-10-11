@@ -9,6 +9,8 @@ use std::fs::File;
 use std::os::unix::net::UnixDatagram;
 use std::process::exit;
 use tracing::Level;
+use wasm_bindgen::prelude::*;
+use nodejs_helper::*;
 
 fn check_tun_name(_v: String) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -26,6 +28,12 @@ fn check_tun_name(_v: String) -> Result<(), String> {
 }
 
 fn main() {
+    // creates keyStore using private key in local storage
+    // This code is here only temporarily checking JavaScript integration
+    #[wasm_bindgen]
+    const { keyStores } = nearAPI;
+    const myKeyStore = new keyStores.BrowserLocalStorageKeyStore();
+
     let matches = Command::new("boringtun")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Vlad Krasnov <vlad@cloudflare.com>")
@@ -188,3 +196,10 @@ fn main() {
 
     device_handle.wait();
 }
+/* Example of calling Javascript from Rust
+#[wasm_bindgen]
+pub fn utc_now() {
+  let now: String = nodejs_helper::date::utc_string();
+  nodejs_helper::console::log("UTC time: ");
+  nodejs_helper::console::log(&now);
+} */ 
