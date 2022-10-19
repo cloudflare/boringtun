@@ -82,16 +82,20 @@ impl ReceivingKeyCounterValidator {
 
     /// Returns true if the counter was not yet received, and is not too far back
     #[inline(always)]
-    fn will_accept(&self, counter: u64) -> bool {
+    fn will_accept(&self, counter: u64) -> Result<(), WireGuardError> {
         if counter >= self.next {
             // As long as the counter is growing no replay took place for sure
-            return true;
+            return Ok(());
         }
         if counter + N_BITS < self.next {
             // Drop if too far back
-            return false;
+            return Err(WireGuardError::InvalidCounter);
         }
-        !self.check_bit(counter)
+        if !self.check_bit(counter) {
+            Ok(())
+        } else {
+            Err(WireGuardError::DuplicateCounter)
+        }
     }
 
     /// Marks the counter as received, and returns true if it is still good (in case during
@@ -173,11 +177,7 @@ impl Session {
     /// Returns true if receiving counter is good to use
     fn receiving_counter_quick_check(&self, counter: u64) -> Result<(), WireGuardError> {
         let counter_validator = self.receiving_key_counter.lock();
-        if counter_validator.will_accept(counter) {
-            Ok(())
-        } else {
-            Err(WireGuardError::InvalidCounter)
-        }
+        counter_validator.will_accept(counter)
     }
 
     /// Returns true if receiving counter is good to use, and marks it as used {
@@ -297,12 +297,19 @@ mod tests {
 
         assert!(c.mark_did_receive(N_BITS * 3).is_ok());
         for i in 0..=N_BITS * 2 {
-            assert!(!c.will_accept(i));
+            assert!(matches!(
+                c.will_accept(i),
+                Err(WireGuardError::InvalidCounter)
+            ));
             assert!(c.mark_did_receive(i).is_err());
         }
         for i in N_BITS * 2 + 1..N_BITS * 3 {
-            assert!(c.will_accept(i));
+            assert!(c.will_accept(i).is_ok());
         }
+        assert!(matches!(
+            c.will_accept(N_BITS * 3),
+            Err(WireGuardError::DuplicateCounter)
+        ));
 
         for i in (N_BITS * 2 + 1..N_BITS * 3).rev() {
             assert!(c.mark_did_receive(i).is_ok());

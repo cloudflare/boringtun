@@ -14,6 +14,7 @@ pub enum WireGuardError {
     InvalidMac,
     InvalidAeadTag,
     InvalidCounter,
+    DuplicateCounter,
     InvalidPacket,
     NoCurrentSession,
     LockFailed,
