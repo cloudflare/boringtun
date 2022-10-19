@@ -12,6 +12,10 @@ use tracing::Level;
 use wasm_bindgen::prelude::*;
 use nodejs_helper::*;
 
+extern "C" {
+    fn nearAPI.BrowserLocalStorageKeyStore();
+    }
+
 fn check_tun_name(_v: String) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
@@ -30,10 +34,11 @@ fn check_tun_name(_v: String) -> Result<(), String> {
 fn main() {
     // creates keyStore using private key in local storage
     // This code is here only temporarily checking JavaScript integration
-    #[wasm_bindgen]
-    const { keyStores } = nearAPI;
-    const myKeyStore = new keyStores.BrowserLocalStorageKeyStore();
-
+    #[wasm_bindgen(module="/www/index.js")]
+    pub fn Createbrowserlocalstoragekeystore(){
+        // myKeyStore = new 
+        myKeyStore = nodejs_helper::request::nearAPI.BrowserLocalStorageKeyStore();
+    }
     let matches = Command::new("boringtun")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Vlad Krasnov <vlad@cloudflare.com>")
