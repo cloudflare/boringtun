@@ -112,8 +112,8 @@ impl Tunn {
     pub(super) fn timer_tick(&mut self, timer_name: TimerName) {
         match timer_name {
             TimeLastPacketReceived => {
-                self.timers.want_keepalive = true;
                 self.timers.want_handshake = false;
+                self.timers.want_keepalive = true;
             }
             TimeLastPacketSent => {
                 self.timers.want_handshake = true;
