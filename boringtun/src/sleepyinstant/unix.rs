@@ -8,7 +8,7 @@ const CLOCK_ID: ClockId = ClockId::CLOCK_MONOTONIC;
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 const CLOCK_ID: ClockId = ClockId::CLOCK_BOOTTIME;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub(crate) struct Instant {
     t: TimeSpec,
 }

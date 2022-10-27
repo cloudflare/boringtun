@@ -34,7 +34,7 @@ use unix as inner;
 /// The size of an `Instant` struct may vary depending on the target operating
 /// system.
 ///
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct Instant {
     t: inner::Instant,
 }
