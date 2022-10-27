@@ -59,6 +59,12 @@ impl Instant {
     }
 }
 
+impl Default for Instant {
+    fn default() -> Self {
+        Self::now()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
