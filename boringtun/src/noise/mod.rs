@@ -12,6 +12,7 @@ use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
+use crate::x25519;
 
 use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
@@ -191,14 +192,14 @@ impl Tunn {
 
     /// Create a new tunnel using own private key and the peer public key
     pub fn new(
-        static_private: x25519_dalek::StaticSecret,
-        peer_static_public: x25519_dalek::PublicKey,
+        static_private: x25519::StaticSecret,
+        peer_static_public: x25519::PublicKey,
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
         index: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Result<Self, &'static str> {
-        let static_public = x25519_dalek::PublicKey::from(&static_private);
+        let static_public = x25519::PublicKey::from(&static_private);
 
         let tunn = Tunn {
             handshake: Handshake::new(
@@ -228,8 +229,8 @@ impl Tunn {
     /// Update the private key and clear existing sessions
     pub fn set_static_private(
         &mut self,
-        static_private: x25519_dalek::StaticSecret,
-        static_public: x25519_dalek::PublicKey,
+        static_private: x25519::StaticSecret,
+        static_public: x25519::PublicKey,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Result<(), WireGuardError> {
         self.timers.should_reset_rr = rate_limiter.is_none();

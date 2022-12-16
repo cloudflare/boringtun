@@ -6,6 +6,7 @@ use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
 #[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::Instant;
+use crate::x25519;
 use aead::{Aead, Payload};
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
@@ -230,13 +231,13 @@ impl Tai64N {
 /// Parameters used by the noise protocol
 struct NoiseParams {
     /// Our static public key
-    static_public: x25519_dalek::PublicKey,
+    static_public: x25519::PublicKey,
     /// Our static private key
-    static_private: x25519_dalek::StaticSecret,
+    static_private: x25519::StaticSecret,
     /// Static public key of the other party
-    peer_static_public: x25519_dalek::PublicKey,
+    peer_static_public: x25519::PublicKey,
     /// A shared key = DH(static_private, peer_static_public)
-    static_shared: x25519_dalek::SharedSecret,
+    static_shared: x25519::SharedSecret,
     /// A pre-computation of HASH("mac1----", peer_static_public) for this peer
     sending_mac1_key: [u8; KEY_LEN],
     /// An optional preshared key
@@ -260,7 +261,7 @@ struct HandshakeInitSentState {
     local_index: u32,
     hash: [u8; KEY_LEN],
     chaining_key: [u8; KEY_LEN],
-    ephemeral_private: x25519_dalek::ReusableSecret,
+    ephemeral_private: x25519::ReusableSecret,
     time_sent: Instant,
 }
 
@@ -286,7 +287,7 @@ enum HandshakeState {
     InitReceived {
         hash: [u8; KEY_LEN],
         chaining_key: [u8; KEY_LEN],
-        peer_ephemeral_public: x25519_dalek::PublicKey,
+        peer_ephemeral_public: x25519::PublicKey,
         peer_index: u32,
     },
     /// Handshake was established too long ago (implies no handshake is in progress)
@@ -323,8 +324,8 @@ pub struct HalfHandshake {
 }
 
 pub fn parse_handshake_anon(
-    static_private: &x25519_dalek::StaticSecret,
-    static_public: &x25519_dalek::PublicKey,
+    static_private: &x25519::StaticSecret,
+    static_public: &x25519::PublicKey,
     packet: &HandshakeInit,
 ) -> Result<HalfHandshake, WireGuardError> {
     let peer_index = packet.sender_idx;
@@ -334,7 +335,7 @@ pub fn parse_handshake_anon(
     let mut hash = INITIAL_CHAIN_HASH;
     hash = b2s_hash(&hash, static_public.as_bytes());
     // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
-    let peer_ephemeral_public = x25519_dalek::PublicKey::from(*packet.unencrypted_ephemeral);
+    let peer_ephemeral_public = x25519::PublicKey::from(*packet.unencrypted_ephemeral);
     // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
     hash = b2s_hash(&hash, peer_ephemeral_public.as_bytes());
     // temp = HMAC(initiator.chaining_key, msg.unencrypted_ephemeral)
@@ -370,9 +371,9 @@ pub fn parse_handshake_anon(
 impl NoiseParams {
     /// New noise params struct from our secret key, peers public key, and optional preshared key
     fn new(
-        static_private: x25519_dalek::StaticSecret,
-        static_public: x25519_dalek::PublicKey,
-        peer_static_public: x25519_dalek::PublicKey,
+        static_private: x25519::StaticSecret,
+        static_public: x25519::PublicKey,
+        peer_static_public: x25519::PublicKey,
         preshared_key: Option<[u8; 32]>,
     ) -> Result<NoiseParams, WireGuardError> {
         let static_shared = static_private.diffie_hellman(&peer_static_public);
@@ -392,11 +393,11 @@ impl NoiseParams {
     /// Set a new private key
     fn set_static_private(
         &mut self,
-        static_private: x25519_dalek::StaticSecret,
-        static_public: x25519_dalek::PublicKey,
+        static_private: x25519::StaticSecret,
+        static_public: x25519::PublicKey,
     ) -> Result<(), WireGuardError> {
         // Check that the public key indeed matches the private key
-        let check_key = x25519_dalek::PublicKey::from(&static_private);
+        let check_key = x25519::PublicKey::from(&static_private);
         assert_eq!(check_key.as_bytes(), static_public.as_bytes());
 
         self.static_private = static_private;
@@ -409,9 +410,9 @@ impl NoiseParams {
 
 impl Handshake {
     pub(crate) fn new(
-        static_private: x25519_dalek::StaticSecret,
-        static_public: x25519_dalek::PublicKey,
-        peer_static_public: x25519_dalek::PublicKey,
+        static_private: x25519::StaticSecret,
+        static_public: x25519::PublicKey,
+        peer_static_public: x25519::PublicKey,
         global_idx: u32,
         preshared_key: Option<[u8; 32]>,
     ) -> Result<Handshake, WireGuardError> {
@@ -472,8 +473,8 @@ impl Handshake {
 
     pub(crate) fn set_static_private(
         &mut self,
-        private_key: x25519_dalek::StaticSecret,
-        public_key: x25519_dalek::PublicKey,
+        private_key: x25519::StaticSecret,
+        public_key: x25519::PublicKey,
     ) -> Result<(), WireGuardError> {
         self.params.set_static_private(private_key, public_key)
     }
@@ -491,7 +492,7 @@ impl Handshake {
         // msg.sender_index = little_endian(initiator.sender_index)
         let peer_index = packet.sender_idx;
         // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
-        let peer_ephemeral_public = x25519_dalek::PublicKey::from(*packet.unencrypted_ephemeral);
+        let peer_ephemeral_public = x25519::PublicKey::from(*packet.unencrypted_ephemeral);
         // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
         hash = b2s_hash(&hash, peer_ephemeral_public.as_bytes());
         // temp = HMAC(initiator.chaining_key, msg.unencrypted_ephemeral)
@@ -576,7 +577,7 @@ impl Handshake {
         let peer_index = packet.sender_idx;
         let local_index = state.local_index;
 
-        let unencrypted_ephemeral = x25519_dalek::PublicKey::from(*packet.unencrypted_ephemeral);
+        let unencrypted_ephemeral = x25519::PublicKey::from(*packet.unencrypted_ephemeral);
         // msg.unencrypted_ephemeral = DH_PUBKEY(responder.ephemeral_private)
         // responder.hash = HASH(responder.hash || msg.unencrypted_ephemeral)
         let mut hash = b2s_hash(&state.hash, unencrypted_ephemeral.as_bytes());
@@ -728,7 +729,7 @@ impl Handshake {
         let mut hash = INITIAL_CHAIN_HASH;
         hash = b2s_hash(&hash, self.params.peer_static_public.as_bytes());
         // initiator.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519_dalek::ReusableSecret::new(OsRng);
+        let ephemeral_private = x25519::ReusableSecret::new(OsRng);
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
         message_type.copy_from_slice(&super::HANDSHAKE_INIT.to_le_bytes());
@@ -736,7 +737,7 @@ impl Handshake {
         sender_index.copy_from_slice(&local_index.to_le_bytes());
         // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
         unencrypted_ephemeral
-            .copy_from_slice(x25519_dalek::PublicKey::from(&ephemeral_private).as_bytes());
+            .copy_from_slice(x25519::PublicKey::from(&ephemeral_private).as_bytes());
         // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
         hash = b2s_hash(&hash, unencrypted_ephemeral);
         // temp = HMAC(initiator.chaining_key, msg.unencrypted_ephemeral)
@@ -814,7 +815,7 @@ impl Handshake {
         let (encrypted_nothing, _) = rest.split_at_mut(16);
 
         // responder.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519_dalek::ReusableSecret::new(OsRng);
+        let ephemeral_private = x25519::ReusableSecret::new(OsRng);
         let local_index = self.inc_index();
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
@@ -825,7 +826,7 @@ impl Handshake {
         receiver_index.copy_from_slice(&peer_index.to_le_bytes());
         // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
         unencrypted_ephemeral
-            .copy_from_slice(x25519_dalek::PublicKey::from(&ephemeral_private).as_bytes());
+            .copy_from_slice(x25519::PublicKey::from(&ephemeral_private).as_bytes());
         // responder.hash = HASH(responder.hash || msg.unencrypted_ephemeral)
         hash = b2s_hash(&hash, unencrypted_ephemeral);
         // temp = HMAC(responder.chaining_key, msg.unencrypted_ephemeral)
