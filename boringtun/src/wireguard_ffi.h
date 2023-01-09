@@ -29,6 +29,12 @@ struct wireguard_result
     size_t size;
 };
 
+struct wireguard_verify_result
+{
+    wireguard_result result;
+    int32_t idx; // idx (-1 if not available)
+};
+
 struct stats
 {
     int64_t time_since_last_handshake;
@@ -108,4 +114,15 @@ struct stats wireguard_stats(const struct wireguard_tunnel *tunnel);
 
 // Allocate a rate limiter
 struct wireguard_rate_limiter *new_rate_limiter(const char *server_static_public,
-                                                uint64_t limit);     // The 24bit index prefix to be used for session indexes
+                                                uint64_t limit);
+
+// Deallocate the rate limiter
+void rate_limiter_free(struct wireguard_rate_limiter *);
+
+// Verify a packet.
+// May produce a packet to request a cookie from the peer
+struct wireguard_verify_result wireguard_verify_packet(const struct wireguard_rate_limiter *rate_limiter,
+                                                       const uint8_t *src,
+                                                       uint32_t src_size,
+                                                       uint8_t *dst,
+                                                       uint32_t dst_size);
