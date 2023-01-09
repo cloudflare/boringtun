@@ -7,6 +7,7 @@
 #include <stdbool.h>
 
 struct wireguard_tunnel; // This corresponds to the Rust type
+struct wireguard_rate_limiter; // This corresponds to the Rust type
 
 enum
 {
@@ -104,3 +105,7 @@ struct wireguard_result wireguard_force_handshake(const struct wireguard_tunnel 
                                                   uint32_t dst_size);
 
 struct stats wireguard_stats(const struct wireguard_tunnel *tunnel);
+
+// Allocate a rate limiter
+struct wireguard_rate_limiter *new_rate_limiter(const char *server_static_public,
+                                                uint64_t limit);     // The 24bit index prefix to be used for session indexes

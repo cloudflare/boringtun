@@ -6,7 +6,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 //! C bindings for the BoringTun library
-use super::noise::{Tunn, TunnResult};
+use super::noise::{Tunn, TunnResult, rate_limiter::RateLimiter};
 use crate::x25519::{PublicKey, StaticSecret};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
@@ -402,4 +402,37 @@ pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<Tunn>) -> stats {
         estimated_rtt: estimated_rtt.map(|r| r as i32).unwrap_or(-1),
         reserved: [0u8; 56],
     }
+}
+
+/// Rate Limiter
+/// Returns null ptr on error.
+#[no_mangle]
+pub unsafe extern "C" fn new_rate_limiter(
+    server_static_public: *const c_char,
+    limit: u64,
+) -> *mut Mutex<RateLimiter> {
+    let c_str = CStr::from_ptr(server_static_public);
+    let server_static_public = match c_str.to_str() {
+        Err(_) => return ptr::null_mut(),
+        Ok(string) => string,
+    };
+
+    let public_key = match server_static_public.parse::<KeyBytes>() {
+        Err(_) => return ptr::null_mut(),
+        Ok(key) => PublicKey::from(key.0),
+    };
+
+    let limiter = Box::new(Mutex::new(RateLimiter::new(
+        &public_key,
+        limit,
+    )));
+
+    PANIC_HOOK.call_once(|| {
+        // FFI won't properly unwind on panic, but it will if we cause a segmentation fault
+        panic::set_hook(Box::new(move |_| {
+            raise(SIGSEGV);
+        }));
+    });
+
+    Box::into_raw(limiter)
 }
