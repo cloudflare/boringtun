@@ -126,3 +126,6 @@ struct wireguard_verify_result wireguard_verify_packet(const struct wireguard_ra
                                                        uint32_t src_size,
                                                        uint8_t *dst,
                                                        uint32_t dst_size);
+
+// Reset the wireguard rate limiter
+void wireguard_reset_count(struct wireguard_rate_limiter *);

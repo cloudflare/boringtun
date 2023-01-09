@@ -517,3 +517,14 @@ pub unsafe extern "C" fn wireguard_verify_packet(
         },
     }
 }
+
+/// Reset the wireguard packet count
+#[no_mangle]
+pub unsafe extern "C" fn wireguard_reset_count(
+    rate_limiter: *const Mutex<RateLimiter>,
+) {
+    // Lock the rate limiter from other use
+    let rate_limiter = rate_limiter.as_ref().unwrap().lock();
+
+    rate_limiter.reset_count();
+}
