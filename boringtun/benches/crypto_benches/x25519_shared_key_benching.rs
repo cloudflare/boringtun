@@ -36,12 +36,9 @@ pub fn bench_x25519_shared_key(c: &mut Criterion) {
                     .unwrap()
             },
             |my_private_key| {
-                ring::agreement::agree_ephemeral(
-                    my_private_key,
-                    &my_public_key,
-                    ring::error::Unspecified,
-                    |_key_material| Ok(()),
-                )
+                ring::agreement::agree_ephemeral(my_private_key, &my_public_key, |_key_material| {
+                    Ok::<_, ring::error::Unspecified>(())
+                })
                 .unwrap()
             },
             BatchSize::SmallInput,

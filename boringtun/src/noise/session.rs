@@ -5,6 +5,7 @@ use super::PacketData;
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
+use std::convert::TryInto;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct Session {
@@ -238,10 +239,14 @@ impl Session {
         packet: PacketData,
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
-        let ct_len = packet.encrypted_encapsulated_packet.len();
-        if dst.len() < ct_len {
+        let decrypted_len = packet.encrypted_encapsulated_packet.len() - AEAD_SIZE;
+        if dst.len() < decrypted_len {
             // This is a very incorrect use of the library, therefore panic and not error
-            panic!("The destination buffer is too small");
+            panic!(
+                "The destination buffer is too small. Need to fill {} bytes, got buffer size {}",
+                decrypted_len,
+                dst.len()
+            );
         }
         if packet.receiver_idx != self.receiving_index {
             return Err(WireGuardError::WrongIndex);
@@ -252,12 +257,18 @@ impl Session {
         let ret = {
             let mut nonce = [0u8; 12];
             nonce[4..12].copy_from_slice(&packet.counter.to_le_bytes());
-            dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
+            dst[..decrypted_len]
+                .copy_from_slice(&packet.encrypted_encapsulated_packet[..decrypted_len]);
+            let tag: [u8; AEAD_SIZE] = packet.encrypted_encapsulated_packet[decrypted_len..]
+                .try_into()
+                .unwrap();
             self.receiver
-                .open_in_place(
+                .open_in_place_separate_tag(
                     Nonce::assume_unique_for_key(nonce),
                     Aad::from(&[]),
-                    &mut dst[..ct_len],
+                    tag.into(),
+                    &mut dst[..decrypted_len],
+                    0..,
                 )
                 .map_err(|_| WireGuardError::InvalidAeadTag)?
         };

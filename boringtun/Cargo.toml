@@ -24,7 +24,7 @@ tracing = "0.1.29"
 tracing-subscriber = { version = "0.3", features = ["fmt"], optional = true }
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
-ring = "0.16"
+ring = { git = "https://github.com/briansmith/ring.git", rev = "450ada288f1805795140097ec96396b890bcf722" }
 x25519-dalek = { version = "2.0.0-pre.1", features = ["reusable_secrets"] }
 rand_core = { version = "0.6.3", features = ["getrandom"] }
 chacha20poly1305 = "0.10.0-pre.1"
