@@ -52,7 +52,7 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
-    pub fn new(public_key: &x25519_dalek::PublicKey, limit: u64) -> Self {
+    pub fn new(public_key: &crate::x25519::PublicKey, limit: u64) -> Self {
         let mut secret_key = [0u8; 16];
         OsRng.fill_bytes(&mut secret_key);
         RateLimiter {
