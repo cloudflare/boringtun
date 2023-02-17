@@ -136,8 +136,8 @@ fn aead_chacha20_open(
 }
 
 #[inline]
-fn aead_chacha20_open_inner<'in_out>(
-    buffer: &'in_out mut [u8],
+fn aead_chacha20_open_inner(
+    buffer: &mut [u8],
     key: &[u8],
     nonce: [u8; 12],
     data: &[u8],

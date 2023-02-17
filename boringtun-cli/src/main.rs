@@ -51,7 +51,7 @@ fn main() {
                 .long("verbosity")
                 .short('v')
                 .env("WG_LOG_LEVEL")
-                .possible_values(&["error", "info", "debug", "trace"])
+                .possible_values(["error", "info", "debug", "trace"])
                 .help("Log verbosity")
                 .default_value("error"),
             Arg::new("uapi-fd")
@@ -106,7 +106,7 @@ fn main() {
         let log = matches.value_of("log").unwrap();
 
         let log_file =
-            File::create(&log).unwrap_or_else(|_| panic!("Could not create log file {}", log));
+            File::create(log).unwrap_or_else(|_| panic!("Could not create log file {}", log));
 
         let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
 
