@@ -70,7 +70,7 @@ mod tests {
         fn drop(&mut self) {
             if let Some(name) = &self.container_name {
                 Command::new("docker")
-                    .args(&[
+                    .args([
                         "stop", // Run docker
                         &name[5..],
                     ])
@@ -110,11 +110,7 @@ mod tests {
             // The local endpoint port is the remote listen port
             let _ = writeln!(conf, "ListenPort = {}", self.endpoint.port());
             // HACK: this should consume the key so it can't be reused instead of cloning and serializing
-            let _ = writeln!(
-                conf,
-                "PrivateKey = {}",
-                base64encode(&self.key.clone().to_bytes())
-            );
+            let _ = writeln!(conf, "PrivateKey = {}", base64encode(self.key.to_bytes()));
 
             // We are the peer
             let _ = writeln!(conf, "[Peer]");
@@ -147,13 +143,13 @@ mod tests {
         ) {
             let peer_config = self.gen_wg_conf(local_key, local_addr, local_port);
             let peer_config_file = temp_path();
-            std::fs::write(&peer_config_file, &peer_config).unwrap();
+            std::fs::write(&peer_config_file, peer_config).unwrap();
             let nginx_config = self.gen_nginx_conf();
             let nginx_config_file = format!("{}.ngx", peer_config_file);
-            std::fs::write(&nginx_config_file, &nginx_config).unwrap();
+            std::fs::write(&nginx_config_file, nginx_config).unwrap();
 
             Command::new("docker")
-                .args(&[
+                .args([
                     "run",                 // Run docker
                     "-d",                  // In detached mode
                     "--cap-add=NET_ADMIN", // Grant permissions to open a tunnel
@@ -352,7 +348,7 @@ mod tests {
         /// Starts the tunnel
         fn start(&mut self) {
             Command::new("ip")
-                .args(&[
+                .args([
                     "address",
                     "add",
                     &self.addr_v4.to_string(),
@@ -363,7 +359,7 @@ mod tests {
                 .expect("failed to assign ip to tunnel");
 
             Command::new("ip")
-                .args(&[
+                .args([
                     "address",
                     "add",
                     &self.addr_v6.to_string(),
@@ -375,7 +371,7 @@ mod tests {
 
             // Start the tunnel
             Command::new("ip")
-                .args(&["link", "set", "mtu", "1400", "up", "dev", &self.name])
+                .args(["link", "set", "mtu", "1400", "up", "dev", &self.name])
                 .status()
                 .expect("failed to start the tunnel");
 
@@ -385,7 +381,7 @@ mod tests {
             for p in &self.peers {
                 for r in &p.allowed_ips {
                     Command::new("ip")
-                        .args(&[
+                        .args([
                             "route",
                             "add",
                             &format!("{}/{}", r.ip, r.cidr),
@@ -462,7 +458,7 @@ mod tests {
         let mut path = String::from("/tmp/");
         let mut buf = [0u8; 32];
         SystemRandom::new().fill(&mut buf[..]).unwrap();
-        path.push_str(&encode(&buf));
+        path.push_str(&encode(buf));
         path
     }
 

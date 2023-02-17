@@ -629,7 +629,7 @@ mod tests {
 
     fn create_handshake_response(tun: &mut Tunn, handshake_init: &[u8]) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let handshake_resp = tun.decapsulate(None, &handshake_init, &mut dst);
+        let handshake_resp = tun.decapsulate(None, handshake_init, &mut dst);
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
         let handshake_resp = if let TunnResult::WriteToNetwork(sent) = handshake_resp {
@@ -643,7 +643,7 @@ mod tests {
 
     fn parse_handshake_resp(tun: &mut Tunn, handshake_resp: &[u8]) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, &handshake_resp, &mut dst);
+        let keepalive = tun.decapsulate(None, handshake_resp, &mut dst);
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
         let keepalive = if let TunnResult::WriteToNetwork(sent) = keepalive {
@@ -657,7 +657,7 @@ mod tests {
 
     fn parse_keepalive(tun: &mut Tunn, keepalive: &[u8]) {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, &keepalive, &mut dst);
+        let keepalive = tun.decapsulate(None, keepalive, &mut dst);
         assert!(matches!(keepalive, TunnResult::Done));
     }
 
@@ -690,7 +690,7 @@ mod tests {
         } else {
             unreachable!();
         };
-        let packet = Tunn::parse_incoming_packet(&packet_data).unwrap();
+        let packet = Tunn::parse_incoming_packet(packet_data).unwrap();
         assert!(matches!(packet, Packet::HandshakeInit(_)));
     }
 
