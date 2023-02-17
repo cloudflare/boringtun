@@ -1,9 +1,10 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::{errno_str, Error};
+use super::Error;
 use libc::*;
 use parking_lot::Mutex;
+use std::io;
 use std::ops::Deref;
 use std::os::unix::io::RawFd;
 use std::ptr::{null, null_mut};

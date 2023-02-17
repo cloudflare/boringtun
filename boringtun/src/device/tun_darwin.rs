@@ -152,7 +152,7 @@ impl TunSocket {
         } < 0
         {
             unsafe { close(fd) };
-            let mut err_string = io::Error::last_os_error();
+            let mut err_string = io::Error::last_os_error().to_string();
             err_string.push_str("(did you run with sudo?)");
             return Err(Error::Connect(err_string));
         }

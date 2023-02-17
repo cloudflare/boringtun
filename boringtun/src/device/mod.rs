@@ -77,7 +77,7 @@ pub enum Error {
     InvalidTunnelName,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     #[error("{0}")]
-    GetSockOpt(String),
+    GetSockOpt(io::Error),
     #[error("{0}")]
     GetSockName(String),
     #[cfg(target_os = "linux")]

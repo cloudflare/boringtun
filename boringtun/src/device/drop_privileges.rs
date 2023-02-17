@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::device::Error;
-use libc::{getlogin, getpwnam, gid_t, setgid, setuid, uid_t};
+use libc::{gid_t, setgid, setuid, uid_t};
 use std::io;
 
 #[cfg(target_os = "macos")]
@@ -27,6 +27,8 @@ pub fn get_saved_ids() -> Result<(uid_t, gid_t), Error> {
     }
     #[cfg(not(target_os = "macos"))]
     {
+        use libc::{getlogin, getpwnam};
+
         let uname = unsafe { getlogin() };
         if uname.is_null() {
             return Err(Error::DropPrivileges("NULL from getlogin".to_owned()));
