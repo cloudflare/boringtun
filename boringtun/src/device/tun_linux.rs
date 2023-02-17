@@ -3,6 +3,7 @@
 
 use super::Error;
 use libc::*;
+use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 
 pub fn errno() -> i32 {
@@ -161,7 +162,7 @@ impl TunSocket {
 
     pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         match unsafe { read(self.fd, dst.as_mut_ptr() as _, dst.len()) } {
-            -1 => Err(Error::IfaceRead(errno())),
+            -1 => Err(Error::IfaceRead(io::Error::last_os_error())),
             n => Ok(&mut dst[..n as usize]),
         }
     }

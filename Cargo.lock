@@ -95,6 +95,8 @@ dependencies = [
  "parking_lot",
  "rand_core 0.6.3",
  "ring",
+ "socket2",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
  "untrusted 0.9.0",
@@ -979,6 +981,16 @@ name = "smallvec"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
+
+[[package]]
+name = "socket2"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02e2d2db9033d13a1567121ddd7a095ee144db4e1ca1b1bda3419bc0da294ebd"
+dependencies = [
+ "libc",
+ "winapi",
+]
 
 [[package]]
 name = "spin"
