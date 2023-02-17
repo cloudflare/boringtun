@@ -6,16 +6,6 @@ use libc::*;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 
-pub fn errno() -> i32 {
-    unsafe { *__errno_location() }
-}
-
-pub fn errno_str() -> String {
-    let strerr = unsafe { strerror(*__errno_location()) };
-    let c_str = unsafe { std::ffi::CStr::from_ptr(strerr) };
-    c_str.to_string_lossy().into_owned()
-}
-
 const TUNSETIFF: u64 = 0x4004_54ca;
 
 #[repr(C)]
@@ -83,7 +73,7 @@ impl TunSocket {
         }
 
         let fd = match unsafe { open(b"/dev/net/tun\0".as_ptr() as _, O_RDWR) } {
-            -1 => return Err(Error::Socket(errno_str())),
+            -1 => return Err(Error::Socket(io::Error::last_os_error())),
             fd => fd,
         };
         let iface_name = name.as_bytes();
@@ -101,7 +91,7 @@ impl TunSocket {
         ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
 
         if unsafe { ioctl(fd, TUNSETIFF as _, &ifr) } < 0 {
-            return Err(Error::IOCtl(errno_str()));
+            return Err(Error::IOCtl(io::Error::last_os_error()));
         }
 
         let name = name.to_string();
@@ -110,9 +100,9 @@ impl TunSocket {
 
     pub fn set_non_blocking(self) -> Result<TunSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
-            -1 => Err(Error::FCntl(errno_str())),
+            -1 => Err(Error::FCntl(io::Error::last_os_error())),
             flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
-                -1 => Err(Error::FCntl(errno_str())),
+                -1 => Err(Error::FCntl(io::Error::last_os_error())),
                 _ => Ok(self),
             },
         }
@@ -130,7 +120,7 @@ impl TunSocket {
         }
 
         let fd = match unsafe { socket(AF_INET, SOCK_STREAM, IPPROTO_IP) } {
-            -1 => return Err(Error::Socket(errno_str())),
+            -1 => return Err(Error::Socket(io::Error::last_os_error())),
             fd => fd,
         };
 
@@ -144,7 +134,7 @@ impl TunSocket {
         ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
 
         if unsafe { ioctl(fd, SIOCGIFMTU as _, &ifr) } < 0 {
-            return Err(Error::IOCtl(errno_str()));
+            return Err(Error::IOCtl(io::Error::last_os_error()));
         }
 
         unsafe { close(fd) };

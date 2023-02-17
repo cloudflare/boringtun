@@ -1,9 +1,9 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::device::errno_str;
 use crate::device::Error;
-use libc::*;
+use libc::{getlogin, getpwnam, gid_t, setgid, setuid, uid_t};
+use std::io;
 
 #[cfg(target_os = "macos")]
 use nix::unistd::User;
@@ -50,12 +50,16 @@ pub fn drop_privileges() -> Result<(), Error> {
 
     if -1 == unsafe { setgid(saved_gid) } {
         // Set real and effective group ID
-        return Err(Error::DropPrivileges(errno_str()));
+        return Err(Error::DropPrivileges(
+            io::Error::last_os_error().to_string(),
+        ));
     }
 
     if -1 == unsafe { setuid(saved_uid) } {
         // Set  real and effective user ID
-        return Err(Error::DropPrivileges(errno_str()));
+        return Err(Error::DropPrivileges(
+            io::Error::last_os_error().to_string(),
+        ));
     }
 
     // Validated we can't get sudo back again

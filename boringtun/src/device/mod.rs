@@ -46,7 +46,7 @@ use peer::{AllowedIP, Peer};
 use poll::{EventPoll, EventRef, WaitResult};
 use rand_core::{OsRng, RngCore};
 use socket2::{Domain, Protocol, Type};
-use tun::{errno_str, TunSocket};
+use tun::TunSocket;
 
 use dev_lock::{Lock, LockReadGuard};
 
@@ -60,15 +60,15 @@ pub enum Error {
     #[error("i/o error: {0}")]
     IoError(#[from] io::Error),
     #[error("{0}")]
-    Socket(String),
+    Socket(io::Error),
     #[error("{0}")]
     Bind(String),
     #[error("{0}")]
-    FCntl(String),
+    FCntl(io::Error),
     #[error("{0}")]
-    EventQueue(String),
+    EventQueue(io::Error),
     #[error("{0}")]
-    IOCtl(String),
+    IOCtl(io::Error),
     #[error("{0}")]
     Connect(String),
     #[error("{0}")]
@@ -82,7 +82,7 @@ pub enum Error {
     GetSockName(String),
     #[cfg(target_os = "linux")]
     #[error("{0}")]
-    Timer(String),
+    Timer(io::Error),
     #[error("iface read: {0}")]
     IfaceRead(io::Error),
     #[error("{0}")]
