@@ -257,7 +257,7 @@ impl TunSocket {
         };
 
         match unsafe { recvmsg(self.fd, &mut msg_hdr, 0) } {
-            -1 => Err(Error::IfaceRead(errno())),
+            -1 => Err(Error::IfaceRead(io::Error::last_os_error())),
             0..=4 => Ok(&mut dst[..0]),
             n => Ok(&mut dst[..(n - 4) as usize]),
         }
