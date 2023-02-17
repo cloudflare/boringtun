@@ -3,20 +3,11 @@
 
 use super::Error;
 use libc::*;
+use std::io;
 use std::mem::size_of;
 use std::mem::size_of_val;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::null_mut;
-
-pub fn errno() -> i32 {
-    unsafe { *__error() }
-}
-
-pub fn errno_str() -> String {
-    let strerr = unsafe { strerror(*__error()) };
-    let c_str = unsafe { std::ffi::CStr::from_ptr(strerr) };
-    c_str.to_string_lossy().into_owned()
-}
 
 const CTRL_NAME: &[u8] = b"com.apple.net.utun_control";
 
@@ -128,7 +119,7 @@ impl TunSocket {
         let idx = parse_utun_name(name)?;
 
         let fd = match unsafe { socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL) } {
-            -1 => return Err(Error::Socket(errno_str())),
+            -1 => return Err(Error::Socket(io::Error::last_os_error())),
             fd => fd,
         };
 
@@ -140,7 +131,7 @@ impl TunSocket {
 
         if unsafe { ioctl(fd, CTLIOCGINFO, &mut info as *mut ctl_info) } < 0 {
             unsafe { close(fd) };
-            return Err(Error::IOCtl(errno_str()));
+            return Err(Error::IOCtl(io::Error::last_os_error()));
         }
 
         let addr = sockaddr_ctl {
@@ -161,7 +152,7 @@ impl TunSocket {
         } < 0
         {
             unsafe { close(fd) };
-            let mut err_string = errno_str();
+            let mut err_string = io::Error::last_os_error().to_string();
             err_string.push_str("(did you run with sudo?)");
             return Err(Error::Connect(err_string));
         }
@@ -171,9 +162,9 @@ impl TunSocket {
 
     pub fn set_non_blocking(self) -> Result<TunSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
-            -1 => Err(Error::FCntl(errno_str())),
+            -1 => Err(Error::FCntl(io::Error::last_os_error())),
             flags => match unsafe { fcntl(self.fd, F_SETFL, flags | O_NONBLOCK) } {
-                -1 => Err(Error::FCntl(errno_str())),
+                -1 => Err(Error::FCntl(io::Error::last_os_error())),
                 _ => Ok(self),
             },
         }
@@ -193,7 +184,7 @@ impl TunSocket {
         } < 0
             || tunnel_name_len == 0
         {
-            return Err(Error::GetSockOpt(errno_str()));
+            return Err(Error::GetSockOpt(io::Error::last_os_error()));
         }
 
         Ok(String::from_utf8_lossy(&tunnel_name[..(tunnel_name_len - 1) as usize]).to_string())
@@ -202,7 +193,7 @@ impl TunSocket {
     /// Get the current MTU value
     pub fn mtu(&self) -> Result<usize, Error> {
         let fd = match unsafe { socket(AF_INET, SOCK_STREAM, IPPROTO_IP) } {
-            -1 => return Err(Error::Socket(errno_str())),
+            -1 => return Err(Error::Socket(io::Error::last_os_error())),
             fd => fd,
         };
 
@@ -216,7 +207,7 @@ impl TunSocket {
         ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
 
         if unsafe { ioctl(fd, SIOCGIFMTU, &ifr) } < 0 {
-            return Err(Error::IOCtl(errno_str()));
+            return Err(Error::IOCtl(io::Error::last_os_error()));
         }
 
         unsafe { close(fd) };
@@ -257,7 +248,7 @@ impl TunSocket {
         };
 
         match unsafe { recvmsg(self.fd, &mut msg_hdr, 0) } {
-            -1 => Err(Error::IfaceRead(errno())),
+            -1 => Err(Error::IfaceRead(io::Error::last_os_error())),
             0..=4 => Ok(&mut dst[..0]),
             n => Ok(&mut dst[..(n - 4) as usize]),
         }

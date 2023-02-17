@@ -9,6 +9,8 @@ documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
 edition = "2018"
 
 [features]
+default = []
+device = ["socket2", "thiserror"]
 jni-bindings = ["ffi-bindings", "jni"]
 ffi-bindings = ["tracing-subscriber"]
 # mocks std::time::Instant with mock_instant
@@ -33,9 +35,14 @@ blake2 = "0.10"
 hmac = "0.12"
 jni = { version = "0.19.0", optional = true }
 mock_instant = { version = "0.2", optional = true }
+socket2 = { version = "0.4.7", features = ["all"], optional = true }
+thiserror = { version = "1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.25", default-features = false, features = ["time", "user"] }
+nix = { version = "0.25", default-features = false, features = [
+    "time",
+    "user",
+] }
 
 [dev-dependencies]
 etherparse = "0.12"

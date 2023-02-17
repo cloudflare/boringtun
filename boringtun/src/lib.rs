@@ -5,7 +5,7 @@
 //!
 //! <code>git clone https://github.com/cloudflare/boringtun.git</code>
 
-#[cfg(not(any(target_os = "windows", target_os = "android", target_os = "ios")))]
+#[cfg(feature = "device")]
 pub mod device;
 
 #[cfg(feature = "ffi-bindings")]

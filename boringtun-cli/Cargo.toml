@@ -18,3 +18,4 @@ tracing-appender = "0.2.1"
 [dependencies.boringtun]
 version = "0.5.2"
 path = "../boringtun"
+features = ["device"]

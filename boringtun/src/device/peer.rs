@@ -2,21 +2,18 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use parking_lot::RwLock;
+use socket2::{Domain, Protocol, Type};
 
-use std::net::IpAddr;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use crate::device::{AllowedIps, Error};
 use crate::noise::{Tunn, TunnResult};
 
-use crate::device::udp::UDPSocket;
-
 #[derive(Default, Debug)]
 pub struct Endpoint {
     pub addr: Option<SocketAddr>,
-    pub conn: Option<Arc<UDPSocket>>,
+    pub conn: Option<socket2::Socket>,
 }
 
 pub struct Peer {
@@ -81,10 +78,14 @@ impl Peer {
         self.endpoint.read()
     }
 
+    pub(crate) fn endpoint_mut(&self) -> parking_lot::RwLockWriteGuard<'_, Endpoint> {
+        self.endpoint.write()
+    }
+
     pub fn shutdown_endpoint(&self) {
         if let Some(conn) = self.endpoint.write().conn.take() {
             tracing::info!("Disconnecting from endpoint");
-            conn.shutdown();
+            conn.shutdown(Shutdown::Both).unwrap();
         }
     }
 
@@ -93,43 +94,43 @@ impl Peer {
         if endpoint.addr != Some(addr) {
             // We only need to update the endpoint if it differs from the current one
             if let Some(conn) = endpoint.conn.take() {
-                conn.shutdown();
+                conn.shutdown(Shutdown::Both).unwrap();
             }
 
-            *endpoint = Endpoint {
-                addr: Some(addr),
-                conn: None,
-            }
-        };
+            endpoint.addr = Some(addr);
+        }
     }
 
     pub fn connect_endpoint(
         &self,
         port: u16,
         fwmark: Option<u32>,
-    ) -> Result<Arc<UDPSocket>, Error> {
+    ) -> Result<socket2::Socket, Error> {
         let mut endpoint = self.endpoint.write();
 
         if endpoint.conn.is_some() {
             return Err(Error::Connect("Connected".to_owned()));
         }
 
-        let udp_conn = Arc::new(match endpoint.addr {
-            Some(addr @ SocketAddr::V4(_)) => UDPSocket::new()?
-                .set_non_blocking()?
-                .set_reuse()?
-                .bind(port)?
-                .connect(&addr)?,
-            Some(addr @ SocketAddr::V6(_)) => UDPSocket::new6()?
-                .set_non_blocking()?
-                .set_reuse()?
-                .bind(port)?
-                .connect(&addr)?,
-            None => panic!("Attempt to connect to undefined endpoint"),
-        });
+        let addr = endpoint
+            .addr
+            .expect("Attempt to connect to undefined endpoint");
 
+        let udp_conn =
+            socket2::Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::UDP))?;
+        udp_conn.set_reuse_address(true)?;
+        let bind_addr = if addr.is_ipv4() {
+            SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into()
+        } else {
+            SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0).into()
+        };
+        udp_conn.bind(&bind_addr)?;
+        udp_conn.connect(&addr.into())?;
+        udp_conn.set_nonblocking(true)?;
+
+        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
         if let Some(fwmark) = fwmark {
-            udp_conn.set_fwmark(fwmark)?;
+            udp_conn.set_mark(fwmark)?;
         }
 
         tracing::info!(
@@ -138,7 +139,7 @@ impl Peer {
             endpoint=?endpoint.addr.unwrap()
         );
 
-        endpoint.conn = Some(Arc::clone(&udp_conn));
+        endpoint.conn = Some(udp_conn.try_clone().unwrap());
 
         Ok(udp_conn)
     }

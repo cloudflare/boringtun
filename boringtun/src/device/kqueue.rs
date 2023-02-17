@@ -1,9 +1,10 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::{errno_str, Error};
+use super::Error;
 use libc::*;
 use parking_lot::Mutex;
+use std::io;
 use std::ops::Deref;
 use std::os::unix::io::RawFd;
 use std::ptr::{null, null_mut};
@@ -69,7 +70,7 @@ impl<H: Send + Sync> EventPoll<H> {
     /// Create a new event registry
     pub fn new() -> Result<EventPoll<H>, Error> {
         let kqueue = match unsafe { kqueue() } {
-            -1 => return Err(Error::EventQueue(errno_str())),
+            -1 => return Err(Error::EventQueue(io::Error::last_os_error())),
             kqueue => kqueue,
         };
 
@@ -187,7 +188,7 @@ impl<H: Send + Sync> EventPoll<H> {
         };
 
         if unsafe { kevent(self.kqueue, null(), 0, &mut event, 1, null()) } == -1 {
-            return WaitResult::Error(errno_str());
+            return WaitResult::Error(io::Error::last_os_error().to_string());
         }
 
         let event_data = unsafe { (event.udata as *mut Event<H>).as_ref().unwrap() };
@@ -234,7 +235,7 @@ impl<H: Send + Sync> EventPoll<H> {
         kev.flags |= EV_ADD;
 
         if unsafe { kevent(self.kqueue, &kev, 1, null_mut(), 0, null()) } == -1 {
-            return Err(Error::EventQueue(errno_str()));
+            return Err(Error::EventQueue(io::Error::last_os_error()));
         }
 
         if let Some(mut event) = events[index].take() {
