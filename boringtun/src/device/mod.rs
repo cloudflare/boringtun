@@ -25,13 +25,10 @@ pub mod tun;
 #[path = "tun_linux.rs"]
 pub mod tun;
 
-#[cfg(unix)]
-#[path = "udp_unix.rs"]
-pub mod udp;
-
 use std::collections::HashMap;
-use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::io::{self, Write as _};
+use std::mem::MaybeUninit;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -48,8 +45,8 @@ use parking_lot::Mutex;
 use peer::{AllowedIP, Peer};
 use poll::{EventPoll, EventRef, WaitResult};
 use rand_core::{OsRng, RngCore};
-use tun::{errno, errno_str, TunSocket};
-use udp::UDPSocket;
+use socket2::{Domain, Protocol, Type};
+use tun::TunSocket;
 
 use dev_lock::{Lock, LockReadGuard};
 
@@ -58,25 +55,40 @@ const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we
 const MAX_UDP_SIZE: usize = (1 << 16) - 1;
 const MAX_ITR: usize = 100; // Number of packets to handle per handler call
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Socket(String),
+    #[error("i/o error: {0}")]
+    IoError(#[from] io::Error),
+    #[error("{0}")]
+    Socket(io::Error),
+    #[error("{0}")]
     Bind(String),
-    FCntl(String),
-    EventQueue(String),
-    IOCtl(String),
+    #[error("{0}")]
+    FCntl(io::Error),
+    #[error("{0}")]
+    EventQueue(io::Error),
+    #[error("{0}")]
+    IOCtl(io::Error),
+    #[error("{0}")]
     Connect(String),
+    #[error("{0}")]
     SetSockOpt(String),
+    #[error("Invalid tunnel name")]
     InvalidTunnelName,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    GetSockOpt(String),
+    #[error("{0}")]
+    GetSockOpt(io::Error),
+    #[error("{0}")]
     GetSockName(String),
-    UDPRead(i32),
     #[cfg(target_os = "linux")]
-    Timer(String),
-    IfaceRead(i32),
+    #[error("{0}")]
+    Timer(io::Error),
+    #[error("iface read: {0}")]
+    IfaceRead(io::Error),
+    #[error("{0}")]
     DropPrivileges(String),
-    ApiSocket(std::io::Error),
+    #[error("API socket error: {0}")]
+    ApiSocket(io::Error),
 }
 
 // What the event loop should do after a handler returns
@@ -125,8 +137,8 @@ pub struct Device {
     fwmark: Option<u32>,
 
     iface: Arc<TunSocket>,
-    udp4: Option<Arc<UDPSocket>>,
-    udp6: Option<Arc<UDPSocket>>,
+    udp4: Option<socket2::Socket>,
+    udp6: Option<socket2::Socket>,
 
     yield_notice: Option<EventRef>,
     exit_notice: Option<EventRef>,
@@ -186,7 +198,7 @@ impl DeviceHandle {
     pub fn clean(&mut self) {
         for path in &self.device.read().cleanup_paths {
             // attempt to remove any file we created in the work dir
-            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(path);
         }
     }
 
@@ -415,27 +427,23 @@ impl Device {
         }
 
         // Then open new sockets and bind to the port
-        let udp_sock4 = Arc::new(
-            UDPSocket::new()?
-                .set_non_blocking()?
-                .set_reuse()?
-                .bind(port)?,
-        );
+        let udp_sock4 = socket2::Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        udp_sock4.set_reuse_address(true)?;
+        udp_sock4.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into())?;
+        udp_sock4.set_nonblocking(true)?;
 
         if port == 0 {
             // Random port was assigned
-            port = udp_sock4.port()?;
+            port = udp_sock4.local_addr()?.as_socket().unwrap().port();
         }
 
-        let udp_sock6 = Arc::new(
-            UDPSocket::new6()?
-                .set_non_blocking()?
-                .set_reuse()?
-                .bind(port)?,
-        );
+        let udp_sock6 = socket2::Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+        udp_sock6.set_reuse_address(true)?;
+        udp_sock6.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0).into())?;
+        udp_sock6.set_nonblocking(true)?;
 
-        self.register_udp_handler(Arc::clone(&udp_sock4))?;
-        self.register_udp_handler(Arc::clone(&udp_sock6))?;
+        self.register_udp_handler(udp_sock4.try_clone().unwrap())?;
+        self.register_udp_handler(udp_sock6.try_clone().unwrap())?;
         self.udp4 = Some(udp_sock4);
         self.udp6 = Some(udp_sock6);
 
@@ -485,22 +493,23 @@ impl Device {
         }
     }
 
+    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
         self.fwmark = Some(mark);
 
         // First set fwmark on listeners
         if let Some(ref sock) = self.udp4 {
-            sock.set_fwmark(mark)?;
+            sock.set_mark(mark)?;
         }
 
         if let Some(ref sock) = self.udp6 {
-            sock.set_fwmark(mark)?;
+            sock.set_mark(mark)?;
         }
 
         // Then on all currently connected sockets
         for peer in self.peers.values() {
             if let Some(ref sock) = peer.lock().endpoint().conn {
-                sock.set_fwmark(mark)?
+                sock.set_mark(mark)?
             }
         }
 
@@ -566,8 +575,12 @@ impl Device {
                         TunnResult::Err(e) => tracing::error!(message = "Timer error", error = ?e),
                         TunnResult::WriteToNetwork(packet) => {
                             match endpoint_addr {
-                                SocketAddr::V4(_) => udp4.sendto(packet, endpoint_addr),
-                                SocketAddr::V6(_) => udp6.sendto(packet, endpoint_addr),
+                                SocketAddr::V4(_) => {
+                                    udp4.send_to(packet, &endpoint_addr.into()).ok()
+                                }
+                                SocketAddr::V6(_) => {
+                                    udp6.send_to(packet, &endpoint_addr.into()).ok()
+                                }
                             };
                         }
                         _ => panic!("Unexpected result from update_timers"),
@@ -595,7 +608,7 @@ impl Device {
             .stop_notification(self.yield_notice.as_ref().unwrap())
     }
 
-    fn register_udp_handler(&self, udp: Arc<UDPSocket>) -> Result<(), Error> {
+    fn register_udp_handler(&self, udp: socket2::Socket) -> Result<(), Error> {
         self.queue.new_event(
             udp.as_raw_fd(),
             Box::new(move |d, t| {
@@ -606,17 +619,26 @@ impl Device {
                 let rate_limiter = d.rate_limiter.as_ref().unwrap();
 
                 // Loop while we have packets on the anonymous connection
-                while let Ok((addr, packet)) = udp.recvfrom(&mut t.src_buf[..]) {
+
+                // Safety: the `recv_from` implementation promises not to write uninitialised
+                // bytes to the buffer, so this casting is safe.
+                let src_buf =
+                    unsafe { &mut *(&mut t.src_buf[..] as *mut [u8] as *mut [MaybeUninit<u8>]) };
+                while let Ok((packet_len, addr)) = udp.recv_from(src_buf) {
+                    let packet = &t.src_buf[..packet_len];
                     // The rate limiter initially checks mac1 and mac2, and optionally asks to send a cookie
-                    let parsed_packet =
-                        match rate_limiter.verify_packet(Some(addr.ip()), packet, &mut t.dst_buf) {
-                            Ok(packet) => packet,
-                            Err(TunnResult::WriteToNetwork(cookie)) => {
-                                udp.sendto(cookie, addr);
-                                continue;
-                            }
-                            Err(_) => continue,
-                        };
+                    let parsed_packet = match rate_limiter.verify_packet(
+                        Some(addr.as_socket().unwrap().ip()),
+                        packet,
+                        &mut t.dst_buf,
+                    ) {
+                        Ok(packet) => packet,
+                        Err(TunnResult::WriteToNetwork(cookie)) => {
+                            let _: Result<_, _> = udp.send_to(cookie, &addr);
+                            continue;
+                        }
+                        Err(_) => continue,
+                    };
 
                     let peer = match &parsed_packet {
                         Packet::HandshakeInit(p) => {
@@ -648,7 +670,7 @@ impl Device {
                         TunnResult::Err(_) => continue,
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
-                            udp.sendto(packet, addr);
+                            let _: Result<_, _> = udp.send_to(packet, &addr);
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if p.is_allowed_ip(addr) {
@@ -667,11 +689,12 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            udp.sendto(packet, addr);
+                            let _: Result<_, _> = udp.send_to(packet, &addr);
                         }
                     }
 
                     // This packet was OK, that means we want to create a connected socket for this peer
+                    let addr = addr.as_socket().unwrap();
                     let ip_addr = addr.ip();
                     p.set_endpoint(addr);
                     if d.config.use_connected_socket {
@@ -695,7 +718,7 @@ impl Device {
     fn register_conn_handler(
         &self,
         peer: Arc<Mutex<Peer>>,
-        udp: Arc<UDPSocket>,
+        udp: socket2::Socket,
         peer_addr: IpAddr,
     ) -> Result<(), Error> {
         self.queue.new_event(
@@ -707,18 +730,24 @@ impl Device {
                 let iface = &t.iface;
                 let mut iter = MAX_ITR;
 
-                while let Ok(src) = udp.read(&mut t.src_buf[..]) {
+                // Safety: the `recv_from` implementation promises not to write uninitialised
+                // bytes to the buffer, so this casting is safe.
+                let src_buf =
+                    unsafe { &mut *(&mut t.src_buf[..] as *mut [u8] as *mut [MaybeUninit<u8>]) };
+
+                while let Ok(read_bytes) = udp.recv(src_buf) {
                     let mut flush = false;
                     let mut p = peer.lock();
-                    match p
-                        .tunnel
-                        .decapsulate(Some(peer_addr), src, &mut t.dst_buf[..])
-                    {
+                    match p.tunnel.decapsulate(
+                        Some(peer_addr),
+                        &t.src_buf[..read_bytes],
+                        &mut t.dst_buf[..],
+                    ) {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
-                            udp.write(packet);
+                            let _: Result<_, _> = udp.send(packet);
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if p.is_allowed_ip(addr) {
@@ -737,7 +766,7 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            udp.write(packet);
+                            let _: Result<_, _> = udp.send(packet);
                         }
                     }
 
@@ -771,12 +800,12 @@ impl Device {
                 for _ in 0..MAX_ITR {
                     let src = match iface.read(&mut t.src_buf[..mtu]) {
                         Ok(src) => src,
-                        Err(Error::IfaceRead(errno)) => {
-                            let ek = io::Error::from_raw_os_error(errno).kind();
+                        Err(Error::IfaceRead(e)) => {
+                            let ek = e.kind();
                             if ek == io::ErrorKind::Interrupted || ek == io::ErrorKind::WouldBlock {
                                 break;
                             }
-                            eprintln!("Fatal read error on tun interface: errno {:?}", errno);
+                            eprintln!("Fatal read error on tun interface: {:?}", e);
                             return Action::Exit;
                         }
                         Err(e) => {
@@ -801,14 +830,14 @@ impl Device {
                             tracing::error!(message = "Encapsulate error", error = ?e)
                         }
                         TunnResult::WriteToNetwork(packet) => {
-                            let endpoint = peer.endpoint();
-                            if let Some(ref conn) = endpoint.conn {
+                            let mut endpoint = peer.endpoint_mut();
+                            if let Some(conn) = endpoint.conn.as_mut() {
                                 // Prefer to send using the connected socket
-                                conn.write(packet);
+                                let _: Result<_, _> = conn.write(packet);
                             } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
-                                udp4.sendto(packet, addr);
+                                let _: Result<_, _> = udp4.send_to(packet, &addr.into());
                             } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
-                                udp6.sendto(packet, addr);
+                                let _: Result<_, _> = udp6.send_to(packet, &addr.into());
                             } else {
                                 tracing::error!("No endpoint");
                             }

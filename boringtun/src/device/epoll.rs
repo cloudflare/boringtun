@@ -1,9 +1,10 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::{errno_str, Error};
+use super::Error;
 use libc::*;
 use parking_lot::Mutex;
+use std::io;
 use std::ops::Deref;
 use std::os::unix::io::RawFd;
 use std::ptr::null_mut;
@@ -57,7 +58,7 @@ impl<H: Sync + Send> EventPoll<H> {
     /// Create a new event registry
     pub fn new() -> Result<EventPoll<H>, Error> {
         let epoll = match unsafe { epoll_create(1) } {
-            -1 => return Err(Error::EventQueue(errno_str())),
+            -1 => return Err(Error::EventQueue(io::Error::last_os_error())),
             epoll => epoll,
         };
 
@@ -125,7 +126,7 @@ impl<H: Sync + Send> EventPoll<H> {
         let tfd = match unsafe { timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK) } {
             -1 => match unsafe { timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK) } {
                 // A fallback for kernels < 3.15
-                -1 => return Err(Error::Timer(errno_str())),
+                -1 => return Err(Error::Timer(io::Error::last_os_error())),
                 efd => efd,
             },
             efd => efd,
@@ -143,7 +144,7 @@ impl<H: Sync + Send> EventPoll<H> {
 
         if unsafe { timerfd_settime(tfd, 0, &spec, std::ptr::null_mut()) } == -1 {
             unsafe { close(tfd) };
-            return Err(Error::Timer(errno_str()));
+            return Err(Error::Timer(io::Error::last_os_error()));
         }
 
         let ev = Event {
@@ -171,7 +172,7 @@ impl<H: Sync + Send> EventPoll<H> {
         // canceled.
         // When we want to stop the event, we read something once from the file descriptor.
         let efd = match unsafe { eventfd(0, EFD_NONBLOCK) } {
-            -1 => return Err(Error::EventQueue(errno_str())),
+            -1 => return Err(Error::EventQueue(io::Error::last_os_error())),
             efd => efd,
         };
 
@@ -198,7 +199,7 @@ impl<H: Sync + Send> EventPoll<H> {
             sigprocmask(SIG_BLOCK, &sigset, null_mut());
             signalfd(-1, &sigset, SFD_NONBLOCK)
         } {
-            -1 => return Err(Error::EventQueue(errno_str())),
+            -1 => return Err(Error::EventQueue(io::Error::last_os_error())),
             sfd => sfd,
         };
 
@@ -223,7 +224,7 @@ impl<H: Sync + Send> EventPoll<H> {
     pub fn wait(&self) -> WaitResult<'_, H> {
         let mut event = epoll_event { events: 0, u64: 0 };
         match unsafe { epoll_wait(self.epoll, &mut event, 1, -1) } {
-            -1 => return WaitResult::Error(errno_str()),
+            -1 => return WaitResult::Error(io::Error::last_os_error().to_string()),
             1 => {}
             _ => return WaitResult::Error("unexpected number of events returned".to_string()),
         }
@@ -260,7 +261,7 @@ impl<H: Sync + Send> EventPoll<H> {
         self.insert_at(trigger as _, ev);
         // Add the event to epoll
         if unsafe { epoll_ctl(self.epoll, EPOLL_CTL_ADD, trigger, &mut event_desc) } == -1 {
-            return Err(Error::EventQueue(errno_str()));
+            return Err(Error::EventQueue(io::Error::last_os_error()));
         }
 
         Ok(EventRef { trigger })
@@ -405,10 +406,10 @@ pub fn block_signal(signal: c_int) -> Result<sigset_t, String> {
         let mut sigset = std::mem::zeroed();
         sigemptyset(&mut sigset);
         if sigaddset(&mut sigset, signal) == -1 {
-            return Err(errno_str());
+            return Err(io::Error::last_os_error().to_string());
         }
         if sigprocmask(SIG_BLOCK, &sigset, null_mut()) == -1 {
-            return Err(errno_str());
+            return Err(io::Error::last_os_error().to_string());
         }
         Ok(sigset)
     }

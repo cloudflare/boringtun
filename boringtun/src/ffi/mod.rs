@@ -118,7 +118,7 @@ pub extern "C" fn x25519_public_key(private_key: x25519_key) -> x25519_key {
 /// The memory has to be freed by calling `x25519_key_to_str_free`
 #[no_mangle]
 pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const c_char {
-    let encoded_key = encode(&key.key);
+    let encoded_key = encode(key.key);
     CString::into_raw(CString::new(encoded_key).unwrap())
 }
 
@@ -127,7 +127,7 @@ pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const c_char {
 /// The memory has to be freed by calling `x25519_key_to_str_free`
 #[no_mangle]
 pub extern "C" fn x25519_key_to_hex(key: x25519_key) -> *const c_char {
-    let encoded_key = encode_hex(&key.key);
+    let encoded_key = encode_hex(key.key);
     CString::into_raw(CString::new(encoded_key).unwrap())
 }
 
@@ -147,7 +147,7 @@ pub unsafe extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> 
         Ok(string) => string,
     };
 
-    if let Ok(key) = decode(&utf8_key) {
+    if let Ok(key) = decode(utf8_key) {
         let len = key.len();
         let mut zero = 0u8;
         for b in key {
@@ -223,23 +223,18 @@ pub unsafe extern "C" fn set_logging_function(
             // disable terminal escape codes
             .with_ansi(false);
 
-        if fmt()
+        fmt()
             .event_format(format)
             .with_writer(std::sync::Mutex::new(writer))
             .with_max_level(tracing::Level::TRACE)
             .with_ansi(false)
             .try_init()
             .is_ok()
-        {
-            return true;
-        }
-
-        return false;
     });
     if let Ok(value) = result {
-        return value;
+        value
     } else {
-        return false;
+        false
     }
 }
 
