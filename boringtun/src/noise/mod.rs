@@ -72,6 +72,8 @@ pub struct Tunn {
     tx_bytes: usize,
     rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
+
+    pub peer_static_public: x25519_dalek::PublicKey,
 }
 
 type MessageType = u32;
@@ -125,6 +127,10 @@ pub enum Packet<'a> {
 }
 
 impl Tunn {
+    pub fn peer_static_public(&self) -> x25519_dalek::PublicKey {
+        self.peer_static_public
+    }
+
     #[inline(always)]
     pub fn parse_incoming_packet(src: &[u8]) -> Result<Packet, WireGuardError> {
         if src.len() < 4 {
@@ -203,6 +209,7 @@ impl Tunn {
         let static_public = x25519::PublicKey::from(&static_private);
 
         let tunn = Tunn {
+            peer_static_public: peer_static_public,
             handshake: Handshake::new(
                 static_private,
                 static_public,
