@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+#![allow(semicolon_in_expressions_from_macros)]
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -5,17 +7,13 @@
 //!
 //! <code>git clone https://github.com/cloudflare/boringtun.git</code>
 
-#[cfg(feature = "device")]
+#[cfg(all(unix, feature = "device"))]
 pub mod device;
-
-#[cfg(feature = "ffi-bindings")]
-pub mod ffi;
-#[cfg(feature = "jni-bindings")]
-pub mod jni;
-pub mod noise;
 
 #[cfg(not(feature = "mock-instant"))]
 pub(crate) mod sleepyinstant;
+
+pub mod noise;
 
 pub(crate) mod serialization;
 

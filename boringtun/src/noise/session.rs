@@ -274,6 +274,13 @@ impl Session {
     }
 }
 
+#[inline(always)]
+pub fn message_data_len(plain_text_len: usize) -> usize {
+    // See:
+    // https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireguard/messages.h?h=v6.1#n112
+    plain_text_len + AEAD_SIZE + DATA_OFFSET
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

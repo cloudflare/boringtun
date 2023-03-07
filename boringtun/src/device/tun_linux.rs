@@ -6,7 +6,12 @@ use libc::*;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 
+const TUNGETIFF: u64 = 0x8004_54D2;
+#[cfg(target_os = "linux")]
 const TUNSETIFF: u64 = 0x4004_54ca;
+
+#[cfg(target_os = "linux")]
+pub const IFF_MULTI_QUEUE: c_int = 0x100;
 
 #[repr(C)]
 union IfrIfru {
@@ -55,8 +60,8 @@ impl AsRawFd for TunSocket {
 }
 
 impl TunSocket {
-    fn write(&self, buf: &[u8]) -> usize {
-        match unsafe { write(self.fd, buf.as_ptr() as _, buf.len() as _) } {
+    fn write(&self, src: &[u8]) -> usize {
+        match unsafe { write(self.fd, src.as_ptr() as _, src.len()) } {
             -1 => 0,
             n => n as usize,
         }
@@ -76,25 +81,66 @@ impl TunSocket {
             -1 => return Err(Error::Socket(io::Error::last_os_error())),
             fd => fd,
         };
-        let iface_name = name.as_bytes();
-        let mut ifr = ifreq {
-            ifr_name: [0; IFNAMSIZ],
-            ifr_ifru: IfrIfru {
-                ifru_flags: (IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE) as _,
-            },
-        };
 
-        if iface_name.len() >= ifr.ifr_name.len() {
-            return Err(Error::InvalidTunnelName);
-        }
+        #[cfg(target_os = "linux")]
+        {
+            let iface_name = name.as_bytes();
+            let mut ifr = ifreq {
+                ifr_name: [0; IFNAMSIZ],
+                ifr_ifru: IfrIfru {
+                    ifru_flags: (IFF_TUN | IFF_MULTI_QUEUE | IFF_NO_PI) as _,
+                },
+            };
 
-        ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
+            if iface_name.len() >= ifr.ifr_name.len() {
+                return Err(Error::InvalidTunnelName);
+            }
 
-        if unsafe { ioctl(fd, TUNSETIFF as _, &ifr) } < 0 {
-            return Err(Error::IOCtl(io::Error::last_os_error()));
+            ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
+
+            if unsafe { ioctl(fd, TUNSETIFF as _, &ifr) } < 0 {
+                return Err(Error::IOCtl(io::Error::last_os_error()));
+            }
         }
 
         let name = name.to_string();
+        Ok(TunSocket { fd, name })
+    }
+
+    pub fn new_from_fd(fd: RawFd) -> Result<TunSocket, Error> {
+        #[cfg(target_os = "linux")]
+        let mut ifr = ifreq {
+            ifr_name: [0; IFNAMSIZ],
+            ifr_ifru: IfrIfru { ifru_intval: 0 },
+        };
+
+        #[cfg(target_os = "android")]
+        let ifr = ifreq {
+            ifr_name: [0; IFNAMSIZ],
+            ifr_ifru: IfrIfru { ifru_intval: 0 },
+        };
+
+        if unsafe { ioctl(fd, TUNGETIFF as _, &ifr) } < 0 {
+            return Err(Error::IOCtl(io::Error::last_os_error()));
+        }
+        let flags = unsafe { ifr.ifr_ifru.ifru_flags };
+        if flags & IFF_TUN as c_short == 0 {
+            return Err(Error::InvalidTunnelName);
+        }
+        let name = std::str::from_utf8(&ifr.ifr_name[..])
+            .map_err(|_| Error::InvalidTunnelName)?
+            .to_owned();
+
+        #[cfg(target_os = "linux")]
+        {
+            ifr.ifr_ifru = IfrIfru {
+                ifru_flags: (IFF_TUN | IFF_MULTI_QUEUE) as _,
+            };
+            if unsafe { ioctl(fd, TUNSETIFF as _, &ifr) } < 0 {
+                return Err(Error::IOCtl(io::Error::last_os_error()));
+            }
+        }
+
         Ok(TunSocket { fd, name })
     }
 

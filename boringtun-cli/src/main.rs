@@ -8,6 +8,7 @@ use daemonize::Daemonize;
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
 use std::process::exit;
+use std::sync::Arc;
 use tracing::Level;
 
 fn check_tun_name(_v: String) -> Result<(), String> {
@@ -151,6 +152,10 @@ fn main() {
         use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),
+        open_uapi_socket: false,
+        protect: Arc::new(boringtun::device::MakeExternalBoringtunNoop),
+        firewall_process_inbound_callback: None,
+        firewall_process_outbound_callback: None,
     };
 
     let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config) {

@@ -11,6 +11,7 @@ mod timers;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
+use crate::noise::session::message_data_len;
 use crate::noise::timers::{TimerName, Timers};
 use crate::x25519;
 
@@ -265,8 +266,13 @@ impl Tunn {
             return TunnResult::WriteToNetwork(packet);
         }
 
-        // If there is no session, queue the packet for future retry
-        self.queue_packet(src);
+        if !src.is_empty() {
+            // If there is no session, queue the packet for future retry,
+            // except if it's keepalive packet, new keepalive packets will be sent when session is created.
+            // This prevents double keepalive packets on initiation
+            self.queue_packet(src);
+        }
+
         // Initiate a new handshake if none is in progress
         self.format_handshake_initiation(dst, false)
     }
@@ -356,7 +362,6 @@ impl Tunn {
         );
 
         let session = self.handshake.receive_handshake_response(p)?;
-
         let keepalive_packet = session.format_packet_data(&[], dst);
         // Store new session in ring buffer
         let l_idx = session.local_index();
@@ -368,6 +373,7 @@ impl Tunn {
         self.set_current_session(l_idx);
 
         tracing::debug!("Sending keepalive");
+        self.tx_bytes += keepalive_packet.len();
 
         Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
     }
@@ -467,7 +473,10 @@ impl Tunn {
     /// Returns the truncated packet and the source IP as TunnResult
     fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a> {
         let (computed_len, src_ip_address) = match packet.len() {
-            0 => return TunnResult::Done, // This is keepalive, and not an error
+            0 => {
+                self.rx_bytes += message_data_len(0);
+                return TunnResult::Done; // This is keepalive, and not an error
+            }
             _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => {
                 let len_bytes: [u8; IP_LEN_SZ] = packet[IPV4_LEN_OFF..IPV4_LEN_OFF + IP_LEN_SZ]
                     .try_into()
@@ -502,7 +511,7 @@ impl Tunn {
         }
 
         self.timer_tick(TimerName::TimeLastDataPacketReceived);
-        self.rx_bytes += computed_len;
+        self.rx_bytes += message_data_len(computed_len);
 
         match src_ip_address {
             IpAddr::V4(addr) => TunnResult::WriteToTunnelV4(&mut packet[..computed_len], addr),
