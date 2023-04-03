@@ -2,7 +2,11 @@
 name = "boringtun"
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
 version = "0.5.2"
-authors = ["Noah Kennedy <nkennedy@cloudflare.com>", "Andy Grover <agrover@cloudflare.com>", "Jeff Hiner <jhiner@cloudflare.com>"]
+authors = [
+    "Noah Kennedy <nkennedy@cloudflare.com>",
+    "Andy Grover <agrover@cloudflare.com>",
+    "Jeff Hiner <jhiner@cloudflare.com>",
+]
 license = "BSD-3-Clause"
 repository = "https://github.com/cloudflare/boringtun"
 documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
@@ -27,7 +31,10 @@ tracing-subscriber = { version = "0.3", features = ["fmt"], optional = true }
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
 ring = "0.16"
-x25519-dalek = { version = "2.0.0-pre.1", features = ["reusable_secrets"] }
+x25519-dalek = { version = "=2.0.0-rc.2", features = [
+    "reusable_secrets",
+    "static_secrets",
+] }
 rand_core = { version = "0.6.3", features = ["getrandom"] }
 chacha20poly1305 = "0.10.0-pre.1"
 aead = "0.5.0-pre.2"
