@@ -99,7 +99,7 @@ pub struct x25519_key {
 #[no_mangle]
 pub extern "C" fn x25519_secret_key() -> x25519_key {
     x25519_key {
-        key: StaticSecret::new(OsRng).to_bytes(),
+        key: StaticSecret::random_from_rng(OsRng).to_bytes(),
     }
 }
 

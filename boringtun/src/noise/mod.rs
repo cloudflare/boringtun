@@ -598,11 +598,11 @@ mod tests {
     use rand_core::{OsRng, RngCore};
 
     fn create_two_tuns() -> (Tunn, Tunn) {
-        let my_secret_key = x25519_dalek::StaticSecret::new(OsRng);
+        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
         let my_idx = OsRng.next_u32();
 
-        let their_secret_key = x25519_dalek::StaticSecret::new(OsRng);
+        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
         let their_idx = OsRng.next_u32();
 
