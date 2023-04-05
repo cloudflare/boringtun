@@ -54,7 +54,7 @@ impl std::fmt::Debug for Instant {
 
 const NSEC_PER_SEC: u64 = 1_000_000_000;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone)]
 struct Timespec {
     t: libc::timespec,
 }
@@ -97,3 +97,13 @@ impl Ord for Timespec {
         me.cmp(&other)
     }
 }
+
+impl PartialEq for Timespec {
+    fn eq(&self, other: &Self) -> bool {
+        (self.t.tv_sec, self.t.tv_nsec) == 
+        (other.t.tv_sec, other.t.tv_nsec)
+    }
+}
+
+impl Eq for Timespec {}
+
