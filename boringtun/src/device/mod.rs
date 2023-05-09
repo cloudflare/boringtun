@@ -94,6 +94,8 @@ pub enum Error {
     DropPrivileges(String),
     #[error("API socket error: {0}")]
     ApiSocket(io::Error),
+    #[error("Set tunnel error: Failed to get device lock when setting tunnel")]
+    SetTunnel,
 }
 
 // What the event loop should do after a handler returns
@@ -117,7 +119,7 @@ impl MakeExternalBoringtun for MakeExternalBoringtunNoop {
 }
 
 pub struct DeviceHandle {
-    device: Arc<Lock<Device>>, // The interface this handle owns
+    pub device: Arc<Lock<Device>>, // The interface this handle owns
     threads: Vec<JoinHandle<()>>,
 }
 
@@ -143,6 +145,8 @@ pub struct Device {
 
     listen_port: u16,
     fwmark: Option<u32>,
+    #[cfg(not(target_os = "linux"))]
+    update_seq: u32,
 
     iface: Arc<TunSocket>,
     udp4: Option<socket2::Socket>,
@@ -172,6 +176,8 @@ struct ThreadData {
     iface: Arc<TunSocket>,
     src_buf: [u8; MAX_UDP_SIZE],
     dst_buf: [u8; MAX_UDP_SIZE],
+    #[cfg(not(target_os = "linux"))]
+    update_seq: u32,
 }
 
 impl DeviceHandle {
@@ -229,6 +235,7 @@ impl DeviceHandle {
         }
     }
 
+    #[cfg(not(target_os = "linux"))]
     pub fn set_iface(&mut self, new_iface: TunSocket) -> Result<(), Error> {
         // Even though device struct is not being written to, we still take a write lock on device to stop the event loop
         // The event loop must be stopped so that the old iface event handler can be safelly cleared.
@@ -238,62 +245,36 @@ impl DeviceHandle {
             .try_writeable(
                 |device| device.trigger_yield(),
                 |device| {
-                    device.cancel_yield();
+                    (device.update_seq, _) = device.update_seq.overflowing_add(1);
+                    // Because the event loop is stopped now, this is safe (see clear_event_by_fd() comment)
                     unsafe {
                         device.queue.clear_event_by_fd(device.iface.as_raw_fd());
                     }
-                    device.register_iface_handler(Arc::new(new_iface.set_non_blocking()?))?;
-                    Ok::<(), Error>(())
+                    device.iface = Arc::new(new_iface.set_non_blocking()?);
+                    device.register_iface_handler(device.iface.clone())?;
+                    device.cancel_yield();
+
+                    Ok(())
                 },
             )
-            // TODO: Not sure about casting none to error here
-            // TODO this is test code
-            .unwrap_or(Err(Error::EventQueue(
-                "Failed to get device lock when setting tunnel".to_string(),
-            )))
+            .ok_or(Error::SetTunnel)?
     }
 
-    fn event_loop(_i: usize, device: &Lock<Device>) {
-        #[cfg(target_os = "linux")]
-        let mut thread_local = ThreadData {
-            src_buf: [0u8; MAX_UDP_SIZE],
-            dst_buf: [0u8; MAX_UDP_SIZE],
-            iface: if _i == 0 || !device.read().config.use_multi_queue {
-                // For the first thread use the original iface
-                Arc::clone(&device.read().iface)
-            } else {
-                // For for the rest create a new iface queue
-                let iface_local = Arc::new(
-                    TunSocket::new(&device.read().iface.name().unwrap())
-                        .unwrap()
-                        .set_non_blocking()
-                        .unwrap(),
-                );
-
-                device
-                    .read()
-                    .register_iface_handler(Arc::clone(&iface_local))
-                    .ok();
-
-                iface_local
-            },
-        };
-
-        #[cfg(not(target_os = "linux"))]
-        let mut thread_local = ThreadData {
-            src_buf: [0u8; MAX_UDP_SIZE],
-            dst_buf: [0u8; MAX_UDP_SIZE],
-            iface: Arc::clone(&device.read().iface),
-        };
-
+    fn event_loop(thread_id: usize, device: &Lock<Device>) {
+        let mut thread_local = DeviceHandle::new_thread_local(thread_id, &device.read());
         #[cfg(not(target_os = "linux"))]
         let uapi_fd = -1;
         #[cfg(target_os = "linux")]
         let uapi_fd = device.read().uapi_fd;
 
         loop {
-            // The event loop keeps a read lock on the device, because we assume write access is rarely needed
             let mut device_lock = device.read();
+            #[cfg(not(target_os = "linux"))]
+            if device_lock.update_seq != thread_local.update_seq {
+                thread_local.update_seq = device_lock.update_seq;
+                thread_local.iface = device_lock.iface.clone();
+            }
+            // The event loop keeps a read lock on the device, because we assume write access is rarely needed
             let queue = Arc::clone(&device_lock.queue);
 
             loop {
@@ -320,6 +301,42 @@ impl DeviceHandle {
                 }
             }
         }
+    }
+
+    fn new_thread_local(thread_id: usize, device_lock: &LockReadGuard<Device>) -> ThreadData {
+        #[cfg(target_os = "linux")]
+        let t_local = ThreadData {
+            src_buf: [0u8; MAX_UDP_SIZE],
+            dst_buf: [0u8; MAX_UDP_SIZE],
+            iface: if thread_id == 0 || !device_lock.config.use_multi_queue {
+                // For the first thread use the original iface
+                Arc::clone(&device_lock.iface)
+            } else {
+                // For for the rest create a new iface queue
+                let iface_local = Arc::new(
+                    TunSocket::new(&device_lock.iface.name().unwrap())
+                        .unwrap()
+                        .set_non_blocking()
+                        .unwrap(),
+                );
+
+                device_lock
+                    .register_iface_handler(Arc::clone(&iface_local))
+                    .ok();
+
+                iface_local
+            },
+        };
+
+        #[cfg(not(target_os = "linux"))]
+        let t_local = ThreadData {
+            src_buf: [0u8; MAX_UDP_SIZE],
+            dst_buf: [0u8; MAX_UDP_SIZE],
+            iface: Arc::clone(&device_lock.iface),
+            update_seq: iface_local.update_seq,
+        };
+
+        t_local
     }
 }
 
@@ -489,6 +506,8 @@ impl Device {
             rate_limiter: None,
             #[cfg(target_os = "linux")]
             uapi_fd,
+            #[cfg(not(target_os = "linux"))]
+            update_seq: 0,
         };
 
         if device.config.open_uapi_socket {
