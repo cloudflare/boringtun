@@ -108,6 +108,7 @@ fn main() {
     let n_threads: usize = matches.get_one::<usize>("threads").unwrap().to_owned();
     let log_level: Level = matches.get_one::<Level>("verbosity").unwrap().to_owned();
 
+    // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
     let _ = sock1.set_nonblocking(true);
 
