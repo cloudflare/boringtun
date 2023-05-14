@@ -97,7 +97,7 @@ fn main() {
 
     let background = !matches.get_flag("foreground");
     #[cfg(target_os = "linux")]
-    let uapi_fd: i32 = matches.get_one::<i32>("uapi-fd").unwrap();
+    let uapi_fd: i32 = *matches.get_one::<i32>("uapi-fd").unwrap();
     let tun_name = if let Some(tun_name) = matches.get_one::<String>("tun-fd") {
         tun_name
     } else {
@@ -105,8 +105,8 @@ fn main() {
             .get_one::<String>("INTERFACE_NAME")
             .expect("provide interface name")
     };
-    let n_threads: usize = matches.get_one::<usize>("threads").unwrap().to_owned();
-    let log_level: Level = matches.get_one::<Level>("verbosity").unwrap().to_owned();
+    let n_threads: usize = *matches.get_one::<usize>("threads").unwrap();
+    let log_level: Level = *matches.get_one::<Level>("verbosity").unwrap();
 
     // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
