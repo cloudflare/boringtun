@@ -104,8 +104,7 @@ impl Peer {
     pub fn connect_endpoint(
         &self,
         port: u16,
-        // TODO: using fwmark
-        _fwmark: Option<u32>,
+        fwmark: Option<u32>,
     ) -> Result<socket2::Socket, Error> {
         let mut endpoint = self.endpoint.write();
 
@@ -133,6 +132,9 @@ impl Peer {
         if let Some(fwmark) = fwmark {
             udp_conn.set_mark(fwmark)?;
         }
+        // silence the unsused variable warning from clippy
+        #[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
+        let _ = fwmark;
 
         tracing::info!(
             message="Connected endpoint",
