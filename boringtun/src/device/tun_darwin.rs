@@ -87,7 +87,7 @@ pub fn parse_utun_name(name: &str) -> Result<u32, Error> {
 
 impl TunSocket {
     fn write(&self, src: &[u8], af: u8) -> usize {
-        let mut hdr = [0u8, 0u8, 0u8, af as u8];
+        let mut hdr = [0u8, 0u8, 0u8, af];
         let mut iov = [
             iovec {
                 iov_base: hdr.as_mut_ptr() as _,

@@ -104,7 +104,8 @@ impl Peer {
     pub fn connect_endpoint(
         &self,
         port: u16,
-        fwmark: Option<u32>,
+        // TODO: using fwmark
+        _fwmark: Option<u32>,
     ) -> Result<socket2::Socket, Error> {
         let mut endpoint = self.endpoint.write();
 

@@ -8,7 +8,7 @@
 //! C bindings for the BoringTun library
 use super::noise::{Tunn, TunnResult};
 use crate::x25519::{PublicKey, StaticSecret};
-use base64::{decode, encode};
+use base64::{engine::general_purpose::STANDARD as base64engine, Engine as _};
 use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
 use parking_lot::Mutex;
@@ -118,7 +118,7 @@ pub extern "C" fn x25519_public_key(private_key: x25519_key) -> x25519_key {
 /// The memory has to be freed by calling `x25519_key_to_str_free`
 #[no_mangle]
 pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const c_char {
-    let encoded_key = encode(key.key);
+    let encoded_key = base64engine.encode(key.key);
     CString::into_raw(CString::new(encoded_key).unwrap())
 }
 
@@ -147,7 +147,7 @@ pub unsafe extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> 
         Ok(string) => string,
     };
 
-    if let Ok(key) = decode(utf8_key) {
+    if let Ok(key) = base64engine.decode(utf8_key) {
         let len = key.len();
         let mut zero = 0u8;
         for b in key {
