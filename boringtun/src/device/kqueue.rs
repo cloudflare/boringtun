@@ -214,7 +214,7 @@ impl<H: Send + Sync> EventPoll<H> {
         };
 
         let (trigger, index) = match ev.kind {
-            EventKind::FD | EventKind::Signal => (ev.event.ident as RawFd, ev.event.ident as usize),
+            EventKind::FD | EventKind::Signal => (ev.event.ident as RawFd, ev.event.ident),
             EventKind::Timer | EventKind::Notifier => (-(events.len() as RawFd) - 1, events.len()), // Custom events get negative identifiers, hopefully we will never have more than 2^31 events of each type
         };
 

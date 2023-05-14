@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::serialization::KeyBytes;
-use base64::encode;
+use base64::{engine::general_purpose::STANDARD as base64engine, Engine as _};
 use rand_core::OsRng;
 use std::fs;
 use std::fs::File;
@@ -295,9 +295,12 @@ fn connected_sock_pair() -> (UdpSocket, UdpSocket) {
 }
 
 fn key_pair() -> (String, String) {
-    let secret_key = x25519_dalek::StaticSecret::new(OsRng);
+    let secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
     let public_key = x25519_dalek::PublicKey::from(&secret_key);
-    (encode(secret_key.to_bytes()), encode(public_key.as_bytes()))
+    (
+        base64engine.encode(secret_key.to_bytes()),
+        base64engine.encode(public_key.as_bytes()),
+    )
 }
 
 fn wireguard_test_pair() -> (UdpSocket, UdpSocket, Arc<AtomicBool>) {
@@ -383,7 +386,7 @@ impl WireGuardExt {
         // Start wireguard
         Command::new("wg-quick")
             .env("WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD", "1")
-            .args(&["up", &conf_file_name])
+            .args(["up", &conf_file_name])
             .status()
             .expect("Failed to run wg-quick");
 
@@ -400,7 +403,7 @@ impl Drop for WireGuardExt {
     fn drop(&mut self) {
         // Stop wireguard
         Command::new("wg-quick")
-            .args(&["down", &self.conf_file_name])
+            .args(["down", &self.conf_file_name])
             .status()
             .expect("Failed to run wg-quick");
         fs::remove_file(&self.conf_file_name).unwrap();
