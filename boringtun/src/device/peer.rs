@@ -132,6 +132,9 @@ impl Peer {
         if let Some(fwmark) = fwmark {
             udp_conn.set_mark(fwmark)?;
         }
+        // silence the unsused variable warning from clippy
+        #[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
+        let _ = fwmark;
 
         tracing::info!(
             message="Connected endpoint",
