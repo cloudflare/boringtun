@@ -859,7 +859,7 @@ impl Device {
 /// ensure it requires a non-trivial amount of processing power and/or samples
 /// to guess other peers' indices. Anything more ambitious than this is wasted
 /// with only 24 bits of space.
-struct IndexLfsr {
+pub(crate) struct IndexLfsr {
     initial: u32,
     lfsr: u32,
     mask: u32,
