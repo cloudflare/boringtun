@@ -117,7 +117,7 @@ fn main() {
             .with_writer(non_blocking)
             .with_ansi(false)
             .init();
-
+        println!("Just a test line");
         let daemonize = Daemonize::new()
             .working_directory("/tmp")
             .exit_action(move || {
