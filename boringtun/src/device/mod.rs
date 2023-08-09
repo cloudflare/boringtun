@@ -333,7 +333,7 @@ impl DeviceHandle {
             src_buf: [0u8; MAX_UDP_SIZE],
             dst_buf: [0u8; MAX_UDP_SIZE],
             iface: Arc::clone(&device_lock.iface),
-            update_seq: iface_local.update_seq,
+            update_seq: device_lock.update_seq,
         };
 
         t_local
