@@ -101,7 +101,7 @@ jobs:
 
   release:
     # needs: [tests, integration-tests]
-    if: startsWith(github.ref, 'refs/tags/')
+    # if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -127,8 +127,10 @@ jobs:
             -v $PWD/${{ matrix.binary.workspace }}:/repo/ -w /repo \
             ghcr.io/innopals/rust-centos7:$RUST_VERSION-${{ matrix.arch }} \
             tail -f /etc/issue
+          # Initial cargo installation to be cached
           docker cp init:/root/.cargo ~/.cargo
           mkdir -p ${HOME}/.local/bin
+          # Use cargo & rustc in the container to obtain rust version and to clean up artifacts
           cd ${HOME}/.local/bin
           echo '#!/bin/bash' > rustc
           echo 'docker exec init rustc $@' > rustc
@@ -154,11 +156,22 @@ jobs:
             strip target/release/${{ matrix.binary.name }}
             cp target/release/${{ matrix.binary.name }} target/release/${{ matrix.binary.name }}-${{ matrix.arch }}
           '
+      - name: Amend File Permissions
+        run: |
           sudo chown -R runner:docker ${{ matrix.binary.workspace }}/target
           sudo chown -R runner:docker $HOME/.cargo
-      - name: publish artifacts
+      - name: Publish Artifacts
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
+            files: |
+              ${{ matrix.binary.workspace }}/target/release/${{ matrix.binary.name }}-${{ matrix.arch }}
+      - name: Draft Artifacts
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: softprops/action-gh-release@v1
+        with:
+            draft: true
+            name: "latest"
+            tag_name: "latest"
             files: |
               ${{ matrix.binary.workspace }}/target/release/${{ matrix.binary.name }}-${{ matrix.arch }}
