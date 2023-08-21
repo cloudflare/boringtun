@@ -1,6 +1,6 @@
 name: PR Status Checks
 env:
-  RUST_VERSION: stable
+  RUST_VERSION: 1.69.0
 
 on:
   push: {}
