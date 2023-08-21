@@ -1,8 +1,9 @@
 name: PR Status Checks
+env:
+  RUST_VERSION: stable
 
 on:
-  push:
-    branches: [ "master" ]
+  push: {}
   pull_request:
     branches: [ "master" ]
 
@@ -97,3 +98,67 @@ jobs:
         with:
           toolchain: stable
       - run: cargo test -- --ignored
+
+  release:
+    needs: [tests, integration-tests]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        binary:
+          - workspace: boringtun-cli
+            name: boringtun-cli
+        arch:
+          - amd64
+          - aarch64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: Setup QEMU
+        if: matrix.arch != 'amd64'
+        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+      - name: Setup Rust
+        run: |
+          rm -rf ~/.cargo
+          docker run -d --name=init \
+            -v $PWD/${{ matrix.binary.workspace }}:/repo/ -w /repo \
+            ghcr.io/innopals/rust-centos7:$RUST_VERSION-${{ matrix.arch }} \
+            tail -f /etc/issue
+          docker cp init:/root/.cargo ~/.cargo
+          mkdir -p ${HOME}/.local/bin
+          cd ${HOME}/.local/bin
+          echo '#!/bin/bash' > rustc
+          echo 'docker exec init rustc $@' > rustc
+          echo '#!/bin/bash' > cargo
+          echo 'docker exec init cargo $@' > cargo
+          chmod +x *
+          rustc -vV
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.binary.workspace }}/${{ matrix.binary.name }}-${{ matrix.arch }}
+          cache-on-failure: true
+          workspaces: ${{ matrix.binary.workspace }} -> target
+      - name: Start Build Container
+        run: |
+          docker run -d --name=build \
+            -v $PWD/${{ matrix.binary.workspace }}:/repo/ -v $HOME/.cargo:/root/.cargo -w /repo \
+            ghcr.io/innopals/rust-centos7:$RUST_VERSION-${{ matrix.arch }} \
+            tail -f /etc/issue
+      - name: Build Artifacts
+        run: |
+          docker exec build bash -c 'set -e
+            cargo build --release
+            strip target/release/${{ matrix.binary.name }}
+            cp target/release/${{ matrix.binary.name }} target/release/${{ matrix.binary.name }}-${{ matrix.arch }}
+          '
+          sudo chown -R runner:docker ${{ matrix.binary.workspace }}/target
+          sudo chown -R runner:docker $HOME/.cargo
+      - name: publish artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+            files: |
+              ${{ matrix.binary.workspace }}/target/release/${{ matrix.binary.name }}-${{ matrix.arch }}
