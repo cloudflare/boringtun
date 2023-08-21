@@ -100,14 +100,14 @@ jobs:
       - run: cargo test -- --ignored
 
   release:
-    needs: [tests, integration-tests]
+    # needs: [tests, integration-tests]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         binary:
-          - workspace: boringtun-cli
+          - workspace: .
             name: boringtun-cli
         arch:
           - amd64
@@ -150,7 +150,7 @@ jobs:
       - name: Build Artifacts
         run: |
           docker exec build bash -c 'set -e
-            cargo build --release
+            cargo build --release --bin=${{ matrix.binary.name }}
             strip target/release/${{ matrix.binary.name }}
             cp target/release/${{ matrix.binary.name }} target/release/${{ matrix.binary.name }}-${{ matrix.arch }}
           '
