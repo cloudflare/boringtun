@@ -1,9 +1,11 @@
 name: PR Status Checks
 env:
+  # https://github.com/rust-lang/rust/issues/113104
   RUST_VERSION: 1.69.0
 
 on:
-  push: {}
+  push:
+    branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
 
@@ -100,8 +102,7 @@ jobs:
       - run: cargo test -- --ignored
 
   release:
-    # needs: [tests, integration-tests]
-    # if: startsWith(github.ref, 'refs/tags/')
+    needs: [tests, integration-tests]
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
