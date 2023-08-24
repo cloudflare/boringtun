@@ -62,10 +62,12 @@ fn main() {
             Arg::new("pid-file")
                 .takes_value(true)
                 .long("pid-file")
+                .env("WG_PID_FILE")
                 .help("Write the process ID to a file"),
             Arg::new("work-dir")
                 .takes_value(true)
                 .long("work-dir")
+                .env("WG_WORK_DIR")
                 .help("Working directory, default is /tmp")
                 .default_value("/tmp"),
             Arg::new("tun-fd")
