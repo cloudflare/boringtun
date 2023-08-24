@@ -258,6 +258,10 @@ impl DeviceHandle {
                             }
                         }
                     }
+                    WaitResult::Eintr() => {
+                        // Interrupted system call, just try again
+                        continue;
+                    }
                     WaitResult::EoF(handler) => {
                         if uapi_fd >= 0 && uapi_fd == handler.fd() {
                             device_lock.trigger_exit();
