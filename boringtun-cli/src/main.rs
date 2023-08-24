@@ -4,7 +4,7 @@
 use boringtun::device::drop_privileges::drop_privileges;
 use boringtun::device::{DeviceConfig, DeviceHandle};
 use clap::{Arg, Command};
-use daemonize::Daemonize;
+use daemonize::{Daemonize, Outcome};
 use std::fs::OpenOptions;
 use std::os::unix::net::UnixDatagram;
 use std::process::exit;
@@ -121,18 +121,19 @@ fn main() {
 
         let outcome = daemonize.execute();
 
-        match outcome.is_parent() {
-            true => {
+        match outcome {
+            Outcome::Parent(Ok(parent))=> {
+
                 let mut b = [0u8; 1];
                 if sock2.recv(&mut b).is_ok() && b[0] == 1 {
                     eprintln!("BoringTun started successfully");
-                    exit(0);
+                    exit(parent.first_child_exit_code);
                 } else {
                     eprintln!("BoringTun failed to start");
                     exit(1);
                 };
             }
-            false => {
+            Outcome::Child(Ok(_)) => {
                 let log_file = OpenOptions::new()
                     .create(true)
                     .append(true)
@@ -150,7 +151,12 @@ fn main() {
 
                 tracing::info!(message = "Started BoringTun child process");
             }
-        }
+            Outcome::Parent(Err(e)) | Outcome::Child(Err(e)) => {
+                eprintln!("BoringTun failed to daemonize: {}", e);
+                exit(1);
+            }
+        };
+
     } else {
         tracing_subscriber::fmt()
             .pretty()
