@@ -111,18 +111,16 @@ fn main() {
 
     let log = matches.value_of("log").unwrap();
 
-    
     if background {
-        
-        let mut daemonize = Daemonize::new()
-            .working_directory(matches.value_of("work-dir").unwrap());
+        let mut daemonize =
+            Daemonize::new().working_directory(matches.value_of("work-dir").unwrap());
 
         if let Some(pid_file) = matches.value_of("pid-file") {
             daemonize = daemonize.pid_file(pid_file);
         }
 
         let outcome = daemonize.execute();
-        
+
         match outcome.is_parent() {
             true => {
                 let mut b = [0u8; 1];
@@ -133,25 +131,26 @@ fn main() {
                     eprintln!("BoringTun failed to start");
                     exit(1);
                 };
-            },
+            }
             false => {
-                let log_file = OpenOptions::new().create(true).append(true).open(&log).unwrap_or_else(move |_| panic!("Could not create log file {}", &log));
-                
+                let log_file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(log)
+                    .unwrap_or_else(move |_| panic!("Could not create log file {}", &log));
+
                 let (non_blocking, _guard) = tracing_appender::non_blocking(log_file);
 
-
-                
                 tracing_subscriber::fmt()
-                .with_thread_ids(true)
-                .with_max_level(log_level)
-                .with_writer(non_blocking)
-                .with_ansi(false)
-                .init();
+                    .with_thread_ids(true)
+                    .with_max_level(log_level)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
 
                 tracing::info!(message = "Started BoringTun child process");
             }
         }
-
     } else {
         tracing_subscriber::fmt()
             .pretty()

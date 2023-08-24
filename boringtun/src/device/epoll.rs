@@ -225,13 +225,13 @@ impl<H: Sync + Send> EventPoll<H> {
     pub fn wait(&self) -> WaitResult<'_, H> {
         let mut event = epoll_event { events: 0, u64: 0 };
         match unsafe { epoll_wait(self.epoll, &mut event, 1, -1) } {
-            -1 => { 
+            -1 => {
                 let err = io::Error::last_os_error();
                 if err.kind() == io::ErrorKind::Interrupted {
                     return WaitResult::Eintr();
                 }
-                return WaitResult::Error(err.to_string())
-            },
+                return WaitResult::Error(err.to_string());
+            }
             1 => {}
             _ => return WaitResult::Error("unexpected number of events returned".to_string()),
         }
@@ -243,7 +243,7 @@ impl<H: Sync + Send> EventPoll<H> {
             event: event_data,
             poll: self,
         };
-        
+
         if event.events & EPOLLHUP as u32 != 0 {
             // End of file flag
             WaitResult::EoF(guard)
