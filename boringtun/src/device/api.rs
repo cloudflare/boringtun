@@ -209,10 +209,7 @@ fn api_get<W: Write>(writer: &mut BufWriter<W>, d: &Device) -> i32 {
     0
 }
 
-fn api_set<R: Read>(
-    reader: &mut BufReader<R>,
-    d: &mut LockReadGuard<Device>,
-) -> i32 {
+fn api_set<R: Read>(reader: &mut BufReader<R>, d: &mut LockReadGuard<Device>) -> i32 {
     d.try_writeable(
         |device| device.trigger_yield(),
         |device| {
@@ -370,6 +367,12 @@ fn api_set_peer<R: Read>(
                     if res.is_err() {
                         return EINVAL;
                     }
+                    replace_ips = false;
+                    endpoint = None;
+                    keepalive = None;
+                    preshared_key = None;
+                    remove = false;
+                    update_only = false; // Reset update only
                     allowed_ips.clear(); //clear the vector content after update
                     match val.parse::<KeyBytes>() {
                         Ok(key_bytes) => public_key = key_bytes.0.into(),
