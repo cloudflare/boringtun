@@ -332,4 +332,8 @@ impl Tunn {
             None
         }
     }
+
+    pub fn set_persistent_keepalive(&mut self, keepalive: Option<u16>) {
+        self.timers.persistent_keepalive = usize::from(keepalive.unwrap_or(0));
+    }
 }

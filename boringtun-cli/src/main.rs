@@ -4,8 +4,8 @@
 use boringtun::device::drop_privileges::drop_privileges;
 use boringtun::device::{DeviceConfig, DeviceHandle};
 use clap::{Arg, Command};
-use daemonize::Daemonize;
-use std::fs::File;
+use daemonize::{Daemonize, Outcome};
+use std::fs::OpenOptions;
 use std::os::unix::net::UnixDatagram;
 use std::process::exit;
 use tracing::Level;
@@ -59,6 +59,17 @@ fn main() {
                 .env("WG_UAPI_FD")
                 .help("File descriptor for the user API")
                 .default_value("-1"),
+            Arg::new("pid-file")
+                .takes_value(true)
+                .long("pid-file")
+                .env("WG_PID_FILE")
+                .help("Write the process ID to a file"),
+            Arg::new("work-dir")
+                .takes_value(true)
+                .long("work-dir")
+                .env("WG_WORK_DIR")
+                .help("Working directory, default is /tmp")
+                .default_value("/tmp"),
             Arg::new("tun-fd")
                 .long("tun-fd")
                 .env("WG_TUN_FD")
@@ -100,43 +111,54 @@ fn main() {
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
     let _ = sock1.set_nonblocking(true);
 
-    let _guard;
+    let log = matches.value_of("log").unwrap();
 
     if background {
-        let log = matches.value_of("log").unwrap();
+        let mut daemonize =
+            Daemonize::new().working_directory(matches.value_of("work-dir").unwrap());
 
-        let log_file =
-            File::create(log).unwrap_or_else(|_| panic!("Could not create log file {}", log));
+        if let Some(pid_file) = matches.value_of("pid-file") {
+            daemonize = daemonize.pid_file(pid_file);
+        }
 
-        let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
+        let outcome = daemonize.execute();
 
-        _guard = guard;
+        match outcome {
+            Outcome::Parent(Ok(parent))=> {
 
-        tracing_subscriber::fmt()
-            .with_max_level(log_level)
-            .with_writer(non_blocking)
-            .with_ansi(false)
-            .init();
-
-        let daemonize = Daemonize::new()
-            .working_directory("/tmp")
-            .exit_action(move || {
                 let mut b = [0u8; 1];
                 if sock2.recv(&mut b).is_ok() && b[0] == 1 {
-                    println!("BoringTun started successfully");
+                    eprintln!("BoringTun started successfully");
+                    exit(parent.first_child_exit_code);
                 } else {
                     eprintln!("BoringTun failed to start");
                     exit(1);
                 };
-            });
+            }
+            Outcome::Child(Ok(_)) => {
+                let log_file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(log)
+                    .unwrap_or_else(move |_| panic!("Could not create log file {}", &log));
 
-        match daemonize.start() {
-            Ok(_) => tracing::info!("BoringTun started successfully"),
-            Err(e) => {
-                tracing::error!(error = ?e);
+                let (non_blocking, _guard) = tracing_appender::non_blocking(log_file);
+
+                tracing_subscriber::fmt()
+                    .with_thread_ids(true)
+                    .with_max_level(log_level)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
+
+                tracing::info!(message = "Started BoringTun child process");
+            }
+            Outcome::Parent(Err(e)) | Outcome::Child(Err(e)) => {
+                eprintln!("BoringTun failed to daemonize: {}", e);
                 exit(1);
             }
-        }
+        };
+
     } else {
         tracing_subscriber::fmt()
             .pretty()
@@ -174,8 +196,6 @@ fn main() {
     // Notify parent that tunnel initialization succeeded
     sock1.send(&[1]).unwrap();
     drop(sock1);
-
-    tracing::info!("BoringTun started successfully");
 
     device_handle.wait();
 }

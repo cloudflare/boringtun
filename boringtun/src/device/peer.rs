@@ -70,6 +70,21 @@ impl Peer {
         }
     }
 
+    pub fn update(
+        &mut self,
+        endpoint: Option<SocketAddr>,
+        allowed_ips: &[AllowedIP],
+        preshared_key: Option<[u8; 32]>,
+    ) {
+
+        if let Some(addr) = endpoint { 
+            self.set_endpoint(addr);
+        }
+        self.allowed_ips = allowed_ips.iter().map(|ip| (ip, ())).collect();
+        self.preshared_key = preshared_key;
+
+    }
+
     pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
         self.tunnel.update_timers(dst)
     }
