@@ -135,7 +135,11 @@ impl Tunn {
         }
 
         let time = self.timers[TimeCurrent];
-        self.timers[timer_name] = time;
+        if time.is_zero() {
+            self.timers[timer_name] = Duration::from_millis(1);
+        } else {
+            self.timers[timer_name] = time;
+        }
     }
 
     pub(super) fn timer_tick_session_established(
