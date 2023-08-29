@@ -319,10 +319,15 @@ impl Device {
             return self.remove_peer(&pub_key);
         }
 
-        // Update an existing peer
-        if self.peers.get(&pub_key).is_some() {
+        if let Some(peer) = self.peers.get(&pub_key) {
             // We already have a peer, we need to merge the existing config into the newly created one
-            panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
+            let mut peer_mut = peer.lock();
+
+            peer_mut.tunnel.set_persistent_keepalive(keepalive);
+            peer_mut.update(endpoint, allowed_ips, preshared_key);
+
+            tracing::info!("Peer updated");
+            return;
         }
 
         let next_index = self.next_index();
