@@ -100,10 +100,8 @@ impl Ord for Timespec {
 
 impl PartialEq for Timespec {
     fn eq(&self, other: &Self) -> bool {
-        (self.t.tv_sec, self.t.tv_nsec) == 
-        (other.t.tv_sec, other.t.tv_nsec)
+        (self.t.tv_sec, self.t.tv_nsec) == (other.t.tv_sec, other.t.tv_nsec)
     }
 }
 
 impl Eq for Timespec {}
-
