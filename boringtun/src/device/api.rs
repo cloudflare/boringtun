@@ -326,9 +326,8 @@ fn api_set_peer<R: Read>(
                     Ok(_) => {}
                     Err(_) => return EINVAL,
                 },
-                "remove" => match val.parse::<bool>() {
-                    Ok(true) => remove = true,
-                    Ok(false) => remove = false,
+                "remove" => match val.parse::<bool>().map(|val| remove = val) {
+                    Ok(_) => {}
                     Err(_) => return EINVAL,
                 },
                 "preshared_key" => match val.parse::<KeyBytes>() {
