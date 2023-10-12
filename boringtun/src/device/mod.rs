@@ -9,7 +9,7 @@ pub mod drop_privileges;
 mod integration_tests;
 pub mod peer;
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
 #[path = "kqueue.rs"]
 pub mod poll;
 
@@ -17,7 +17,7 @@ pub mod poll;
 #[path = "epoll.rs"]
 pub mod poll;
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
 #[path = "tun_darwin.rs"]
 pub mod tun;
 
@@ -78,7 +78,7 @@ pub enum Error {
     SetSockOpt(String),
     #[error("Invalid tunnel name")]
     InvalidTunnelName,
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     #[error("Get sockopt error: {0}")]
     GetSockOpt(io::Error),
     #[error("Get socket error: {0}")]

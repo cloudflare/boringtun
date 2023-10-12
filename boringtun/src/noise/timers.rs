@@ -10,19 +10,25 @@ use std::time::Duration;
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 
-#[cfg(not(any(feature = "mock-instant", target_os = "android", target_os = "ios")))]
+#[cfg(not(any(
+    feature = "mock-instant",
+    target_os = "android",
+    target_os = "ios",
+    target_os = "tvos"
+)))]
 use crate::sleepyinstant::Instant;
 
 #[cfg(all(
     not(feature = "mock-instant"),
-    any(target_os = "android", target_os = "ios")
+    any(target_os = "android", target_os = "ios", target_os = "tvos")
 ))]
 #[cfg_attr(target_os = "android", path = "./_instant_boottime_android.rs")]
 #[cfg_attr(target_os = "ios", path = "./_instant_boottime_ios.rs")]
+#[cfg_attr(target_os = "tvos", path = "./_instant_boottime_tvos.rs")]
 mod _instant_boottime;
 #[cfg(all(
     not(feature = "mock-instant"),
-    any(target_os = "android", target_os = "ios")
+    any(target_os = "android", target_os = "ios", target_os = "tvos")
 ))]
 use _instant_boottime::Instant;
 
