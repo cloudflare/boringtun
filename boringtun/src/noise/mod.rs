@@ -229,17 +229,16 @@ impl Tunn {
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
         rate_limiter: Option<Arc<RateLimiter>>,
-    ) -> Result<(), WireGuardError> {
+    ) {
         self.timers.should_reset_rr = rate_limiter.is_none();
         self.rate_limiter = rate_limiter.unwrap_or_else(|| {
             Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
         });
         self.handshake
-            .set_static_private(static_private, static_public)?;
+            .set_static_private(static_private, static_public);
         for s in &mut self.sessions {
             *s = None;
         }
-        Ok(())
     }
 
     /// Encapsulate a single packet from the tunnel interface.
@@ -605,8 +604,7 @@ mod tests {
 
         let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None);
 
-        let their_tun =
-            Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None);
+        let their_tun = Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None);
 
         (my_tun, their_tun)
     }
