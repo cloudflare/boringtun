@@ -334,8 +334,7 @@ impl Device {
             keepalive,
             next_index,
             None,
-        )
-        .unwrap();
+        );
 
         let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);
 

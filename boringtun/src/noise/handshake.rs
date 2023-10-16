@@ -375,19 +375,19 @@ impl NoiseParams {
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
         preshared_key: Option<[u8; 32]>,
-    ) -> Result<NoiseParams, WireGuardError> {
+    ) -> NoiseParams {
         let static_shared = static_private.diffie_hellman(&peer_static_public);
 
         let initial_sending_mac_key = b2s_hash(LABEL_MAC1, peer_static_public.as_bytes());
 
-        Ok(NoiseParams {
+        NoiseParams {
             static_public,
             static_private,
             peer_static_public,
             static_shared,
             sending_mac1_key: initial_sending_mac_key,
             preshared_key,
-        })
+        }
     }
 
     /// Set a new private key
@@ -415,15 +415,15 @@ impl Handshake {
         peer_static_public: x25519::PublicKey,
         global_idx: u32,
         preshared_key: Option<[u8; 32]>,
-    ) -> Result<Handshake, WireGuardError> {
+    ) -> Handshake {
         let params = NoiseParams::new(
             static_private,
             static_public,
             peer_static_public,
             preshared_key,
-        )?;
+        );
 
-        Ok(Handshake {
+        Handshake {
             params,
             next_index: global_idx,
             previous: HandshakeState::None,
@@ -432,7 +432,7 @@ impl Handshake {
             stamper: TimeStamper::new(),
             cookies: Default::default(),
             last_rtt: None,
-        })
+        }
     }
 
     pub(crate) fn is_in_progress(&self) -> bool {

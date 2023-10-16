@@ -198,18 +198,17 @@ impl Tunn {
         persistent_keepalive: Option<u16>,
         index: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
-    ) -> Result<Self, &'static str> {
+    ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
-        let tunn = Tunn {
+        Tunn {
             handshake: Handshake::new(
                 static_private,
                 static_public,
                 peer_static_public,
                 index << 8,
                 preshared_key,
-            )
-            .map_err(|_| "Invalid parameters")?,
+            ),
             sessions: Default::default(),
             current: Default::default(),
             tx_bytes: Default::default(),
@@ -221,9 +220,7 @@ impl Tunn {
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
             }),
-        };
-
-        Ok(tunn)
+        }
     }
 
     /// Update the private key and clear existing sessions
@@ -606,10 +603,10 @@ mod tests {
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
         let their_idx = OsRng.next_u32();
 
-        let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None).unwrap();
+        let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None);
 
         let their_tun =
-            Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None).unwrap();
+            Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None);
 
         (my_tun, their_tun)
     }
