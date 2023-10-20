@@ -350,6 +350,13 @@ fn api_set_peer(
                         preshared_key,
                     );
                     allowed_ips.clear(); //clear the vector content after update
+
+                    // Reset state for the next peer(s).
+                    replace_ips = false;
+                    keepalive = None;
+                    endpoint = None;
+                    remove = false;
+
                     match val.parse::<KeyBytes>() {
                         Ok(key_bytes) => public_key = key_bytes.0.into(),
                         Err(_) => return EINVAL,
