@@ -9,7 +9,7 @@ documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
 edition = "2021"
 
 [dependencies]
-daemonize = "0.4.1"
+daemonize = "0.5.0"
 clap = { version = "3.1.6", features = ["env"] }
 tracing = "0.1.31"
 tracing-subscriber = "0.3.9"
