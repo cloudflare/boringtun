@@ -375,19 +375,19 @@ impl NoiseParams {
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
         preshared_key: Option<[u8; 32]>,
-    ) -> Result<NoiseParams, WireGuardError> {
+    ) -> NoiseParams {
         let static_shared = static_private.diffie_hellman(&peer_static_public);
 
         let initial_sending_mac_key = b2s_hash(LABEL_MAC1, peer_static_public.as_bytes());
 
-        Ok(NoiseParams {
+        NoiseParams {
             static_public,
             static_private,
             peer_static_public,
             static_shared,
             sending_mac1_key: initial_sending_mac_key,
             preshared_key,
-        })
+        }
     }
 
     /// Set a new private key
@@ -395,7 +395,7 @@ impl NoiseParams {
         &mut self,
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
-    ) -> Result<(), WireGuardError> {
+    ) {
         // Check that the public key indeed matches the private key
         let check_key = x25519::PublicKey::from(&static_private);
         assert_eq!(check_key.as_bytes(), static_public.as_bytes());
@@ -404,7 +404,6 @@ impl NoiseParams {
         self.static_public = static_public;
 
         self.static_shared = self.static_private.diffie_hellman(&self.peer_static_public);
-        Ok(())
     }
 }
 
@@ -415,15 +414,15 @@ impl Handshake {
         peer_static_public: x25519::PublicKey,
         global_idx: u32,
         preshared_key: Option<[u8; 32]>,
-    ) -> Result<Handshake, WireGuardError> {
+    ) -> Handshake {
         let params = NoiseParams::new(
             static_private,
             static_public,
             peer_static_public,
             preshared_key,
-        )?;
+        );
 
-        Ok(Handshake {
+        Handshake {
             params,
             next_index: global_idx,
             previous: HandshakeState::None,
@@ -432,7 +431,7 @@ impl Handshake {
             stamper: TimeStamper::new(),
             cookies: Default::default(),
             last_rtt: None,
-        })
+        }
     }
 
     pub(crate) fn is_in_progress(&self) -> bool {
@@ -475,7 +474,7 @@ impl Handshake {
         &mut self,
         private_key: x25519::StaticSecret,
         public_key: x25519::PublicKey,
-    ) -> Result<(), WireGuardError> {
+    ) {
         self.params.set_static_private(private_key, public_key)
     }
 

@@ -292,17 +292,14 @@ pub unsafe extern "C" fn new_tunnel(
         Some(keep_alive)
     };
 
-    let tunnel = match Tunn::new(
+    let tunnel = Box::new(Mutex::new(Tunn::new(
         private_key,
         public_key,
         preshared_key,
         keep_alive,
         index,
         None,
-    ) {
-        Ok(t) => Box::new(Mutex::new(t)),
-        Err(_) => return ptr::null_mut(),
-    };
+    )));
 
     PANIC_HOOK.call_once(|| {
         // FFI won't properly unwind on panic, but it will if we cause a segmentation fault
