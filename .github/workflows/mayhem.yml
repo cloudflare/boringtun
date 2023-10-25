@@ -1,0 +1,76 @@
+name: Mayhem
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  NEW_MAC: Mayhemfile.new_mac
+  CHECK_TUN_NAME: Mayhemfile.check_tun_name
+
+jobs:
+  build:
+    name: ${{ matrix.os }} shared=${{ matrix.shared }} ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      packages: write
+      # required for all workflows
+      security-events: write
+
+      # only required for workflows in private repositories
+      actions: read
+      contents: read
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        shared: [false]
+        build_type: [Release]
+        include:
+          - os: ubuntu-latest
+            triplet: x64-linux
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      #- name: Start analysis for check_tun_name
+      #  uses: ForAllSecure/mcode-action@v1
+      #  with:
+      #    mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+      #    args: --image ${{ steps.meta.outputs.tags }} --duration 300 --file ${{ env.CHECK_TUN_NAME }}
+      #    sarif-output: sarif
+
+      - name: Start analysis for new_mac
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --duration 300 --file ${{ env.NEW_MAC }}
+          sarif-output: sarif
+
+      - name: Upload SARIF file(s)
+        uses: github/codeql-action/upload-sarif@v1
+        with:
+          sarif_file: sarif

@@ -1,0 +1,6 @@
+project: boringtun
+target: new_mac
+
+cmds:
+  - cmd: /new_mac
+
