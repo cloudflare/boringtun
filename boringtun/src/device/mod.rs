@@ -1098,6 +1098,10 @@ impl Device {
         )?;
         Ok(())
     }
+
+    pub fn iface(&self) -> &TunSocket {
+        &self.iface
+    }
 }
 
 /// A basic linear-feedback shift register implemented as xorshift, used to
