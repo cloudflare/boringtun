@@ -11,7 +11,7 @@ use std::process::exit;
 use tracing::Level;
 
 fn check_tun_name(_v: String) -> Result<(), String> {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     {
         if boringtun::device::tun::parse_utun_name(&_v).is_ok() {
             Ok(())
