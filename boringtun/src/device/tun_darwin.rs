@@ -116,6 +116,14 @@ impl TunSocket {
     }
 
     pub fn new(name: &str) -> Result<TunSocket, Error> {
+        // If the provided name appears to be a FD, use that.
+        let provided_fd = name.parse::<i32>();
+        if let Ok(fd) = provided_fd {
+            return Ok(TunSocket {
+                fd,
+            });
+        }
+
         let idx = parse_utun_name(name)?;
 
         let fd = match unsafe { socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL) } {
