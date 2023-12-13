@@ -112,7 +112,7 @@ pub struct DeviceConfig {
     pub use_connected_socket: bool,
     #[cfg(target_os = "linux")]
     pub use_multi_queue: bool,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub uapi_fd: i32,
 }
 
@@ -123,7 +123,7 @@ impl Default for DeviceConfig {
             use_connected_socket: true,
             #[cfg(target_os = "linux")]
             use_multi_queue: true,
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             uapi_fd: -1,
         }
     }
@@ -156,7 +156,7 @@ pub struct Device {
 
     rate_limiter: Option<Arc<RateLimiter>>,
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     uapi_fd: i32,
 }
 
@@ -235,9 +235,9 @@ impl DeviceHandle {
             iface: Arc::clone(&device.read().iface),
         };
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         let uapi_fd = -1;
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         let uapi_fd = device.read().uapi_fd;
 
         loop {
@@ -357,9 +357,9 @@ impl Device {
         let iface = Arc::new(TunSocket::new(name)?.set_non_blocking()?);
         let mtu = iface.mtu()?;
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         let uapi_fd = -1;
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         let uapi_fd = config.uapi_fd;
 
         let mut device = Device {
@@ -380,7 +380,7 @@ impl Device {
             cleanup_paths: Default::default(),
             mtu: AtomicUsize::new(mtu),
             rate_limiter: None,
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             uapi_fd,
         };
 
