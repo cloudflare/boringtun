@@ -297,7 +297,8 @@ impl Tunn {
                     .timers
                     .want_handshake_since
                     .map(|want_handshake_since| {
-                        (now - want_handshake_since) >= (KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+                        (now.saturating_sub(want_handshake_since))
+                            >= (KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
                     })
                     .unwrap_or_default()
                 {
