@@ -4,6 +4,7 @@
 pub mod errors;
 pub mod handshake;
 pub mod rate_limiter;
+pub mod safe_duration;
 
 mod session;
 mod timers;
@@ -769,7 +770,7 @@ mod tests {
         assert!(matches!(data, TunnResult::WriteToNetwork(_)));
 
         //Advance to timeout
-        mock_instant::MockClock::advance(REKEY_AFTER_TIME);
+        mock_instant::MockClock::advance(REKEY_AFTER_TIME.into());
         assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
         update_timer_results_in_handshake(&mut my_tun);
     }
@@ -783,7 +784,7 @@ mod tests {
         let packet = Tunn::parse_incoming_packet(&init).unwrap();
         assert!(matches!(packet, Packet::HandshakeInit(_)));
 
-        mock_instant::MockClock::advance(REKEY_TIMEOUT);
+        mock_instant::MockClock::advance(REKEY_TIMEOUT.into());
         update_timer_results_in_handshake(&mut my_tun)
     }
 

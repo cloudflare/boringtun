@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::errors::WireGuardError;
-use crate::noise::{Tunn, TunnResult};
+use crate::noise::{safe_duration::SafeDuration as Duration, Tunn, TunnResult};
 use std::mem;
 use std::ops::{Index, IndexMut};
-use std::time::Duration;
 
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
@@ -104,7 +103,7 @@ impl Timers {
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     pub(super) fn clear(&mut self) {
-        let now = Instant::now().duration_since(self.time_started);
+        let now = Instant::now().duration_since(self.time_started).into();
         for t in &mut self.timers[..] {
             *t = now;
         }
@@ -203,7 +202,7 @@ impl Tunn {
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded
         // to a second, as there is no real benefit to having highly accurate timers.
-        let now = time.duration_since(self.timers.time_started);
+        let now = time.duration_since(self.timers.time_started).into();
         self.timers[TimeCurrent] = now;
 
         self.update_session_timers(now);
@@ -297,8 +296,7 @@ impl Tunn {
                     .timers
                     .want_handshake_since
                     .map(|want_handshake_since| {
-                        (now.saturating_sub(want_handshake_since))
-                            >= (KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+                        (now - want_handshake_since) >= (KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
                     })
                     .unwrap_or_default()
                 {
@@ -343,13 +341,15 @@ impl Tunn {
         TunnResult::Done
     }
 
-    pub fn time_since_last_handshake(&self) -> Option<Duration> {
+    pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
-            let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
+            let duration_since_tun_start: Duration = Instant::now()
+                .duration_since(self.timers.time_started)
+                .into();
             let duration_since_session_established = self.timers[TimeSessionEstablished];
 
-            Some(duration_since_tun_start - duration_since_session_established)
+            duration_since_tun_start.checked_sub(duration_since_session_established)
         } else {
             None
         }
