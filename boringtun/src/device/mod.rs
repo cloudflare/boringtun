@@ -83,8 +83,6 @@ pub enum Error {
     GetSockOpt(io::Error),
     #[error("Get socket error: {0}")]
     GetSockName(String),
-    #[error("UDP read error: {0}")]
-    UDPRead(i32),
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[error("Timer error: {0}")]
     Timer(io::Error),
@@ -701,14 +699,18 @@ impl Device {
                         }
                         TunnResult::Err(e) => tracing::error!(message = "Timer error", error = ?e),
                         TunnResult::WriteToNetwork(packet) => {
-                            match endpoint_addr {
+                            let res = match endpoint_addr {
                                 SocketAddr::V4(_) => {
-                                    udp4.send_to(packet, &endpoint_addr.into()).ok()
+                                    udp4.send_to(packet, &endpoint_addr.into())
                                 }
                                 SocketAddr::V6(_) => {
-                                    udp6.send_to(packet, &endpoint_addr.into()).ok()
+                                    udp6.send_to(packet, &endpoint_addr.into())
                                 }
                             };
+
+                            if let Err(err) = res {
+                                tracing::warn!(message = "Failed to send timers request", error = ?err, dst = ?endpoint_addr);
+                            }
                         }
                         _ => panic!("Unexpected result from update_timers"),
                     };
@@ -765,18 +767,17 @@ impl Device {
                 while let Ok((packet_len, addr)) = udp.recv_from(src_buf) {
                     let packet = &t.src_buf[..packet_len];
                     // The rate limiter initially checks mac1 and mac2, and optionally asks to send a cookie
-                    let parsed_packet = match rate_limiter.verify_packet(
-                        Some(addr.as_socket().unwrap().ip()),
-                        packet,
-                        &mut t.dst_buf,
-                    ) {
-                        Ok(packet) => packet,
-                        Err(TunnResult::WriteToNetwork(cookie)) => {
-                            let _: Result<_, _> = udp.send_to(cookie, &addr);
-                            continue;
-                        }
-                        Err(_) => continue,
-                    };
+                    let parsed_packet =
+                        match rate_limiter.verify_packet(Some(addr.as_socket().unwrap().ip()), packet, &mut t.dst_buf) {
+                            Ok(packet) => packet,
+                            Err(TunnResult::WriteToNetwork(cookie)) => {
+                                if let Err(err) = udp.send_to(cookie, &addr) {
+                                    tracing::warn!(message = "Failed to send cookie", error = ?err, dst = ?addr);
+                                }
+                                continue;
+                            }
+                            Err(_) => continue,
+                        };
 
                     let peer = match &parsed_packet {
                         Packet::HandshakeInit(p) => {
@@ -812,7 +813,9 @@ impl Device {
                         TunnResult::Err(_) => continue,
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
-                            let _: Result<_, _> = udp.send_to(packet, &addr);
+                            if let Err(err) = udp.send_to(packet, &addr) {
+                                tracing::warn!(message = "Failed to send packet", error = ?err, dst = ?addr);
+                            }
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
@@ -855,7 +858,9 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            let _: Result<_, _> = udp.send_to(packet, &addr);
+                            if let Err(err) = udp.send_to(packet, &addr) {
+                                tracing::warn!(message = "Failed to flush queue", error = ?err, dst = ?addr);
+                            }
                         }
                     }
 
@@ -923,7 +928,9 @@ impl Device {
                         }
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
-                            let _: Result<_, _> = udp.send(packet);
+                            if let Err(err) = udp.send(packet) {
+                                tracing::warn!(message="Failed to write packet", error = ?err);
+                            }
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
@@ -972,7 +979,9 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            let _: Result<_, _> = udp.send(packet);
+                            if let Err(err) = udp.send(packet) {
+                                tracing::warn!(message="Failed to flush queue", error = ?err);
+                            }
                         }
                     }
 
@@ -1057,7 +1066,8 @@ impl Device {
                             let mut endpoint = peer.endpoint_mut();
                             if let Some(conn) = endpoint.conn.as_mut() {
                                 // Prefer to send using the connected socket
-                                if let Err(_) = conn.write(packet) {
+                                if let Err(err) = conn.write(packet) {
+                                    tracing::debug!(message = "Failed to send packet with the connected socket", error = ?err);
                                     drop(endpoint);
                                     peer.shutdown_endpoint();
                                 } else {
@@ -1069,23 +1079,29 @@ impl Device {
                                     );
                                 }
                             } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
-                                let _ = udp4.send_to(packet, &addr.into());
-                                tracing::trace!(
-                                    message = "Writing packet to network v4",
-                                    interface = ?t.iface.name(),
-                                    packet_length = packet.len(),
-                                    src_addr = ?addr,
-                                    public_key = public_key
-                                );
+                                if let Err(err) = udp4.send_to(packet, &addr.into()) {
+                                    tracing::warn!(message = "Failed to write packet to network v4", error = ?err, dst = ?addr);
+                                } else {
+                                    tracing::trace!(
+                                        message = "Writing packet to network v4",
+                                        interface = ?t.iface.name(),
+                                        packet_length = packet.len(),
+                                        src_addr = ?addr,
+                                        public_key = public_key
+                                    );
+                                }
                             } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
-                                let _ = udp6.send_to(packet, &addr.into());
-                                tracing::trace!(
-                                    message = "Writing packet to network v6",
-                                    interface = ?t.iface.name(),
-                                    packet_length = packet.len(),
-                                    src_addr = ?addr,
-                                    public_key = public_key
-                                );
+                                if let Err(err) = udp6.send_to(packet, &addr.into()) {
+                                    tracing::warn!(message = "Failed to write packet to network v6", error = ?err, dst = ?addr);
+                                } else {
+                                    tracing::trace!(
+                                        message = "Writing packet to network v6",
+                                        interface = ?t.iface.name(),
+                                        packet_length = packet.len(),
+                                        src_addr = ?addr,
+                                        public_key = public_key
+                                    );
+                                }
                             } else {
                                 tracing::error!("No endpoint");
                             }
