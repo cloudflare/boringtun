@@ -18,7 +18,8 @@ mod tests {
     use std::process::Command;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use std::thread;
+    use std::thread::{self, sleep};
+    use std::time::Duration;
 
     static NEXT_IFACE_IDX: AtomicUsize = AtomicUsize::new(100); // utun 100+ should be vacant during testing on CI
     static NEXT_PORT: AtomicUsize = AtomicUsize::new(61111); // Use ports starting with 61111, hoping we don't run into a taken port 🤷
@@ -623,6 +624,48 @@ mod tests {
 
         wg.add_peer(Arc::clone(&peer));
         wg.start();
+
+        let response = peer.get_request();
+
+        assert_eq!(response, encode(PublicKey::from(&peer.key).as_bytes()));
+    }
+
+    /// Test if wireguard can handle simple ipv4 connections with no traffic for over Reject-After-Time
+    #[test]
+    #[ignore]
+    fn test_wg_start_ipv4_traffic_flows_after_reject_after_time() {
+        let port = next_port();
+        let private_key = StaticSecret::new(OsRng);
+        let public_key = PublicKey::from(&private_key);
+        let addr_v4 = next_ip();
+        let addr_v6 = next_ip_v6();
+
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
+
+        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+
+        // Create a new peer whose endpoint is on this machine
+        let mut peer = Peer::new(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),
+            vec![AllowedIp {
+                ip: next_ip(),
+                cidr: 32,
+            }],
+        );
+
+        peer.start_in_container(&public_key, &addr_v4, port);
+
+        let peer = Arc::new(peer);
+
+        wg.add_peer(Arc::clone(&peer));
+        wg.start();
+
+        let response = peer.get_request();
+
+        assert_eq!(response, encode(PublicKey::from(&peer.key).as_bytes()));
+
+        sleep(Duration::from_secs(180 + 5));
 
         let response = peer.get_request();
 
