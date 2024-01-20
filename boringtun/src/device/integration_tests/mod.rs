@@ -864,15 +864,21 @@ mod tests {
     #[test]
     fn test_fd_leaks() {
         let n_before = count_fds();
-        {
+        let queue = {
             let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
             let response = wg.wg_get();
             assert!(response.ends_with("errno=0\n\n"));
-        }
+            let device = wg._device.device.read();
+            device.queue.clone()
+        };
+
         // WGHandle._device (DeviceHandle) triggers an exit notice to the queue. When Device is dropped the queue
         // (Arc<EventPoll<Handler>>) will eventually be dropped too. Only when the queue is dropped will the fds be
-        // closed. Therefore we have to wait enough time until the queue is dropped.
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        // closed. Wait until we are the last reference and then drop the queue.
+        while Arc::strong_count(&queue) > 1 {
+            std::thread::yield_now();
+        }
+        drop(queue); // dropping fds now
 
         let n_after = count_fds();
         assert_eq!(n_before, n_after);
