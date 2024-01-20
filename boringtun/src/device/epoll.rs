@@ -50,6 +50,17 @@ struct Event<H> {
 
 impl<H> Drop for EventPoll<H> {
     fn drop(&mut self) {
+        // The only other struct that holds EventRef is the Device, which will necessarily be
+        // dropped before EventPoll, so closing all fds is fine.
+        let events = self.events.lock();
+        events
+            .iter()
+            .enumerate()
+            .filter(|(_i, o)| o.is_some()) // This is inefficient but shouldn't be a problem
+            .for_each(|(i, _o)| {
+                unsafe { close(i as _) };
+            });
+
         unsafe { close(self.epoll) };
     }
 }
