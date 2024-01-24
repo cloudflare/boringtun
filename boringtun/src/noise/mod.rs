@@ -326,8 +326,7 @@ impl Tunn {
         let (packet, session) = self.handshake.receive_handshake_initialization(p, dst)?;
 
         // Store new session in ring buffer
-        let index = session.local_index();
-        self.set_session(index, session);
+        let index = self.set_session(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeLastPacketSent);
@@ -353,8 +352,7 @@ impl Tunn {
 
         let keepalive_packet = session.format_packet_data(&[], dst);
         // Store new session in ring buffer
-        let index = session.local_index();
-        self.set_session(index, session);
+        let index = self.set_session(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick_session_established(true, index); // New session established, we are the initiator
@@ -595,8 +593,11 @@ impl Tunn {
         self.sessions[index % N_SESSIONS].as_ref()
     }
 
-    fn set_session(&mut self, index: usize, session: Session) {
-        self.sessions[index % N_SESSIONS] = Some(session);
+    fn set_session(&mut self, session: Session) -> usize {
+        let index = session.local_index() % N_SESSIONS;
+        self.sessions[index] = Some(session);
+
+        index
     }
 }
 
