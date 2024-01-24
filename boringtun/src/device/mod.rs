@@ -679,7 +679,8 @@ impl Device {
                     if flush {
                         // Flush pending queue
                         while let TunnResult::WriteToNetwork(packet) =
-                            p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
+                            p.tunnel
+                                .decapsulate(None, &[], &mut t.dst_buf[..], Instant::now())
                         {
                             let _: Result<_, _> = udp.send_to(packet, &addr);
                         }
@@ -734,6 +735,7 @@ impl Device {
                         Some(peer_addr),
                         &t.src_buf[..read_bytes],
                         &mut t.dst_buf[..],
+                        Instant::now(),
                     ) {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
@@ -756,7 +758,8 @@ impl Device {
                     if flush {
                         // Flush pending queue
                         while let TunnResult::WriteToNetwork(packet) =
-                            p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
+                            p.tunnel
+                                .decapsulate(None, &[], &mut t.dst_buf[..], Instant::now())
                         {
                             let _: Result<_, _> = udp.send(packet);
                         }
@@ -816,7 +819,10 @@ impl Device {
                         None => continue,
                     };
 
-                    match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
+                    match peer
+                        .tunnel
+                        .encapsulate(src, &mut t.dst_buf[..], Instant::now())
+                    {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => {
                             tracing::error!(message = "Encapsulate error", error = ?e)
