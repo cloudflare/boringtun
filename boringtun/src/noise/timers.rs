@@ -140,9 +140,7 @@ impl Tunn {
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     fn clear_all(&mut self) {
-        for session in &mut self.sessions {
-            *session = None;
-        }
+        self.clear_sessions();
 
         self.packet_queue.clear();
 
@@ -312,15 +310,12 @@ impl Tunn {
     }
 
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
-        let current_session = self.current;
-        if self.sessions[current_session % super::N_SESSIONS].is_some() {
-            let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
-            let duration_since_session_established = self.timers[TimeSessionEstablished];
+        let _current = self.current_session()?; // Guard to ensure we have a session.
 
-            Some(duration_since_tun_start - duration_since_session_established)
-        } else {
-            None
-        }
+        let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
+        let duration_since_session_established = self.timers[TimeSessionEstablished];
+
+        Some(duration_since_tun_start - duration_since_session_established)
     }
 
     pub fn persistent_keepalive(&self) -> Option<u16> {
