@@ -49,6 +49,7 @@ use socket2::{Domain, Protocol, Type};
 use tun::TunSocket;
 
 use dev_lock::{Lock, LockReadGuard};
+use std::time::{Instant, SystemTime};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 
@@ -334,6 +335,11 @@ impl Device {
             keepalive,
             next_index,
             None,
+            Instant::now(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
         );
 
         let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);
@@ -461,7 +467,11 @@ impl Device {
             return;
         }
 
-        let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
+        let rate_limiter = Arc::new(RateLimiter::new(
+            &public_key,
+            HANDSHAKE_RATE_LIMIT,
+            Instant::now(),
+        ));
 
         for peer in self.peers.values_mut() {
             peer.lock().tunnel.set_static_private(
@@ -524,7 +534,7 @@ impl Device {
             // Reset the rate limiter every second give or take
             Box::new(|d, _| {
                 if let Some(r) = d.rate_limiter.as_ref() {
-                    r.reset_count()
+                    r.reset_count(Instant::now())
                 }
                 Action::Continue
             }),
@@ -669,7 +679,8 @@ impl Device {
                     if flush {
                         // Flush pending queue
                         while let TunnResult::WriteToNetwork(packet) =
-                            p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
+                            p.tunnel
+                                .decapsulate(None, &[], &mut t.dst_buf[..], Instant::now())
                         {
                             let _: Result<_, _> = udp.send_to(packet, &addr);
                         }
@@ -724,6 +735,7 @@ impl Device {
                         Some(peer_addr),
                         &t.src_buf[..read_bytes],
                         &mut t.dst_buf[..],
+                        Instant::now(),
                     ) {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
@@ -746,7 +758,8 @@ impl Device {
                     if flush {
                         // Flush pending queue
                         while let TunnResult::WriteToNetwork(packet) =
-                            p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
+                            p.tunnel
+                                .decapsulate(None, &[], &mut t.dst_buf[..], Instant::now())
                         {
                             let _: Result<_, _> = udp.send(packet);
                         }
@@ -806,7 +819,10 @@ impl Device {
                         None => continue,
                     };
 
-                    match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
+                    match peer
+                        .tunnel
+                        .encapsulate(src, &mut t.dst_buf[..], Instant::now())
+                    {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => {
                             tracing::error!(message = "Encapsulate error", error = ?e)
