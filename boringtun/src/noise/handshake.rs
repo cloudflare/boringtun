@@ -4,8 +4,6 @@
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
-#[cfg(not(feature = "mock-instant"))]
-use crate::sleepyinstant::Instant;
 use crate::x25519;
 use aead::{Aead, Payload};
 use blake2::digest::{FixedOutput, KeyInit};
@@ -14,10 +12,7 @@ use chacha20poly1305::XChaCha20Poly1305;
 use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
-use std::time::{Duration, SystemTime};
-
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
+use std::time::{Duration, Instant};
 
 pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
 pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
@@ -168,26 +163,24 @@ struct Tai64N {
 #[derive(Debug)]
 /// This struct computes a [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp from current system time
 struct TimeStamper {
-    duration_at_start: Duration,
-    instant_at_start: Instant,
+    unix_start: Duration,
+    instant_now: Instant,
 }
 
 impl TimeStamper {
     /// Create a new TimeStamper
-    pub fn new() -> TimeStamper {
+    pub fn new(instant_now: Instant, unix_now: u64) -> TimeStamper {
         TimeStamper {
-            duration_at_start: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap(),
-            instant_at_start: Instant::now(),
+            unix_start: Duration::from_secs(unix_now),
+            instant_now,
         }
     }
 
     /// Take time reading and generate a 12 byte timestamp
-    pub fn stamp(&self) -> [u8; 12] {
+    pub fn stamp(&self, now: Instant) -> [u8; 12] {
         const TAI64_BASE: u64 = (1u64 << 62) + 37;
         let mut ext_stamp = [0u8; 12];
-        let stamp = Instant::now().duration_since(self.instant_at_start) + self.duration_at_start;
+        let stamp = now.duration_since(self.instant_now) + self.unix_start;
         ext_stamp[0..8].copy_from_slice(&(stamp.as_secs() + TAI64_BASE).to_be_bytes());
         ext_stamp[8..12].copy_from_slice(&stamp.subsec_nanos().to_be_bytes());
         ext_stamp
@@ -414,6 +407,8 @@ impl Handshake {
         peer_static_public: x25519::PublicKey,
         global_idx: u32,
         preshared_key: Option<[u8; 32]>,
+        now: Instant,
+        unix_now: u64,
     ) -> Handshake {
         let params = NoiseParams::new(
             static_private,
@@ -428,7 +423,7 @@ impl Handshake {
             previous: HandshakeState::None,
             state: HandshakeState::None,
             last_handshake_timestamp: Tai64N::zero(),
-            stamper: TimeStamper::new(),
+            stamper: TimeStamper::new(now, unix_now),
             cookies: Default::default(),
             last_rtt: None,
         }
@@ -565,6 +560,7 @@ impl Handshake {
     pub(super) fn receive_handshake_response(
         &mut self,
         packet: HandshakeResponse,
+        now: Instant,
     ) -> Result<Session, WireGuardError> {
         // Check if there is a handshake awaiting a response and return the correct one
         let (state, is_previous) = match (&self.state, &self.previous) {
@@ -633,7 +629,7 @@ impl Handshake {
         let temp2 = b2s_hmac(&temp1, &[0x01]);
         let temp3 = b2s_hmac2(&temp1, &temp2, &[0x02]);
 
-        let rtt_time = Instant::now().duration_since(state.time_sent);
+        let rtt_time = now.duration_since(state.time_sent);
         self.last_rtt = Some(rtt_time.as_millis() as u32);
 
         if is_previous {
@@ -709,6 +705,7 @@ impl Handshake {
     pub(super) fn format_handshake_initiation<'a>(
         &mut self,
         dst: &'a mut [u8],
+        now: Instant,
     ) -> Result<&'a mut [u8], WireGuardError> {
         if dst.len() < super::HANDSHAKE_INIT_SZ {
             return Err(WireGuardError::DestinationBufferTooSmall);
@@ -766,12 +763,11 @@ impl Handshake {
         // key = HMAC(temp, initiator.chaining_key || 0x2)
         let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
         // msg.encrypted_timestamp = AEAD(key, 0, TAI64N(), initiator.hash)
-        let timestamp = self.stamper.stamp();
+        let timestamp = self.stamper.stamp(now);
         aead_chacha20_seal(encrypted_timestamp, &key, 0, &timestamp, &hash);
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
         hash = b2s_hash(&hash, encrypted_timestamp);
 
-        let time_now = Instant::now();
         self.previous = std::mem::replace(
             &mut self.state,
             HandshakeState::InitSent(HandshakeInitSentState {
@@ -779,7 +775,7 @@ impl Handshake {
                 chaining_key,
                 hash,
                 ephemeral_private,
-                time_sent: time_now,
+                time_sent: now,
             }),
         );
 
