@@ -323,6 +323,19 @@ impl Tunn {
         }
     }
 
+    /// Time since we last received a packet.
+    pub fn time_since_last_received(&self) -> Option<Duration> {
+        let current_session = self.current;
+        if self.sessions[current_session % super::N_SESSIONS].is_some() {
+            let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
+            let duration_since_last_packet = self.timers[TimeLastPacketReceived];
+
+            Some(duration_since_tun_start - duration_since_last_packet)
+        } else {
+            None
+        }
+    }
+
     pub fn persistent_keepalive(&self) -> Option<u16> {
         let keepalive = self.timers.persistent_keepalive;
 
