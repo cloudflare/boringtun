@@ -99,7 +99,7 @@ impl<H: Sync + Send> EventPoll<H> {
 
     /// Add and enable a new write event with the factory.
     /// The event is triggered when a Write operation on the provided trigger becomes possible
-    /// For TCP sockets it means that the socket was succesfully connected
+    /// For TCP sockets it means that the socket was successfully connected
     #[allow(dead_code)]
     pub fn new_write_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
         // Create an event descriptor
