@@ -119,6 +119,8 @@ impl Peer {
         let udp_conn =
             socket2::Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::UDP))?;
         udp_conn.set_reuse_address(true)?;
+        // SO_REUSEPORT is not really needed here, as long as the wildcard address is used in the bind
+        udp_conn.set_reuse_port(true)?;
         let bind_addr = if addr.is_ipv4() {
             SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into()
         } else {

@@ -428,6 +428,8 @@ impl Device {
         // Then open new sockets and bind to the port
         let udp_sock4 = socket2::Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
         udp_sock4.set_reuse_address(true)?;
+        // SO_REUSEPORT is not really needed here, as long as the wildcard address is used in the bind
+        udp_sock4.set_reuse_port(true)?;
         udp_sock4.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into())?;
         udp_sock4.set_nonblocking(true)?;
 
@@ -438,6 +440,8 @@ impl Device {
 
         let udp_sock6 = socket2::Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
         udp_sock6.set_reuse_address(true)?;
+        // SO_REUSEPORT is not really needed here, as long as the wildcard address is used in the bind
+        udp_sock6.set_reuse_port(true)?;
         udp_sock6.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0).into())?;
         udp_sock6.set_nonblocking(true)?;
 
