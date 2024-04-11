@@ -5,7 +5,7 @@ version = "0.6.0"
 authors = ["Noah Kennedy <nkennedy@cloudflare.com>", "Andy Grover <agrover@cloudflare.com>", "Jeff Hiner <jhiner@cloudflare.com>"]
 license = "BSD-3-Clause"
 repository = "https://github.com/cloudflare/boringtun"
-documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
+readme = "../README.md"
 edition = "2021"
 
 [dependencies]
