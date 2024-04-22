@@ -150,11 +150,14 @@ pub fn api_exec<R: Read, W: Write>(
     let mut cmd = String::new();
     if reader.read_line(&mut cmd).is_ok() {
         cmd.pop(); // pop the new line character
-        let status = match cmd.as_ref() {
-            // Only two commands are legal according to the protocol, get=1 and set=1.
-            "get=1" => api_get(writer, d),
-            "set=1" => api_set(reader, d),
-            _ => EIO,
+        let status = match d.closed {
+            true => ENOENT,
+            false => match cmd.as_ref() {
+                // Only two commands are legal according to the protocol, get=1 and set=1.
+                "get=1" => api_get(writer, d),
+                "set=1" => api_set(reader, d),
+                _ => EIO,
+            },
         };
         // The protocol requires to return an error code as the response, or zero on success
         writeln!(writer, "errno={}\n", status).ok();
