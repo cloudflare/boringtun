@@ -533,10 +533,8 @@ impl Tunn {
 
     /// Push packet to the front of the queue
     fn requeue_packet(&mut self, packet: Vec<u8>) {
-        if self.packet_queue.len() < self.max_queue_depth {
-            // Drop if too many are already in queue
-            self.packet_queue.push_front(packet);
-        }
+        self.packet_queue.push_front(packet);
+        assert!(self.packet_queue.len() <= self.max_queue_depth);
     }
 
     fn dequeue_packet(&mut self) -> Option<Vec<u8>> {
