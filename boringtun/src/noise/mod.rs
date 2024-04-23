@@ -37,7 +37,6 @@ const IPV6_IP_SZ: usize = 16;
 
 const IP_LEN_SZ: usize = 2;
 
-const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
 const N_SESSIONS: usize = 8;
 
@@ -71,6 +70,8 @@ pub struct Tunn {
     tx_bytes: usize,
     rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
+    /// Maximum number of packets to queue when there is no session (0 to disable queuing)
+    max_queue_depth: usize,
 }
 
 type MessageType = u32;
@@ -198,6 +199,7 @@ impl Tunn {
         persistent_keepalive: Option<u16>,
         index: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
+        max_queue_depth: usize,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -220,6 +222,7 @@ impl Tunn {
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
             }),
+            max_queue_depth,
         }
     }
 
@@ -522,7 +525,7 @@ impl Tunn {
 
     /// Push packet to the back of the queue
     fn queue_packet(&mut self, packet: &[u8]) {
-        if self.packet_queue.len() < MAX_QUEUE_DEPTH {
+        if self.packet_queue.len() < self.max_queue_depth {
             // Drop if too many are already in queue
             self.packet_queue.push_back(packet.to_vec());
         }
@@ -530,7 +533,7 @@ impl Tunn {
 
     /// Push packet to the front of the queue
     fn requeue_packet(&mut self, packet: Vec<u8>) {
-        if self.packet_queue.len() < MAX_QUEUE_DEPTH {
+        if self.packet_queue.len() < self.max_queue_depth {
             // Drop if too many are already in queue
             self.packet_queue.push_front(packet);
         }
@@ -602,9 +605,9 @@ mod tests {
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
         let their_idx = OsRng.next_u32();
 
-        let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None);
+        let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None, 256);
 
-        let their_tun = Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None);
+        let their_tun = Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None, 256);
 
         (my_tun, their_tun)
     }

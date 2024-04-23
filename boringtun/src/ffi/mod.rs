@@ -299,6 +299,7 @@ pub unsafe extern "C" fn new_tunnel(
         keep_alive,
         index,
         None,
+        256,
     )));
 
     PANIC_HOOK.call_once(|| {
