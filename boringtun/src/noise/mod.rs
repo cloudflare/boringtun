@@ -525,9 +525,10 @@ impl Tunn {
 
     /// Push packet to the back of the queue
     fn queue_packet(&mut self, packet: &[u8]) {
-        if self.packet_queue.len() < self.max_queue_depth {
-            // Drop if too many are already in queue
-            self.packet_queue.push_back(packet.to_vec());
+        self.packet_queue.push_back(packet.to_vec());
+        if self.packet_queue.len() > self.max_queue_depth {
+            // Drop oldest packet if too many are already in queue
+            self.packet_queue.pop_front();
         }
     }
 
