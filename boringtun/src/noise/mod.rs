@@ -256,6 +256,14 @@ impl Tunn {
         Ok(())
     }
 
+    /// Update the preshared key and clear sessions
+    pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+        self.handshake.set_preshared_key(preshared_key);
+        for s in &mut self.sessions {
+            *s = None;
+        }
+    }
+
     /// Encapsulate a single packet from the tunnel interface.
     /// Returns TunnResult.
     ///
