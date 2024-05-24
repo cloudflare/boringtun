@@ -26,7 +26,7 @@ pub struct Peer {
     index: u32,
     endpoint: RwLock<Endpoint>,
     allowed_ips: RwLock<AllowedIps<()>>,
-    preshared_key: RwLock<Option<[u8; 32]>>,
+    preshared_key: Option<[u8; 32]>,
     protect: Arc<dyn MakeExternalBoringtun>,
 }
 
@@ -71,7 +71,7 @@ impl Peer {
                 conn: None,
             }),
             allowed_ips: RwLock::new(allowed_ips.iter().map(|ip| (ip, ())).collect()),
-            preshared_key: RwLock::new(preshared_key),
+            preshared_key,
             protect,
         }
     }
@@ -191,13 +191,13 @@ impl Peer {
     }
 
     pub fn preshared_key(&self) -> Option<[u8; 32]> {
-        *self.preshared_key.read()
+        self.preshared_key
     }
 
-    pub fn set_preshared_key(&self, key: [u8; 32]) {
-        let mut preshared_key = self.preshared_key.write();
-
-        let _ = preshared_key.replace(key);
+    pub fn set_preshared_key(&mut self, key: [u8; 32]) {
+        let key = if key == [0; 32] { None } else { Some(key) };
+        self.preshared_key = key;
+        self.tunnel.set_preshared_key(key);
     }
 
     pub fn index(&self) -> u32 {

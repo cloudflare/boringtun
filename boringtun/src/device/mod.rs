@@ -813,7 +813,10 @@ impl Device {
                         .handle_verified_packet(parsed_packet, &mut t.dst_buf[..])
                     {
                         TunnResult::Done => {}
-                        TunnResult::Err(_) => continue,
+                        TunnResult::Err(err) => {
+                            tracing::warn!(message = "Failed to handle packet", error = ?err);
+                            continue;
+                        },
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
                             if let Err(err) = udp.send_to(packet, &addr) {
