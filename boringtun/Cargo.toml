@@ -1,14 +1,15 @@
 [package]
-name = "boringtun"
-description = "an implementation of the WireGuard® protocol designed for portability and speed"
+name = "boringtun-easytier"
+description = "an implementation of the WireGuard® protocol designed for portability and speed. modified version for EasyTier."
 version = "0.6.0"
 authors = [
     "Noah Kennedy <nkennedy@cloudflare.com>",
     "Andy Grover <agrover@cloudflare.com>",
     "Jeff Hiner <jhiner@cloudflare.com>",
+    "Sijie Sun <sunsijie@buaa.edu.cn>",
 ]
 license = "BSD-3-Clause"
-repository = "https://github.com/cloudflare/boringtun"
+repository = "https://github.com/EasyTier/boringtun"
 documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
 edition = "2018"
 
