@@ -5,6 +5,7 @@ use super::Error;
 use libc::*;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
+use tracing::error;
 
 const TUNGETIFF: u64 = 0x8004_54D2;
 #[cfg(target_os = "linux")]
@@ -99,7 +100,16 @@ impl TunSocket {
             ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
 
             if unsafe { ioctl(fd, TUNSETIFF as _, &ifr) } < 0 {
-                return Err(Error::IOCtl(io::Error::last_os_error()));
+                let error = Error::IOCtl(io::Error::last_os_error());
+                let flags = unsafe { format!("{:x}", ifr.ifr_ifru.ifru_flags) };
+                error!(
+                    ?error,
+                    op = "TUNSETIFF",
+                    name,
+                    flags,
+                    "Failed to configure tunnel"
+                );
+                return Err(error);
             }
         }
 
@@ -121,7 +131,9 @@ impl TunSocket {
         };
 
         if unsafe { ioctl(fd, TUNGETIFF as _, &ifr) } < 0 {
-            return Err(Error::IOCtl(io::Error::last_os_error()));
+            let error = Error::IOCtl(io::Error::last_os_error());
+            error!(?error, op = "TUNGETIFF", "Failed to get tunnel info");
+            return Err(error);
         }
         let flags = unsafe { ifr.ifr_ifru.ifru_flags };
         if flags & IFF_TUN as c_short == 0 {
@@ -137,7 +149,16 @@ impl TunSocket {
                 ifru_flags: (IFF_TUN | IFF_MULTI_QUEUE) as _,
             };
             if unsafe { ioctl(fd, TUNSETIFF as _, &ifr) } < 0 {
-                return Err(Error::IOCtl(io::Error::last_os_error()));
+                let error = Error::IOCtl(io::Error::last_os_error());
+                let flags = unsafe { format!("{:x}", ifr.ifr_ifru.ifru_flags) };
+                error!(
+                    ?error,
+                    op = "TUNSETIFF",
+                    name,
+                    flags,
+                    "Failed to configure tunnel flags"
+                );
+                return Err(error);
             }
         }
 
@@ -180,7 +201,14 @@ impl TunSocket {
         ifr.ifr_name[..iface_name.len()].copy_from_slice(iface_name);
 
         if unsafe { ioctl(fd, SIOCGIFMTU as _, &ifr) } < 0 {
-            return Err(Error::IOCtl(io::Error::last_os_error()));
+            let error = Error::IOCtl(io::Error::last_os_error());
+            error!(
+                ?error,
+                op = "SIOCGIFMTU",
+                name,
+                "Failed to get mtu for tunnel"
+            );
+            return Err(error);
         }
 
         unsafe { close(fd) };
