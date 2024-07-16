@@ -107,11 +107,7 @@ impl Peer {
         }
     }
 
-    pub fn connect_endpoint(
-        &self,
-        port: u16,
-        fwmark: Option<u32>,
-    ) -> Result<socket2::Socket, Error> {
+    pub fn connect_endpoint(&self, port: u16) -> Result<socket2::Socket, Error> {
         let mut endpoint = self.endpoint.write();
 
         if endpoint.conn.is_some() {
@@ -123,7 +119,7 @@ impl Peer {
             .expect("Attempt to connect to undefined endpoint");
 
         let udp_conn =
-            socket2::Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::UDP))?;
+            socket2::Socket::new(Domain::for_address(addr), Type::DGRAM, Some(Protocol::UDP))?;
         udp_conn.set_reuse_address(true)?;
         let bind_addr = if addr.is_ipv4() {
             SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into()
@@ -131,14 +127,11 @@ impl Peer {
             SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0).into()
         };
         udp_conn.bind(&bind_addr)?;
-        udp_conn.connect(&addr.into())?;
         udp_conn.set_nonblocking(true)?;
+        // fw_mark is being set inside make_external(), so no need to set it twice as in Cloudflare's repo.
         self.protect.make_external(udp_conn.as_raw_fd());
-
-        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-        if let Some(fwmark) = fwmark {
-            udp_conn.set_mark(fwmark)?;
-        }
+        // Also mind that all socket setup functions should be called before .connect().
+        udp_conn.connect(&addr.into())?;
 
         tracing::info!(
             message="Connected endpoint",
@@ -202,5 +195,33 @@ impl Peer {
 
     pub fn index(&self) -> u32 {
         self.index
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    // Introduced this test to prevent LLT-5351 recurring in the future:
+    #[test]
+    fn test_connect_endpoint() {
+        let a_secret_key = StaticSecret::random_from_rng(&mut rand::rngs::StdRng::from_entropy());
+
+        let b_secret_key = StaticSecret::random_from_rng(&mut rand::rngs::StdRng::from_entropy());
+        let b_public_key = PublicKey::from(&b_secret_key);
+
+        let tunnel = Tunn::new(a_secret_key, b_public_key, None, None, 0, None).unwrap();
+        let peer = Peer::new(
+            tunnel,
+            0,
+            Some(SocketAddr::new(IpAddr::from([1, 2, 3, 4]), 54321)),
+            &[],
+            None,
+            Arc::new(crate::device::MakeExternalBoringtunNoop),
+        );
+
+        peer.connect_endpoint(12345).unwrap();
     }
 }
