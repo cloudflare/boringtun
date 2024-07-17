@@ -199,9 +199,17 @@ fn api_get<W: Write>(writer: &mut BufWriter<W>, d: &Device) -> i32 {
             writeln!(writer, "allowed_ip={}/{}", addr, cidr);
         }
 
-        if let Some(time) = p.time_since_last_handshake() {
-            writeln!(writer, "last_handshake_time_sec={}", time.as_secs());
-            writeln!(writer, "last_handshake_time_nsec={}", time.subsec_nanos());
+        if let Some(last_handshake_time) = p.last_handshake_time() {
+            writeln!(
+                writer,
+                "last_handshake_time_sec={}",
+                last_handshake_time.as_secs()
+            );
+            writeln!(
+                writer,
+                "last_handshake_time_nsec={}",
+                last_handshake_time.subsec_nanos()
+            );
         }
 
         let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
