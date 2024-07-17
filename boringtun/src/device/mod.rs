@@ -35,7 +35,6 @@ use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::thread::JoinHandle;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -118,7 +117,10 @@ impl MakeExternalBoringtun for MakeExternalBoringtunNoop {
 
 pub struct DeviceHandle {
     pub device: Arc<Lock<Device>>, // The interface this handle owns
-    threads: Vec<JoinHandle<()>>,
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
+    threads: Vec<thread::JoinHandle<()>>,
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
+    threads: (dispatch::Group, Vec<dispatch::Queue>),
 }
 
 #[derive(Clone)]
@@ -191,14 +193,36 @@ impl DeviceHandle {
 
         let interface_lock = Arc::new(Lock::new(wg_interface));
 
-        let mut threads = vec![];
+        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
+        let threads = {
+            let group = dispatch::Group::create();
+            let mut queues = vec![];
+            for i in 0..n_threads {
+                queues.push({
+                    let dev = Arc::clone(&interface_lock);
+                    let group_clone = group.clone();
+                    let queue = dispatch::Queue::global(dispatch::QueuePriority::High);
+                    queue.exec_async(move || {
+                        group_clone.enter();
+                        DeviceHandle::event_loop(i, &dev)
+                    });
+                    queue
+                });
+            }
+            (group, queues)
+        };
 
-        for i in 0..n_threads {
-            threads.push({
-                let dev = Arc::clone(&interface_lock);
-                thread::spawn(move || DeviceHandle::event_loop(i, &dev))
-            });
-        }
+        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
+        let threads = {
+            let mut threads = vec![];
+            for i in 0..n_threads {
+                threads.push({
+                    let dev = Arc::clone(&interface_lock);
+                    thread::spawn(move || DeviceHandle::event_loop(i, &dev))
+                });
+            }
+            threads
+        };
 
         Ok(DeviceHandle {
             device: interface_lock,
@@ -221,10 +245,16 @@ impl DeviceHandle {
         self.device.read().drop_connected_sockets();
     }
 
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
     pub fn wait(&mut self) {
         while let Some(thread) = self.threads.pop() {
             thread.join().unwrap();
         }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
+    pub fn wait(&mut self) {
+        self.threads.0.wait();
     }
 
     pub fn clean(&mut self) {

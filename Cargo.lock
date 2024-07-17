@@ -89,6 +89,7 @@ dependencies = [
  "blake2",
  "chacha20poly1305",
  "criterion",
+ "dispatch",
  "etherparse",
  "hex",
  "hmac",
@@ -442,6 +443,11 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
+
+[[package]]
+name = "dispatch"
+version = "0.2.0"
+source = "git+https://github.com/NordSecurity/rust-dispatch.git?rev=13447cd7221a74ebcce1277ae0cfc9a421a28ec5#13447cd7221a74ebcce1277ae0cfc9a421a28ec5"
 
 [[package]]
 name = "either"
