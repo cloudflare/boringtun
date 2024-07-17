@@ -303,12 +303,12 @@ impl DeviceHandle {
         }
     }
 
-    fn new_thread_local(thread_id: usize, device_lock: &LockReadGuard<Device>) -> ThreadData {
+    fn new_thread_local(_thread_id: usize, device_lock: &LockReadGuard<Device>) -> ThreadData {
         #[cfg(target_os = "linux")]
         let t_local = ThreadData {
             src_buf: [0u8; MAX_UDP_SIZE],
             dst_buf: [0u8; MAX_UDP_SIZE],
-            iface: if thread_id == 0 || !device_lock.config.use_multi_queue {
+            iface: if _thread_id == 0 || !device_lock.config.use_multi_queue {
                 // For the first thread use the original iface
                 Arc::clone(&device_lock.iface)
             } else {
@@ -875,7 +875,7 @@ impl Device {
                     let ip_addr = addr.ip();
                     p.set_endpoint(addr);
                     if d.config.use_connected_socket {
-                        if let Ok(sock) = p.connect_endpoint(d.listen_port, d.fwmark) {
+                        if let Ok(sock) = p.connect_endpoint(d.listen_port) {
                             d.register_conn_handler(Arc::clone(peer), sock, ip_addr)
                                 .unwrap();
                         }
@@ -904,10 +904,10 @@ impl Device {
                 // The conn_handler handles packet received from a connected UDP socket, associated
                 // with a known peer, this saves us the hustle of finding the right peer. If another
                 // peer gets the same ip, it will be ignored until the socket does not expire.
-                let iface = &t.iface;
                 let mut iter = MAX_ITR;
 
                 let mut public_key = String::with_capacity(32);
+
                 for byte in peer.lock().tunnel.peer_static_public().as_bytes() {
                     let pub_symbol = format!("{:02X}", byte);
                     public_key.push_str(&pub_symbol);
@@ -940,15 +940,12 @@ impl Device {
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
-                                if !callback(
-                                    &peer.lock().tunnel.peer_static_public().to_bytes(),
-                                    packet,
-                                ) {
+                                if !callback(&p.tunnel.peer_static_public().to_bytes(), packet) {
                                     continue;
                                 }
                             }
                             if p.is_allowed_ip(addr) {
-                                iface.write4(packet);
+                                t.iface.write4(packet);
                                 tracing::trace!(
                                     message = "Writing packet to tunnel v4",
                                     interface = ?t.iface.name(),
@@ -960,15 +957,12 @@ impl Device {
                         }
                         TunnResult::WriteToTunnelV6(packet, addr) => {
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
-                                if !callback(
-                                    &peer.lock().tunnel.peer_static_public().to_bytes(),
-                                    packet,
-                                ) {
+                                if !callback(&p.tunnel.peer_static_public().to_bytes(), packet) {
                                     continue;
                                 }
                             }
                             if p.is_allowed_ip(addr) {
-                                iface.write6(packet);
+                                t.iface.write6(packet);
                                 tracing::trace!(
                                     message = "Writing packet to tunnel v6",
                                     interface = ?t.iface.name(),

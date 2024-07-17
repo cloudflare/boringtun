@@ -51,10 +51,10 @@ mod tests {
     }
 
     async fn setup() -> (WGClient, WGClient) {
-        let a_secret_key = StaticSecret::new(&mut rand::rngs::StdRng::from_entropy());
+        let a_secret_key = StaticSecret::random_from_rng(&mut rand::rngs::StdRng::from_entropy());
         let a_public_key = PublicKey::from(&a_secret_key);
 
-        let b_secret_key = StaticSecret::new(&mut rand::rngs::StdRng::from_entropy());
+        let b_secret_key = StaticSecret::random_from_rng(&mut rand::rngs::StdRng::from_entropy());
         let b_public_key = PublicKey::from(&b_secret_key);
 
         let a = WGClient::new(a_secret_key, b_public_key).await;

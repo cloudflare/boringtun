@@ -482,7 +482,6 @@ mod tests {
     fn test_wireguard_set() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
-        let own_public_key = PublicKey::from(&private_key);
 
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
         assert!(wg.wg_get().ends_with("errno=0\n\n"));
@@ -635,7 +634,7 @@ mod tests {
     #[ignore]
     fn test_wg_start_ipv4_traffic_flows_after_reject_after_time() {
         let port = next_port();
-        let private_key = StaticSecret::new(OsRng);
+        let private_key = StaticSecret::random_from_rng(OsRng);
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
