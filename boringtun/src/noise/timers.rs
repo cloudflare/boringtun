@@ -309,7 +309,7 @@ impl Tunn {
                 if !handshake_initiation_required {
                     // If a packet has been received from a given peer, but we have not sent one back
                     // to the given peer in KEEPALIVE ms, we send an empty packet.
-                    if data_packet_received > aut_packet_sent
+                    if data_packet_received >= aut_packet_sent
                         && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
                         && mem::replace(&mut self.timers.want_keepalive, false)
                     {
