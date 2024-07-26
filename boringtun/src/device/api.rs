@@ -179,27 +179,35 @@ fn api_get<W: Write>(writer: &mut BufWriter<W>, d: &Device) -> i32 {
         writeln!(writer, "fwmark={}", fwmark);
     }
 
-    for (k, p) in d.peers.iter() {
-        let p = p.lock();
+    for (k, peer) in d.peers.iter() {
+        let (keepalive, last_handshake_time, stats) = {
+            let tun = peer.tunnel.lock();
+            (
+                tun.persistent_keepalive(),
+                tun.last_handshake_time(),
+                tun.stats(),
+            )
+        };
+
         writeln!(writer, "public_key={}", encode_hex(k.as_bytes()));
 
-        if let Some(ref key) = p.preshared_key() {
+        if let Some(ref key) = peer.preshared_key() {
             writeln!(writer, "preshared_key={}", encode_hex(key));
         }
 
-        if let Some(keepalive) = p.persistent_keepalive() {
+        if let Some(keepalive) = keepalive {
             writeln!(writer, "persistent_keepalive_interval={}", keepalive);
         }
 
-        if let Some(ref addr) = p.endpoint().addr {
+        if let Some(ref addr) = peer.endpoint().addr {
             writeln!(writer, "endpoint={}", addr);
         }
 
-        for AllowedIP { addr, cidr } in p.allowed_ips() {
+        for AllowedIP { addr, cidr } in peer.allowed_ips() {
             writeln!(writer, "allowed_ip={}/{}", addr, cidr);
         }
 
-        if let Some(last_handshake_time) = p.last_handshake_time() {
+        if let Some(last_handshake_time) = last_handshake_time {
             writeln!(
                 writer,
                 "last_handshake_time_sec={}",
@@ -212,7 +220,7 @@ fn api_get<W: Write>(writer: &mut BufWriter<W>, d: &Device) -> i32 {
             );
         }
 
-        let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
+        let (_, tx_bytes, rx_bytes, ..) = stats;
 
         writeln!(writer, "rx_bytes={}", rx_bytes);
         writeln!(writer, "tx_bytes={}", tx_bytes);
