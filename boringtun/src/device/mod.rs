@@ -26,7 +26,7 @@ pub mod tun;
 pub mod tun;
 
 use std::collections::HashMap;
-use std::io::{self, BufReader, BufWriter, Write as _};
+use std::io::{self, BufReader, BufWriter};
 use std::mem::MaybeUninit;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::fd::RawFd;
@@ -42,7 +42,6 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::{Packet, Tunn, TunnResult};
 use crate::x25519;
 use allowed_ips::AllowedIps;
-use parking_lot::Mutex;
 use peer::{AllowedIP, Peer};
 use poll::{EventPoll, EventRef, WaitResult};
 use rand_core::{OsRng, RngCore};
@@ -624,7 +623,6 @@ impl Device {
         let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
 
         for peer in self.peers.values_mut() {
-
             if peer
                 .tunnel
                 .set_static_private(
@@ -888,7 +886,7 @@ impl Device {
                         while let TunnResult::WriteToNetwork(packet) =
                             peer.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
                         {
-                            if let Err(err) = udp.sendto(packet, addr) {
+                            if let Err(err) = udp.send_to(packet, &addr) {
                                 tracing::warn!(message = "Failed to flush queue", error = ?err, dst = ?addr);
                             }
                         }
@@ -944,8 +942,7 @@ impl Device {
 
                 while let Ok(read_bytes) = udp.recv(src_buf) {
                     let mut flush = false;
-                    let mut p = peer.lock();
-                    match p.tunnel.decapsulate(
+                    match peer.tunnel.decapsulate(
                         Some(peer_addr),
                         &t.src_buf[..read_bytes],
                         &mut t.dst_buf[..],
@@ -964,7 +961,7 @@ impl Device {
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
-                                if !callback(&p.tunnel.peer_static_public().to_bytes(), packet) {
+                                if !callback(&peer.tunnel.peer_static_public().to_bytes(), packet) {
                                     continue;
                                 }
                             }
@@ -1104,7 +1101,7 @@ impl Device {
                                     );
                                 }
                             } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
-                                if let Err(err) = udp4.sendto(packet, addr) {
+                                if let Err(err) = udp4.send_to(packet, &addr.into()) {
                                     tracing::warn!(message = "Failed to write packet to network v4", error = ?err, dst = ?addr);
                                 } else {
                                     tracing::trace!(

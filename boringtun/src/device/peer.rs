@@ -7,9 +7,12 @@ use socket2::{Domain, Protocol, Type};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::device::{AllowedIps, Error, MakeExternalBoringtun};
-use crate::noise::{Tunn, TunnResult};
+use crate::noise::errors::WireGuardError;
+use crate::noise::rate_limiter::RateLimiter;
+use crate::noise::{Packet, Tunn, TunnResult};
 
 use std::os::fd::AsRawFd;
 
@@ -21,7 +24,7 @@ pub struct Endpoint {
 
 pub struct Peer {
     /// The associated tunnel struct
-    pub(crate) tunnel: Tunn,
+    pub(crate) tunnel: TunnLock,
     /// The index the tunnel uses
     index: u32,
     endpoint: RwLock<Endpoint>,
@@ -64,28 +67,24 @@ impl Peer {
         protect: Arc<dyn MakeExternalBoringtun>,
     ) -> Peer {
         Peer {
-            tunnel,
+            tunnel: TunnLock::new(tunnel),
             index,
             endpoint: RwLock::new(Endpoint {
                 addr: endpoint,
                 conn: None,
             }),
             allowed_ips: RwLock::new(allowed_ips.iter().map(|ip| (ip, ())).collect()),
-            preshared_key,
+            preshared_key: RwLock::new(preshared_key),
             protect,
         }
     }
 
-    pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
+    pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
         self.tunnel.update_timers(dst)
     }
 
     pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
         self.endpoint.read()
-    }
-
-    pub(crate) fn endpoint_mut(&self) -> parking_lot::RwLockWriteGuard<'_, Endpoint> {
-        self.endpoint.write()
     }
 
     pub fn shutdown_endpoint(&self) {
@@ -200,6 +199,92 @@ impl Peer {
 
     pub fn index(&self) -> u32 {
         self.index
+    }
+}
+
+/// A portback of https://github.com/NordSecurity/boringtun/blob/51b0a45e6de490cfabbc09c8c14dccf1e0172c59/boringtun/src/noise/mod.rs#L136
+pub(crate) struct TunnLock {
+    inner: RwLock<Tunn>,
+}
+
+impl TunnLock {
+    pub fn new(tunn: Tunn) -> Self {
+        Self {
+            inner: RwLock::new(tunn),
+        }
+    }
+
+    /// Update the private key and clear existing sessions
+    pub fn set_static_private(
+        &self,
+        static_private: x25519_dalek::StaticSecret,
+        static_public: x25519_dalek::PublicKey,
+        rate_limiter: Option<Arc<RateLimiter>>,
+    ) -> Result<(), WireGuardError> {
+        self.inner
+            .write()
+            .set_static_private(static_private, static_public, rate_limiter)
+    }
+
+    /// Encapsulate a single packet from the tunnel interface.
+    /// Returns TunnResult.
+    ///
+    /// # Panics
+    /// Panics if dst buffer is too small.
+    /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
+    pub fn encapsulate<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+        self.inner.write().encapsulate(src, dst)
+    }
+
+    /// Receives a UDP datagram from the network and parses it.
+    /// Returns TunnResult.
+    ///
+    /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
+    /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
+    /// packet is processed.
+    pub fn decapsulate<'a>(
+        &self,
+        src_addr: Option<IpAddr>,
+        datagram: &[u8],
+        dst: &'a mut [u8],
+    ) -> TunnResult<'a> {
+        self.inner.write().decapsulate(src_addr, datagram, dst)
+    }
+
+    /// Return stats from the tunnel:
+    /// * Time since last handshake in seconds
+    /// * Data bytes sent
+    /// * Data bytes received
+    pub fn stats(&self) -> (Option<Duration>, usize, usize, f32, Option<u32>) {
+        self.inner.read().stats()
+    }
+
+    pub fn peer_static_public(&self) -> x25519_dalek::PublicKey {
+        self.inner.read().peer_static_public
+    }
+
+    pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
+        self.inner.write().update_timers(dst)
+    }
+
+    pub fn persistent_keepalive(&self) -> Option<u16> {
+        self.inner.read().persistent_keepalive()
+    }
+
+    pub fn set_persistent_keepalive(&self, keepalive: u16) {
+        self.inner.write().set_persistent_keepalive(keepalive);
+    }
+
+    pub fn time_since_last_handshake(&self) -> Option<Duration> {
+        self.inner.read().time_since_last_handshake()
+    }
+
+    pub fn last_handshake_time(&self) -> Option<Duration> {
+        self.inner.read().last_handshake_time()
+    }
+
+    pub fn handle_verified_packet<'a>(&self, packet: Packet, dst: &'a mut [u8]) -> TunnResult<'a> {
+        self.inner.write().handle_verified_packet(packet, dst)
     }
 }
 
