@@ -26,7 +26,7 @@ pub struct Peer {
     index: u32,
     endpoint: RwLock<Endpoint>,
     allowed_ips: RwLock<AllowedIps<()>>,
-    preshared_key: Option<[u8; 32]>,
+    preshared_key: RwLock<Option<[u8; 32]>>,
     protect: Arc<dyn MakeExternalBoringtun>,
 }
 
@@ -91,6 +91,7 @@ impl Peer {
     pub fn shutdown_endpoint(&self) {
         if let Some(conn) = self.endpoint.write().conn.take() {
             tracing::info!("Disconnecting from endpoint");
+            // TODO(pna) what does this Both do?
             conn.shutdown(Shutdown::Both).unwrap();
         }
     }
@@ -138,7 +139,7 @@ impl Peer {
             port=port,
             endpoint=?endpoint.addr.unwrap()
         );
-
+        // TODO(pna): WTF is this?
         endpoint.conn = Some(udp_conn.try_clone().unwrap());
 
         Ok(udp_conn)
@@ -183,18 +184,18 @@ impl Peer {
         self.tunnel.persistent_keepalive()
     }
 
-    pub fn set_persistent_keepalive(&mut self, keepalive: u16) {
+    pub fn set_persistent_keepalive(&self, keepalive: u16) {
         self.tunnel.set_persistent_keepalive(keepalive);
     }
 
     pub fn preshared_key(&self) -> Option<[u8; 32]> {
-        self.preshared_key
+        *self.preshared_key.read()
     }
 
-    pub fn set_preshared_key(&mut self, key: [u8; 32]) {
-        let key = if key == [0; 32] { None } else { Some(key) };
-        self.preshared_key = key;
-        self.tunnel.set_preshared_key(key);
+    pub fn set_preshared_key(&self, key: [u8; 32]) {
+        let mut preshared_key = self.preshared_key.write();
+
+        let _ = preshared_key.replace(key);
     }
 
     pub fn index(&self) -> u32 {
