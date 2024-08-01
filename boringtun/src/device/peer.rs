@@ -1,7 +1,7 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use socket2::{Domain, Protocol, Type};
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -9,7 +9,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::device::{AllowedIps, Error, MakeExternalBoringtun};
-use crate::noise::{Tunn, TunnResult};
+use crate::noise::Tunn;
 
 use std::os::fd::AsRawFd;
 
@@ -21,12 +21,14 @@ pub struct Endpoint {
 
 pub struct Peer {
     /// The associated tunnel struct
-    pub(crate) tunnel: Tunn,
+    pub(crate) tunnel: Mutex<Tunn>,
+    /// Public key of this peer in raw bytes and hex formats
+    pub(crate) public_key: ([u8; 32], String),
     /// The index the tunnel uses
     index: u32,
     endpoint: RwLock<Endpoint>,
     allowed_ips: RwLock<AllowedIps<()>>,
-    preshared_key: Option<[u8; 32]>,
+    preshared_key: RwLock<Option<[u8; 32]>>,
     protect: Arc<dyn MakeExternalBoringtun>,
 }
 
@@ -63,29 +65,29 @@ impl Peer {
         preshared_key: Option<[u8; 32]>,
         protect: Arc<dyn MakeExternalBoringtun>,
     ) -> Peer {
+        let pub_key = tunnel.peer_static_public();
+        let mut public_key_hex = String::with_capacity(32);
+        for byte in pub_key.as_bytes() {
+            let pub_symbol = format!("{:02X}", byte);
+            public_key_hex.push_str(&pub_symbol);
+        }
+
         Peer {
-            tunnel,
+            tunnel: Mutex::new(tunnel),
+            public_key: (pub_key.to_bytes(), public_key_hex),
             index,
             endpoint: RwLock::new(Endpoint {
                 addr: endpoint,
                 conn: None,
             }),
             allowed_ips: RwLock::new(allowed_ips.iter().map(|ip| (ip, ())).collect()),
-            preshared_key,
+            preshared_key: RwLock::new(preshared_key),
             protect,
         }
     }
 
-    pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.update_timers(dst)
-    }
-
     pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
         self.endpoint.read()
-    }
-
-    pub(crate) fn endpoint_mut(&self) -> parking_lot::RwLockWriteGuard<'_, Endpoint> {
-        self.endpoint.write()
     }
 
     pub fn shutdown_endpoint(&self) {
@@ -97,14 +99,13 @@ impl Peer {
 
     pub fn set_endpoint(&self, addr: SocketAddr) {
         let mut endpoint = self.endpoint.write();
-        if endpoint.addr != Some(addr) {
-            // We only need to update the endpoint if it differs from the current one
-            if let Some(conn) = endpoint.conn.take() {
-                conn.shutdown(Shutdown::Both).unwrap();
-            }
-
-            endpoint.addr = Some(addr);
+        if endpoint.addr == Some(addr) {
+            return;
         }
+        if let Some(conn) = endpoint.conn.take() {
+            conn.shutdown(Shutdown::Both).unwrap();
+        }
+        endpoint.addr = Some(addr);
     }
 
     pub fn connect_endpoint(&self, port: u16) -> Result<socket2::Socket, Error> {
@@ -171,30 +172,17 @@ impl Peer {
         *self.allowed_ips.write() = allowed_ips.iter().map(|ip| (ip, ())).collect();
     }
 
-    pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
-        self.tunnel.time_since_last_handshake()
-    }
-
-    pub fn last_handshake_time(&self) -> Option<std::time::Duration> {
-        self.tunnel.last_handshake_time()
-    }
-
-    pub fn persistent_keepalive(&self) -> Option<u16> {
-        self.tunnel.persistent_keepalive()
-    }
-
-    pub fn set_persistent_keepalive(&mut self, keepalive: u16) {
-        self.tunnel.set_persistent_keepalive(keepalive);
-    }
-
     pub fn preshared_key(&self) -> Option<[u8; 32]> {
-        self.preshared_key
+        self.preshared_key.read().clone()
     }
 
-    pub fn set_preshared_key(&mut self, key: [u8; 32]) {
+    /// Be carefull using this one, as it locks tunnel
+    pub fn set_preshared_key(&self, key: [u8; 32]) {
         let key = if key == [0; 32] { None } else { Some(key) };
-        self.preshared_key = key;
-        self.tunnel.set_preshared_key(key);
+
+        *self.preshared_key.write() = key;
+
+        self.tunnel.lock().set_preshared_key(key);
     }
 
     pub fn index(&self) -> u32 {
