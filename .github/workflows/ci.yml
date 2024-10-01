@@ -1,0 +1,35 @@
+name: CI
+on: [push, pull_request]
+permissions: {}
+
+jobs:
+  trigger:
+    if: |
+      github.event_name == 'push' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+      )
+    runs-on: ubuntu-22.04
+    steps:
+    - name: CI Trigger
+      run: echo "Triggering CI"
+
+  linters:
+    needs: trigger
+    uses: ./.github/workflows/linters.yml
+
+  tests:
+    needs: trigger
+    uses: ./.github/workflows/tests.yml
+
+  check-all-green:
+    needs:
+    - linters
+    - tests
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Collect statuses from all jobs
+      uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+      with:
+        jobs: ${{ toJSON(needs) }}

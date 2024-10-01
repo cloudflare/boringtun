@@ -1,0 +1,98 @@
+name: Linters
+on: [workflow_call]
+permissions: {}
+
+jobs:
+  rustfmt:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+    - uses: actions-rs/cargo@ae10961054e4aa8b4aa7dffede299aaf087aa33b # v1.0.3
+      with:
+        command: fmt
+        args: -- --check --color always
+
+  check:
+    strategy:
+      matrix:
+        include:
+        - os: ubuntu-22.04
+          packages: ""
+        - os: macos-12
+          packages: ""
+        - os: windows-2022
+          packages: "-p boringtun"
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+    - name: Install hack
+      run: cargo install --git https://github.com/taiki-e/cargo-hack.git cargo-hack --rev c0b517b9eefa27cdaf27cca5f1b186c00ef1af47 --locked
+    - run: cargo hack check --each-feature ${{ matrix.packages }}
+
+  clippy:
+    strategy:
+      matrix:
+        include:
+        - os: ubuntu-22.04
+          packages: ""
+        - os: macos-12
+          packages: ""
+        - os: windows-2022
+          packages: -p boringtun
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+    - name: Install hack
+      run: cargo install --git https://github.com/taiki-e/cargo-hack.git cargo-hack --rev c0b517b9eefa27cdaf27cca5f1b186c00ef1af47 --locked
+    - run: cargo hack clippy --each-feature ${{ matrix.packages }} --color always
+
+  udeps:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+    - uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+      with:
+        toolchain: nightly-2024-05-10
+        override: true
+    - uses: aig787/cargo-udeps-action@1cd634a329e14ccfbccfe7c96497d14dac24a743 # v1
+      with:
+        version: 'v0.1.47'
+        args: '--workspace --locked --output human --backend depinfo'
+
+# TODO: LLT-5668
+#   deny:
+#     runs-on: ubuntu-22.04
+#     steps:
+#     - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+#     - uses: EmbarkStudios/cargo-deny-action@3f4a782664881cf5725d0ffd23969fcce89fd868 # v1.6.3
+#       with:
+#         rust-version: 1.77.2 # NOTE: Runs in its own docker container and doesn't support toolchain files
+
+#   unused-features:
+#     runs-on: ubuntu-22.04
+#     steps:
+#     - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+#     - uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+#       with:
+#         toolchain: 1.79.0
+#         override: true
+#         default: true
+#     - uses: actions-rs/install@9da1d2adcfe5e7c16992e8242ca33a56b6d9b101
+#       with:
+#         crate: cargo-unused-features
+#         version: 0.2.0
+#     - name: Run cargo-unused-features
+#       run: |
+#         for dir in boringtun boringtun-cli; do
+#           pushd "$dir"
+#           unused-features analyze -l debug
+#           unused-features prune -l debug
+#           popd
+#         done
+#     - name: Check results
+#       run: |
+#         git restore Cargo.lock
+#         if ! git diff --quiet; then
+#           git diff
+#           exit 1
+#         fi
