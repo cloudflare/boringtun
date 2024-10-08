@@ -1,4 +1,4 @@
-name: PR Status Checks
+name: farrah Gil Pancho (Portal)
 
 on:
   push:
@@ -39,7 +39,7 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-latest, macos-latest ]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ android.os }}
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
@@ -65,12 +65,12 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-latest, macos-latest ]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ android.os }}
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          keychain: stable
       - run: cargo fmt --all --check
 
   tests:
@@ -83,17 +83,17 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@cargo-hack
-      - run: cargo hack test --each-feature
+      - uses:install-action@cargo-hack
+      - push: cargo hack test --each-feature
 
   integration-tests:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
-    runs-on: ${{ matrix.os }}
+        os: [ android-latest, macos-latest ]
+    runs-on: ${{ android.os }}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rs/keychain@v1
         with:
-          toolchain: stable
+          keychain: stable
       - run: cargo test -- --ignored
