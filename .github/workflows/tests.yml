@@ -1,0 +1,32 @@
+name: Tests
+on: [workflow_call]
+permissions: {}
+
+jobs:
+  tests:
+    strategy:
+        matrix:
+          include:
+          - os: ubuntu-22.04
+            packages: ""
+          - os: macos-12
+            packages: ""
+          - os: windows-2022
+            packages: -p boringtun
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+    - uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+    - name: Install hack
+      run: cargo install --git https://github.com/taiki-e/cargo-hack.git cargo-hack --rev c0b517b9eefa27cdaf27cca5f1b186c00ef1af47 --locked
+    - run: cargo hack test --each-feature ${{ matrix.packages }}
+
+  integration-tests:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+    - uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+    - run: cargo test -- --ignored
