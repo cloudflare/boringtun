@@ -9,6 +9,7 @@ use std::str::FromStr;
 
 use crate::device::{AllowedIps, Error};
 use crate::noise::{Tunn, TunnResult};
+use std::time::Instant;
 
 #[derive(Default, Debug)]
 pub struct Endpoint {
@@ -71,7 +72,7 @@ impl Peer {
     }
 
     pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.update_timers(dst)
+        self.tunnel.update_timers(Instant::now(), dst)
     }
 
     pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
