@@ -40,8 +40,7 @@ pub fn bench_x25519_shared_key(c: &mut Criterion) {
                 ring::agreement::agree_ephemeral(
                     my_private_key,
                     &my_public_key,
-                    ring::error::Unspecified,
-                    |_key_material| Ok(()),
+                    |_key_material| -> Result<(), ()> { Ok(()) },
                 )
                 .unwrap()
             },
