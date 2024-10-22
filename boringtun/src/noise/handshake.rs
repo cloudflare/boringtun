@@ -414,6 +414,7 @@ impl Handshake {
         peer_static_public: x25519::PublicKey,
         global_idx: u32,
         preshared_key: Option<[u8; 32]>,
+        now: Instant,
     ) -> Handshake {
         let params = NoiseParams::new(
             static_private,
@@ -428,7 +429,7 @@ impl Handshake {
             previous: HandshakeState::None,
             state: HandshakeState::None,
             last_handshake_timestamp: Tai64N::zero(),
-            stamper: TimeStamper::new(Instant::now()),
+            stamper: TimeStamper::new(now),
             cookies: Default::default(),
             last_rtt: None,
         }

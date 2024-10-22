@@ -214,6 +214,7 @@ impl Tunn {
                 peer_static_public,
                 index << 8,
                 preshared_key,
+                Instant::now(),
             ),
             sessions: Default::default(),
             current: Default::default(),
