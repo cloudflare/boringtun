@@ -85,8 +85,8 @@ impl Timers {
 
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
-    pub(super) fn clear(&mut self) {
-        let now = Instant::now().duration_since(self.time_started);
+    pub(super) fn clear(&mut self, now: Instant) {
+        let now = now.duration_since(self.time_started);
         for t in &mut self.timers[..] {
             *t = now;
         }
@@ -146,7 +146,7 @@ impl Tunn {
 
         self.packet_queue.clear();
 
-        self.timers.clear();
+        self.timers.clear(Instant::now());
     }
 
     fn update_session_timers(&mut self, time_now: Duration) {

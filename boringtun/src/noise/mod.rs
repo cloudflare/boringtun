@@ -443,7 +443,7 @@ impl Tunn {
         }
 
         if self.handshake.is_expired() {
-            self.timers.clear();
+            self.timers.clear(Instant::now());
         }
 
         let starting_new_handshake = !self.handshake.is_in_progress();
