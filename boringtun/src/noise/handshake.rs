@@ -183,11 +183,11 @@ impl TimeStamper {
         }
     }
 
-    /// Take time reading and generate a 12 byte timestamp
-    pub fn stamp(&self) -> [u8; 12] {
+    /// Generate a 12 byte timestamp for the given instant.
+    pub fn stamp(&self, now: Instant) -> [u8; 12] {
         const TAI64_BASE: u64 = (1u64 << 62) + 37;
         let mut ext_stamp = [0u8; 12];
-        let stamp = Instant::now().duration_since(self.instant_at_start) + self.duration_at_start;
+        let stamp = now.duration_since(self.instant_at_start) + self.duration_at_start;
         ext_stamp[0..8].copy_from_slice(&(stamp.as_secs() + TAI64_BASE).to_be_bytes());
         ext_stamp[8..12].copy_from_slice(&stamp.subsec_nanos().to_be_bytes());
         ext_stamp
@@ -770,7 +770,7 @@ impl Handshake {
         // key = HMAC(temp, initiator.chaining_key || 0x2)
         let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
         // msg.encrypted_timestamp = AEAD(key, 0, TAI64N(), initiator.hash)
-        let timestamp = self.stamper.stamp();
+        let timestamp = self.stamper.stamp(Instant::now());
         aead_chacha20_seal(encrypted_timestamp, &key, 0, &timestamp, &hash);
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
         hash = b2s_hash(&hash, encrypted_timestamp);
