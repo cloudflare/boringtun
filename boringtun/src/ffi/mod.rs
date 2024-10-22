@@ -378,7 +378,7 @@ pub unsafe extern "C" fn wireguard_force_handshake(
     let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.format_handshake_initiation(dst, true))
+    wireguard_result::from(tunnel.format_handshake_initiation_at(dst, true, Instant::now()))
 }
 
 /// Returns stats from the tunnel:

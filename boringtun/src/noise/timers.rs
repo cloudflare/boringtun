@@ -304,7 +304,7 @@ impl Tunn {
         }
 
         if handshake_initiation_required {
-            return self.format_handshake_initiation(dst, true);
+            return self.format_handshake_initiation_at(dst, true, time);
         }
 
         if keepalive_required {

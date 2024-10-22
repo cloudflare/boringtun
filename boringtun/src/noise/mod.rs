@@ -316,7 +316,7 @@ impl Tunn {
         // If there is no session, queue the packet for future retry
         self.queue_packet(src);
         // Initiate a new handshake if none is in progress
-        self.format_handshake_initiation(dst, false)
+        self.format_handshake_initiation_at(dst, false, Instant::now())
     }
 
     /// Receives a UDP datagram from the network and parses it.
@@ -501,25 +501,34 @@ impl Tunn {
 
     /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
     /// a new handshake, even if a handshake is already in progress (for example when a handshake times out)
+    #[deprecated(note = "Prefer `Tunn::format_handshake_initiation_at` to avoid time-impurity")]
     pub fn format_handshake_initiation<'a>(
         &mut self,
         dst: &'a mut [u8],
         force_resend: bool,
+    ) -> TunnResult<'a> {
+        self.format_handshake_initiation_at(dst, force_resend, Instant::now())
+    }
+
+    /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
+    /// a new handshake, even if a handshake is already in progress (for example when a handshake times out)
+    pub fn format_handshake_initiation_at<'a>(
+        &mut self,
+        dst: &'a mut [u8],
+        force_resend: bool,
+        now: Instant,
     ) -> TunnResult<'a> {
         if self.handshake.is_in_progress() && !force_resend {
             return TunnResult::Done;
         }
 
         if self.handshake.is_expired() {
-            self.timers.clear(Instant::now());
+            self.timers.clear(now);
         }
 
         let starting_new_handshake = !self.handshake.is_in_progress();
 
-        match self
-            .handshake
-            .format_handshake_initiation(dst, Instant::now())
-        {
+        match self.handshake.format_handshake_initiation(dst, now) {
             Ok(packet) => {
                 tracing::debug!("Sending handshake_initiation");
 
@@ -707,7 +716,7 @@ mod tests {
 
     fn create_handshake_init(tun: &mut Tunn) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let handshake_init = tun.format_handshake_initiation(&mut dst, false);
+        let handshake_init = tun.format_handshake_initiation_at(&mut dst, false, Instant::now());
         assert!(matches!(handshake_init, TunnResult::WriteToNetwork(_)));
         let handshake_init = if let TunnResult::WriteToNetwork(sent) = handshake_init {
             sent
