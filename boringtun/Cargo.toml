@@ -46,7 +46,7 @@ socket2 = { version = "0.4.7", features = ["all"], optional = true }
 thiserror = { version = "1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.25", default-features = false, features = [
+nix = { version = "0.29", default-features = false, features = [
     "time",
     "user",
 ] }
