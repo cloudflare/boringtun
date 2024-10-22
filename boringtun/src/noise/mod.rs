@@ -308,17 +308,18 @@ impl Tunn {
             _ => unreachable!(),
         };
 
-        self.handle_verified_packet(packet, dst)
+        self.handle_verified_packet(packet, dst, Instant::now())
     }
 
     pub(crate) fn handle_verified_packet<'a>(
         &mut self,
         packet: Packet,
         dst: &'a mut [u8],
+        now: Instant,
     ) -> TunnResult<'a> {
         match packet {
             Packet::HandshakeInit(p) => self.handle_handshake_init(p, dst),
-            Packet::HandshakeResponse(p) => self.handle_handshake_response(p, dst, Instant::now()),
+            Packet::HandshakeResponse(p) => self.handle_handshake_response(p, dst, now),
             Packet::PacketCookieReply(p) => self.handle_cookie_reply(p),
             Packet::PacketData(p) => self.handle_data(p, dst),
         }

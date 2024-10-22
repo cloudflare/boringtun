@@ -644,10 +644,11 @@ impl Device {
 
                     // We found a peer, use it to decapsulate the message+
                     let mut flush = false; // Are there packets to send from the queue?
-                    match p
-                        .tunnel
-                        .handle_verified_packet(parsed_packet, &mut t.dst_buf[..])
-                    {
+                    match p.tunnel.handle_verified_packet(
+                        parsed_packet,
+                        &mut t.dst_buf[..],
+                        Instant::now(),
+                    ) {
                         TunnResult::Done => {}
                         TunnResult::Err(_) => continue,
                         TunnResult::WriteToNetwork(packet) => {
