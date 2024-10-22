@@ -303,10 +303,12 @@ impl Tunn {
         }
 
         let mut cookie = [0u8; COOKIE_REPLY_SZ];
-        let packet = match self
-            .rate_limiter
-            .verify_packet(src_addr, datagram, &mut cookie)
-        {
+        let packet = match self.rate_limiter.verify_packet_at(
+            src_addr,
+            datagram,
+            &mut cookie,
+            Instant::now(),
+        ) {
             Ok(packet) => packet,
             Err(TunnResult::WriteToNetwork(cookie)) => {
                 dst[..cookie.len()].copy_from_slice(cookie);

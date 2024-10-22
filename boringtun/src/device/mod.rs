@@ -619,10 +619,11 @@ impl Device {
                 while let Ok((packet_len, addr)) = udp.recv_from(src_buf) {
                     let packet = &t.src_buf[..packet_len];
                     // The rate limiter initially checks mac1 and mac2, and optionally asks to send a cookie
-                    let parsed_packet = match rate_limiter.verify_packet(
+                    let parsed_packet = match rate_limiter.verify_packet_at(
                         Some(addr.as_socket().unwrap().ip()),
                         packet,
                         &mut t.dst_buf,
+                        Instant::now(),
                     ) {
                         Ok(packet) => packet,
                         Err(TunnResult::WriteToNetwork(cookie)) => {

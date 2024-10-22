@@ -176,11 +176,23 @@ impl RateLimiter {
     }
 
     /// Verify the MAC fields on the datagram, and apply rate limiting if needed
+    #[deprecated(note = "Prefer `RateLimiter::verify_packet_at` to avoid time-impurity")]
     pub fn verify_packet<'a, 'b>(
         &self,
         src_addr: Option<IpAddr>,
         src: &'a [u8],
         dst: &'b mut [u8],
+    ) -> Result<Packet<'a>, TunnResult<'b>> {
+        self.verify_packet_at(src_addr, src, dst, Instant::now())
+    }
+
+    /// Verify the MAC fields on the datagram, and apply rate limiting if needed
+    pub fn verify_packet_at<'a, 'b>(
+        &self,
+        src_addr: Option<IpAddr>,
+        src: &'a [u8],
+        dst: &'b mut [u8],
+        now: Instant,
     ) -> Result<Packet<'a>, TunnResult<'b>> {
         let packet = Tunn::parse_incoming_packet(src)?;
 
@@ -202,7 +214,7 @@ impl RateLimiter {
                 };
 
                 // Only given an address can we validate mac2
-                let cookie = self.current_cookie(addr, Instant::now());
+                let cookie = self.current_cookie(addr, now);
                 let computed_mac2 = b2s_keyed_mac_16_2(&cookie, msg, mac1);
 
                 if verify_slices_are_equal(&computed_mac2[..16], mac2).is_err() {
