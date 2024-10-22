@@ -87,7 +87,7 @@ impl RateLimiter {
     }
 
     /// Compute the correct cookie value based on the current secret value and the source IP
-    fn current_cookie(&self, addr: IpAddr) -> Cookie {
+    fn current_cookie(&self, addr: IpAddr, now: Instant) -> Cookie {
         let mut addr_bytes = [0u8; 16];
 
         match addr {
@@ -97,7 +97,7 @@ impl RateLimiter {
 
         // The current cookie for a given IP is the MAC(responder.changing_secret_every_two_minutes, initiator.ip_address)
         // First we derive the secret from the current time, the value of cur_counter would change with time.
-        let cur_counter = Instant::now().duration_since(self.start_time).as_secs() / COOKIE_REFRESH;
+        let cur_counter = now.duration_since(self.start_time).as_secs() / COOKIE_REFRESH;
 
         // Next we derive the cookie
         b2s_keyed_mac_16_2(&self.secret_key, &cur_counter.to_le_bytes(), &addr_bytes)
@@ -180,7 +180,7 @@ impl RateLimiter {
                 };
 
                 // Only given an address can we validate mac2
-                let cookie = self.current_cookie(addr);
+                let cookie = self.current_cookie(addr, Instant::now());
                 let computed_mac2 = b2s_keyed_mac_16_2(&cookie, msg, mac1);
 
                 if verify_slices_are_equal(&computed_mac2[..16], mac2).is_err() {
