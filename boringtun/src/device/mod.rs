@@ -50,6 +50,12 @@ use tun::TunSocket;
 
 use dev_lock::{Lock, LockReadGuard};
 
+#[cfg(feature = "mock-instant")]
+use mock_instant::Instant;
+
+#[cfg(not(feature = "mock-instant"))]
+use crate::sleepyinstant::Instant;
+
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 
 const MAX_UDP_SIZE: usize = (1 << 16) - 1;
@@ -461,7 +467,11 @@ impl Device {
             return;
         }
 
-        let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
+        let rate_limiter = Arc::new(RateLimiter::new_at(
+            &public_key,
+            HANDSHAKE_RATE_LIMIT,
+            Instant::now(),
+        ));
 
         for peer in self.peers.values_mut() {
             peer.lock().tunnel.set_static_private(

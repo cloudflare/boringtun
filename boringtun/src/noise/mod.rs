@@ -225,7 +225,11 @@ impl Tunn {
             timers: Timers::new(persistent_keepalive, rate_limiter.is_none(), Instant::now()),
 
             rate_limiter: rate_limiter.unwrap_or_else(|| {
-                Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
+                Arc::new(RateLimiter::new_at(
+                    &static_public,
+                    PEER_HANDSHAKE_RATE_LIMIT,
+                    Instant::now(),
+                ))
             }),
         }
     }
@@ -239,7 +243,11 @@ impl Tunn {
     ) {
         self.timers.should_reset_rr = rate_limiter.is_none();
         self.rate_limiter = rate_limiter.unwrap_or_else(|| {
-            Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
+            Arc::new(RateLimiter::new_at(
+                &static_public,
+                PEER_HANDSHAKE_RATE_LIMIT,
+                Instant::now(),
+            ))
         });
         self.handshake
             .set_static_private(static_private, static_public);

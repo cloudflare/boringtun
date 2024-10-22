@@ -53,6 +53,7 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
+    #[deprecated(note = "Prefer `RateLimiter::new_at` to avoid time-impurity")]
     pub fn new(public_key: &crate::x25519::PublicKey, limit: u64) -> Self {
         let mut secret_key = [0u8; 16];
         OsRng.fill_bytes(&mut secret_key);
@@ -66,6 +67,22 @@ impl RateLimiter {
             limit,
             count: AtomicU64::new(0),
             last_reset: Mutex::new(Instant::now()),
+        }
+    }
+
+    pub fn new_at(public_key: &crate::x25519::PublicKey, limit: u64, now: Instant) -> Self {
+        let mut secret_key = [0u8; 16];
+        OsRng.fill_bytes(&mut secret_key);
+        RateLimiter {
+            nonce_key: Self::rand_bytes(),
+            secret_key,
+            start_time: now,
+            nonce_ctr: AtomicU64::new(0),
+            mac1_key: b2s_hash(LABEL_MAC1, public_key.as_bytes()),
+            cookie_key: b2s_hash(LABEL_COOKIE, public_key.as_bytes()).into(),
+            limit,
+            count: AtomicU64::new(0),
+            last_reset: Mutex::new(now),
         }
     }
 
