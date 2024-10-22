@@ -333,13 +333,14 @@ impl Device {
             .as_ref()
             .expect("Private key must be set first");
 
-        let tunn = Tunn::new(
+        let tunn = Tunn::new_at(
             device_key_pair.0.clone(),
             pub_key,
             preshared_key,
             keepalive,
             next_index,
             None,
+            Instant::now(),
         );
 
         let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);

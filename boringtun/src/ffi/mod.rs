@@ -294,13 +294,14 @@ pub unsafe extern "C" fn new_tunnel(
         Some(keep_alive)
     };
 
-    let tunnel = Box::new(Mutex::new(Tunn::new(
+    let tunnel = Box::new(Mutex::new(Tunn::new_at(
         private_key,
         public_key,
         preshared_key,
         keep_alive,
         index,
         None,
+        Instant::now(),
     )));
 
     PANIC_HOOK.call_once(|| {

@@ -197,6 +197,7 @@ impl Tunn {
     }
 
     /// Create a new tunnel using own private key and the peer public key
+    #[deprecated(note = "Prefer `Tunn::new_at` to avoid time-impurity")]
     pub fn new(
         static_private: x25519::StaticSecret,
         peer_static_public: x25519::PublicKey,
@@ -204,6 +205,27 @@ impl Tunn {
         persistent_keepalive: Option<u16>,
         index: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
+    ) -> Self {
+        Self::new_at(
+            static_private,
+            peer_static_public,
+            preshared_key,
+            persistent_keepalive,
+            index,
+            rate_limiter,
+            Instant::now(),
+        )
+    }
+
+    /// Create a new tunnel using own private key and the peer public key
+    pub fn new_at(
+        static_private: x25519::StaticSecret,
+        peer_static_public: x25519::PublicKey,
+        preshared_key: Option<[u8; 32]>,
+        persistent_keepalive: Option<u16>,
+        index: u32,
+        rate_limiter: Option<Arc<RateLimiter>>,
+        now: Instant,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -214,7 +236,7 @@ impl Tunn {
                 peer_static_public,
                 index << 8,
                 preshared_key,
-                Instant::now(),
+                now,
             ),
             sessions: Default::default(),
             current: Default::default(),
@@ -222,13 +244,13 @@ impl Tunn {
             rx_bytes: Default::default(),
 
             packet_queue: VecDeque::new(),
-            timers: Timers::new(persistent_keepalive, rate_limiter.is_none(), Instant::now()),
+            timers: Timers::new(persistent_keepalive, rate_limiter.is_none(), now),
 
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new_at(
                     &static_public,
                     PEER_HANDSHAKE_RATE_LIMIT,
-                    Instant::now(),
+                    now,
                 ))
             }),
         }
@@ -633,9 +655,25 @@ mod tests {
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
         let their_idx = OsRng.next_u32();
 
-        let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None);
+        let my_tun = Tunn::new_at(
+            my_secret_key,
+            their_public_key,
+            None,
+            None,
+            my_idx,
+            None,
+            Instant::now(),
+        );
 
-        let their_tun = Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None);
+        let their_tun = Tunn::new_at(
+            their_secret_key,
+            my_public_key,
+            None,
+            None,
+            their_idx,
+            None,
+            Instant::now(),
+        );
 
         (my_tun, their_tun)
     }
