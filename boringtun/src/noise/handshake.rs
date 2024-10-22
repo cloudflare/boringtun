@@ -174,12 +174,12 @@ struct TimeStamper {
 
 impl TimeStamper {
     /// Create a new TimeStamper
-    pub fn new() -> TimeStamper {
+    pub fn new(now: Instant) -> TimeStamper {
         TimeStamper {
             duration_at_start: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap(),
-            instant_at_start: Instant::now(),
+            instant_at_start: now,
         }
     }
 
@@ -428,7 +428,7 @@ impl Handshake {
             previous: HandshakeState::None,
             state: HandshakeState::None,
             last_handshake_timestamp: Tai64N::zero(),
-            stamper: TimeStamper::new(),
+            stamper: TimeStamper::new(Instant::now()),
             cookies: Default::default(),
             last_rtt: None,
         }
