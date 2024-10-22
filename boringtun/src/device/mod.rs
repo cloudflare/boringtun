@@ -683,7 +683,8 @@ impl Device {
                     if flush {
                         // Flush pending queue
                         while let TunnResult::WriteToNetwork(packet) =
-                            p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
+                            p.tunnel
+                                .decapsulate_at(None, &[], &mut t.dst_buf[..], Instant::now())
                         {
                             let _: Result<_, _> = udp.send_to(packet, &addr);
                         }
@@ -734,10 +735,11 @@ impl Device {
                 while let Ok(read_bytes) = udp.recv(src_buf) {
                     let mut flush = false;
                     let mut p = peer.lock();
-                    match p.tunnel.decapsulate(
+                    match p.tunnel.decapsulate_at(
                         Some(peer_addr),
                         &t.src_buf[..read_bytes],
                         &mut t.dst_buf[..],
+                        Instant::now(),
                     ) {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
@@ -760,7 +762,8 @@ impl Device {
                     if flush {
                         // Flush pending queue
                         while let TunnResult::WriteToNetwork(packet) =
-                            p.tunnel.decapsulate(None, &[], &mut t.dst_buf[..])
+                            p.tunnel
+                                .decapsulate_at(None, &[], &mut t.dst_buf[..], Instant::now())
                         {
                             let _: Result<_, _> = udp.send(packet);
                         }

@@ -325,11 +325,28 @@ impl Tunn {
     /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
     /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
     /// packet is processed.
+    #[deprecated(note = "Prefer `Tunn::decapsulate_at` to avoid time-impurity")]
     pub fn decapsulate<'a>(
         &mut self,
         src_addr: Option<IpAddr>,
         datagram: &[u8],
         dst: &'a mut [u8],
+    ) -> TunnResult<'a> {
+        self.decapsulate_at(src_addr, datagram, dst, Instant::now())
+    }
+
+    /// Receives a UDP datagram from the network and parses it.
+    /// Returns TunnResult.
+    ///
+    /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
+    /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
+    /// packet is processed.
+    pub fn decapsulate_at<'a>(
+        &mut self,
+        src_addr: Option<IpAddr>,
+        datagram: &[u8],
+        dst: &'a mut [u8],
+        now: Instant,
     ) -> TunnResult<'a> {
         if datagram.is_empty() {
             // Indicates a repeated call
@@ -337,12 +354,10 @@ impl Tunn {
         }
 
         let mut cookie = [0u8; COOKIE_REPLY_SZ];
-        let packet = match self.rate_limiter.verify_packet_at(
-            src_addr,
-            datagram,
-            &mut cookie,
-            Instant::now(),
-        ) {
+        let packet = match self
+            .rate_limiter
+            .verify_packet_at(src_addr, datagram, &mut cookie, now)
+        {
             Ok(packet) => packet,
             Err(TunnResult::WriteToNetwork(cookie)) => {
                 dst[..cookie.len()].copy_from_slice(cookie);
@@ -352,7 +367,7 @@ impl Tunn {
             _ => unreachable!(),
         };
 
-        self.handle_verified_packet(packet, dst, Instant::now())
+        self.handle_verified_packet(packet, dst, now)
     }
 
     pub(crate) fn handle_verified_packet<'a>(
@@ -705,7 +720,7 @@ mod tests {
 
     fn create_handshake_response(tun: &mut Tunn, handshake_init: &[u8]) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let handshake_resp = tun.decapsulate(None, handshake_init, &mut dst);
+        let handshake_resp = tun.decapsulate_at(None, handshake_init, &mut dst, Instant::now());
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
         let handshake_resp = if let TunnResult::WriteToNetwork(sent) = handshake_resp {
@@ -719,7 +734,7 @@ mod tests {
 
     fn parse_handshake_resp(tun: &mut Tunn, handshake_resp: &[u8]) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, handshake_resp, &mut dst);
+        let keepalive = tun.decapsulate_at(None, handshake_resp, &mut dst, Instant::now());
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
         let keepalive = if let TunnResult::WriteToNetwork(sent) = keepalive {
@@ -733,7 +748,7 @@ mod tests {
 
     fn parse_keepalive(tun: &mut Tunn, keepalive: &[u8]) {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, keepalive, &mut dst);
+        let keepalive = tun.decapsulate_at(None, keepalive, &mut dst, Instant::now());
         assert!(matches!(keepalive, TunnResult::Done));
     }
 
@@ -875,7 +890,7 @@ mod tests {
             unreachable!();
         };
 
-        let data = their_tun.decapsulate(None, data, &mut their_dst);
+        let data = their_tun.decapsulate_at(None, data, &mut their_dst, Instant::now());
         assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
         let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv, _addr) = data {
             recv

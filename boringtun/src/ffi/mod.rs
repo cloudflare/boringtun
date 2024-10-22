@@ -351,7 +351,7 @@ pub unsafe extern "C" fn wireguard_read(
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.decapsulate(None, src, dst))
+    wireguard_result::from(tunnel.decapsulate_at(None, src, dst, Instant::now()))
 }
 
 /// This is a state keeping function, that need to be called periodically.
