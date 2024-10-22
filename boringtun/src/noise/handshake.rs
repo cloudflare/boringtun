@@ -171,7 +171,7 @@ impl TimeStamper {
     /// Create a new TimeStamper
     pub fn new(now: Instant) -> TimeStamper {
         TimeStamper {
-            duration_at_start: SystemTime::now()
+            duration_at_start: SystemTime::now() // This is technically impure but it doesn't matter because the generated timestamps are only offset by this.
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap(),
             instant_at_start: now,
