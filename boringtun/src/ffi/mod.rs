@@ -334,7 +334,7 @@ pub unsafe extern "C" fn wireguard_write(
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.encapsulate(src, dst))
+    wireguard_result::from(tunnel.encapsulate_at(src, dst, Instant::now()))
 }
 
 /// Read a UDP packet from the server.

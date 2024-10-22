@@ -296,7 +296,23 @@ impl Tunn {
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
+    #[deprecated(note = "Prefer `Tunn::encapsulate_at` to avoid time-impurity")]
     pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+        self.encapsulate_at(src, dst, Instant::now())
+    }
+
+    /// Encapsulate a single packet from the tunnel interface.
+    /// Returns TunnResult.
+    ///
+    /// # Panics
+    /// Panics if dst buffer is too small.
+    /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
+    pub fn encapsulate_at<'a>(
+        &mut self,
+        src: &[u8],
+        dst: &'a mut [u8],
+        now: Instant,
+    ) -> TunnResult<'a> {
         let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
@@ -316,7 +332,7 @@ impl Tunn {
         // If there is no session, queue the packet for future retry
         self.queue_packet(src);
         // Initiate a new handshake if none is in progress
-        self.format_handshake_initiation_at(dst, false, Instant::now())
+        self.format_handshake_initiation_at(dst, false, now)
     }
 
     /// Receives a UDP datagram from the network and parses it.
@@ -350,7 +366,7 @@ impl Tunn {
     ) -> TunnResult<'a> {
         if datagram.is_empty() {
             // Indicates a repeated call
-            return self.send_queued_packet(dst);
+            return self.send_queued_packet(dst, now);
         }
 
         let mut cookie = [0u8; COOKIE_REPLY_SZ];
@@ -590,9 +606,9 @@ impl Tunn {
     }
 
     /// Get a packet from the queue, and try to encapsulate it
-    fn send_queued_packet<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
+    fn send_queued_packet<'a>(&mut self, dst: &'a mut [u8], now: Instant) -> TunnResult<'a> {
         if let Some(packet) = self.dequeue_packet() {
-            match self.encapsulate(&packet, dst) {
+            match self.encapsulate_at(&packet, dst, now) {
                 TunnResult::Err(_) => {
                     // On error, return packet to the queue
                     self.requeue_packet(packet);
@@ -858,7 +874,7 @@ mod tests {
             TunnResult::Done
         ));
         let sent_packet_buf = create_ipv4_udp_packet();
-        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        let data = my_tun.encapsulate_at(&sent_packet_buf, &mut my_dst, Instant::now());
         assert!(matches!(data, TunnResult::WriteToNetwork(_)));
 
         //Advance to timeout
@@ -891,7 +907,7 @@ mod tests {
 
         let sent_packet_buf = create_ipv4_udp_packet();
 
-        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        let data = my_tun.encapsulate_at(&sent_packet_buf, &mut my_dst, Instant::now());
         assert!(matches!(data, TunnResult::WriteToNetwork(_)));
         let data = if let TunnResult::WriteToNetwork(sent) = data {
             sent
