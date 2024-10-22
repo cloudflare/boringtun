@@ -318,7 +318,7 @@ impl Tunn {
     ) -> TunnResult<'a> {
         match packet {
             Packet::HandshakeInit(p) => self.handle_handshake_init(p, dst),
-            Packet::HandshakeResponse(p) => self.handle_handshake_response(p, dst),
+            Packet::HandshakeResponse(p) => self.handle_handshake_response(p, dst, Instant::now()),
             Packet::PacketCookieReply(p) => self.handle_cookie_reply(p),
             Packet::PacketData(p) => self.handle_data(p, dst),
         }
@@ -354,6 +354,7 @@ impl Tunn {
         &mut self,
         p: HandshakeResponse,
         dst: &'a mut [u8],
+        now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
         tracing::debug!(
             message = "Received handshake_response",
@@ -361,9 +362,7 @@ impl Tunn {
             remote_idx = p.sender_idx
         );
 
-        let session = self
-            .handshake
-            .receive_handshake_response(p, Instant::now())?;
+        let session = self.handshake.receive_handshake_response(p, now)?;
 
         let keepalive_packet = session.format_packet_data(&[], dst)?;
         // Store new session in ring buffer
