@@ -18,6 +18,7 @@ jobs:
       - tests
       - integration-tests
       - test-windows
+      - semver
     steps:
       - run: exit 0
 
@@ -97,3 +98,9 @@ jobs:
         with:
           toolchain: stable
       - run: cargo test -- --ignored
+
+  semver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
