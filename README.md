@@ -2,6 +2,19 @@
 
 # BoringTun
 
+## How to use this fork
+
+This repository is a fork of https://github.com/cloudflare/boringtun.
+We aim for 100% API compatibility with upstream.
+As such, the best way to use this fork is by patching the `boringtun` dependency in your `Cargo.toml`:
+
+```toml
+[patch.crates-io]
+boringtun = { git = "https://github.com/firezone/boringtun", branch = "master" }
+```
+
+The full list of patches in this fork over upstream can be seen in [here](https://github.com/cloudflare/boringtun/compare/master...firezone:boringtun:master).
+
 ## Warning
 Boringtun is currently undergoing a restructuring. You should probably not rely on or link to 
 the master branch right now. Instead you should use the crates.io page.
