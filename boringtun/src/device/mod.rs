@@ -475,10 +475,11 @@ impl Device {
         ));
 
         for peer in self.peers.values_mut() {
-            peer.lock().tunnel.set_static_private(
+            peer.lock().tunnel.set_static_private_at(
                 private_key.clone(),
                 public_key,
                 Some(Arc::clone(&rate_limiter)),
+                Instant::now(),
             )
         }
 

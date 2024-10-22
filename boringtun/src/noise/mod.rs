@@ -257,18 +257,30 @@ impl Tunn {
     }
 
     /// Update the private key and clear existing sessions
+    #[deprecated(note = "Prefer `Tunn::set_static_private_at` to avoid time-impurity")]
     pub fn set_static_private(
         &mut self,
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) {
+        self.set_static_private_at(static_private, static_public, rate_limiter, Instant::now())
+    }
+
+    /// Update the private key and clear existing sessions
+    pub fn set_static_private_at(
+        &mut self,
+        static_private: x25519::StaticSecret,
+        static_public: x25519::PublicKey,
+        rate_limiter: Option<Arc<RateLimiter>>,
+        now: Instant,
+    ) {
         self.timers.should_reset_rr = rate_limiter.is_none();
         self.rate_limiter = rate_limiter.unwrap_or_else(|| {
             Arc::new(RateLimiter::new_at(
                 &static_public,
                 PEER_HANDSHAKE_RATE_LIMIT,
-                Instant::now(),
+                now,
             ))
         });
         self.handshake
