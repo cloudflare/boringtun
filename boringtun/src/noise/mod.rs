@@ -673,8 +673,17 @@ impl Tunn {
     /// * Time since last handshake in seconds
     /// * Data bytes sent
     /// * Data bytes received
+    #[deprecated(note = "Prefer `Tunn::stats_at` to avoid time-impurity")]
     pub fn stats(&self) -> (Option<Duration>, usize, usize, f32, Option<u32>) {
-        let time = self.time_since_last_handshake_at(Instant::now());
+        self.stats_at(Instant::now())
+    }
+
+    /// Return stats from the tunnel:
+    /// * Time since last handshake in seconds
+    /// * Data bytes sent
+    /// * Data bytes received
+    pub fn stats_at(&self, now: Instant) -> (Option<Duration>, usize, usize, f32, Option<u32>) {
+        let time = self.time_since_last_handshake_at(now);
         let tx_bytes = self.tx_bytes;
         let rx_bytes = self.rx_bytes;
         let loss = self.estimate_loss();
