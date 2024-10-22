@@ -1,10 +1,12 @@
-name: PR Status Checks
+name: Continuous Integration
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
+  merge_group:
+    types: [checks_requested]
 
 jobs:
   # Depends on all actions that are required for a "successful" CI run.
