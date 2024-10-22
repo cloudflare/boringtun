@@ -711,6 +711,7 @@ impl Handshake {
     pub(super) fn format_handshake_initiation<'a>(
         &mut self,
         dst: &'a mut [u8],
+        now: Instant,
     ) -> Result<&'a mut [u8], WireGuardError> {
         let buf_len = dst.len();
         if buf_len < super::HANDSHAKE_INIT_SZ {
@@ -771,12 +772,11 @@ impl Handshake {
         // key = HMAC(temp, initiator.chaining_key || 0x2)
         let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
         // msg.encrypted_timestamp = AEAD(key, 0, TAI64N(), initiator.hash)
-        let timestamp = self.stamper.stamp(Instant::now());
+        let timestamp = self.stamper.stamp(now);
         aead_chacha20_seal(encrypted_timestamp, &key, 0, &timestamp, &hash);
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
         hash = b2s_hash(&hash, encrypted_timestamp);
 
-        let time_now = Instant::now();
         self.previous = std::mem::replace(
             &mut self.state,
             HandshakeState::InitSent(HandshakeInitSentState {
@@ -784,7 +784,7 @@ impl Handshake {
                 chaining_key,
                 hash,
                 ephemeral_private,
-                time_sent: time_now,
+                time_sent: now,
             }),
         );
 

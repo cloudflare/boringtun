@@ -457,7 +457,10 @@ impl Tunn {
 
         let starting_new_handshake = !self.handshake.is_in_progress();
 
-        match self.handshake.format_handshake_initiation(dst) {
+        match self
+            .handshake
+            .format_handshake_initiation(dst, Instant::now())
+        {
             Ok(packet) => {
                 tracing::debug!("Sending handshake_initiation");
 
