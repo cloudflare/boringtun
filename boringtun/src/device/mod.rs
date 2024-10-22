@@ -34,6 +34,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::Instant;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -49,12 +50,6 @@ use socket2::{Domain, Protocol, Type};
 use tun::TunSocket;
 
 use dev_lock::{Lock, LockReadGuard};
-
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
-
-#[cfg(not(feature = "mock-instant"))]
-use crate::sleepyinstant::Instant;
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 

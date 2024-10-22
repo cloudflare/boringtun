@@ -14,12 +14,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::Ordering;
-
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
-
-#[cfg(not(feature = "mock-instant"))]
-use crate::sleepyinstant::Instant;
+use std::time::Instant;
 
 const SOCK_DIR: &str = "/var/run/wireguard/";
 

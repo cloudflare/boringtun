@@ -25,12 +25,7 @@ use std::ptr;
 use std::ptr::null_mut;
 use std::slice;
 use std::sync::Once;
-
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
-
-#[cfg(not(feature = "mock-instant"))]
-use crate::sleepyinstant::Instant;
+use std::time::Instant;
 
 static PANIC_HOOK: Once = Once::new();
 

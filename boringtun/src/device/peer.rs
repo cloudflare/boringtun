@@ -6,15 +6,10 @@ use socket2::{Domain, Protocol, Type};
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
+use std::time::Instant;
 
 use crate::device::{AllowedIps, Error};
 use crate::noise::{Tunn, TunnResult};
-
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
-
-#[cfg(not(feature = "mock-instant"))]
-use crate::sleepyinstant::Instant;
 
 #[derive(Default, Debug)]
 pub struct Endpoint {

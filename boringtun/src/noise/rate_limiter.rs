@@ -2,13 +2,9 @@ use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_2
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-
-#[cfg(not(feature = "mock-instant"))]
-use crate::sleepyinstant::Instant;
+use std::time::Instant;
 
 use aead::generic_array::GenericArray;
 use aead::{AeadInPlace, KeyInit};
