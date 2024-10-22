@@ -3,7 +3,7 @@
 
 // Requiring explicit per-fn "Safety" docs not worth it. Just pass in valid
 // pointers and buffers/lengths to these, ok?
-#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::missing_safety_doc, non_camel_case_types)]
 
 //! C bindings for the BoringTun library
 use super::noise::{Tunn, TunnResult};
@@ -231,11 +231,7 @@ pub unsafe extern "C" fn set_logging_function(
             .try_init()
             .is_ok()
     });
-    if let Ok(value) = result {
-        value
-    } else {
-        false
-    }
+    result.unwrap_or_default()
 }
 
 /// Allocate a new tunnel, return NULL on failure.
