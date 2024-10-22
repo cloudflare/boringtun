@@ -26,6 +26,12 @@ use std::ptr::null_mut;
 use std::slice;
 use std::sync::Once;
 
+#[cfg(feature = "mock-instant")]
+use mock_instant::Instant;
+
+#[cfg(not(feature = "mock-instant"))]
+use crate::sleepyinstant::Instant;
+
 static PANIC_HOOK: Once = Once::new();
 
 #[allow(non_camel_case_types)]
@@ -358,7 +364,7 @@ pub unsafe extern "C" fn wireguard_tick(
     let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.update_timers(dst))
+    wireguard_result::from(tunnel.update_timers_at(dst, Instant::now()))
 }
 
 /// Force the tunnel to initiate a new handshake, dst buffer must be at least 148 byte long.

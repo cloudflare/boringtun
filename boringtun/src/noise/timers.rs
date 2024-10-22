@@ -165,11 +165,14 @@ impl Tunn {
         }
     }
 
+    #[deprecated(note = "Prefer `Timers::update_timers_at` to avoid time-impurity")]
     pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
+        self.update_timers_at(dst, Instant::now())
+    }
+
+    pub fn update_timers_at<'a>(&mut self, dst: &'a mut [u8], time: Instant) -> TunnResult<'a> {
         let mut handshake_initiation_required = false;
         let mut keepalive_required = false;
-
-        let time = Instant::now();
 
         if self.timers.should_reset_rr {
             self.rate_limiter.reset_count();
@@ -225,7 +228,7 @@ impl Tunn {
                     return TunnResult::Err(WireGuardError::ConnectionExpired);
                 }
 
-                if time_init_sent.elapsed() >= REKEY_TIMEOUT {
+                if time.duration_since(time_init_sent) >= REKEY_TIMEOUT {
                     // We avoid using `time` here, because it can be earlier than `time_init_sent`.
                     // Once `checked_duration_since` is stable we can use that.
                     // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
