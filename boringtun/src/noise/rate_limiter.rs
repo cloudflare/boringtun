@@ -93,9 +93,14 @@ impl RateLimiter {
     }
 
     /// Reset packet count (ideally should be called with a period of 1 second)
+    #[deprecated(note = "Prefer `RateLimiter::reset_count_at` to avoid time-impurity")]
     pub fn reset_count(&self) {
+        self.reset_count_at(Instant::now())
+    }
+
+    /// Reset packet count (ideally should be called with a period of 1 second)
+    pub fn reset_count_at(&self, current_time: Instant) {
         // The rate limiter is not very accurate, but at the scale we care about it doesn't matter much
-        let current_time = Instant::now();
         let mut last_reset_time = self.last_reset.lock();
         if current_time.duration_since(*last_reset_time).as_secs() >= RESET_PERIOD {
             self.count.store(0, Ordering::SeqCst);

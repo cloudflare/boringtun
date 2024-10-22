@@ -534,7 +534,7 @@ impl Device {
             // Reset the rate limiter every second give or take
             Box::new(|d, _| {
                 if let Some(r) = d.rate_limiter.as_ref() {
-                    r.reset_count()
+                    r.reset_count_at(Instant::now())
                 }
                 Action::Continue
             }),

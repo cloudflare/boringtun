@@ -175,7 +175,7 @@ impl Tunn {
         let mut keepalive_required = false;
 
         if self.timers.should_reset_rr {
-            self.rate_limiter.reset_count();
+            self.rate_limiter.reset_count_at(time);
         }
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded
