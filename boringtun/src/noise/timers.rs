@@ -314,10 +314,15 @@ impl Tunn {
         TunnResult::Done
     }
 
+    #[deprecated(note = "Prefer `Tunn::time_since_last_handshake_at` to avoid time-impurity")]
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
+        self.time_since_last_handshake_at(Instant::now())
+    }
+
+    pub fn time_since_last_handshake_at(&self, now: Instant) -> Option<Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
-            let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
+            let duration_since_tun_start = now.duration_since(self.timers.time_started);
             let duration_since_session_established = self.timers[TimeSessionEstablished];
 
             Some(duration_since_tun_start - duration_since_session_established)

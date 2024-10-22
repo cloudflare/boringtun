@@ -600,7 +600,7 @@ impl Tunn {
     /// * Data bytes sent
     /// * Data bytes received
     pub fn stats(&self) -> (Option<Duration>, usize, usize, f32, Option<u32>) {
-        let time = self.time_since_last_handshake();
+        let time = self.time_since_last_handshake_at(Instant::now());
         let tx_bytes = self.tx_bytes;
         let rx_bytes = self.rx_bytes;
         let loss = self.estimate_loss();
