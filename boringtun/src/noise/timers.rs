@@ -66,10 +66,10 @@ pub struct Timers {
 }
 
 impl Timers {
-    pub(super) fn new(persistent_keepalive: Option<u16>, reset_rr: bool) -> Timers {
+    pub(super) fn new(persistent_keepalive: Option<u16>, reset_rr: bool, now: Instant) -> Timers {
         Timers {
             is_initiator: false,
-            time_started: Instant::now(),
+            time_started: now,
             timers: Default::default(),
             session_timers: Default::default(),
             want_keepalive: Default::default(),

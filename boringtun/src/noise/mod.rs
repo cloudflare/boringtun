@@ -20,6 +20,12 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "mock-instant")]
+use mock_instant::Instant;
+
+#[cfg(not(feature = "mock-instant"))]
+use crate::sleepyinstant::Instant;
+
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
 
@@ -215,7 +221,7 @@ impl Tunn {
             rx_bytes: Default::default(),
 
             packet_queue: VecDeque::new(),
-            timers: Timers::new(persistent_keepalive, rate_limiter.is_none()),
+            timers: Timers::new(persistent_keepalive, rate_limiter.is_none(), Instant::now()),
 
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
