@@ -361,7 +361,9 @@ impl Tunn {
             remote_idx = p.sender_idx
         );
 
-        let session = self.handshake.receive_handshake_response(p)?;
+        let session = self
+            .handshake
+            .receive_handshake_response(p, Instant::now())?;
 
         let keepalive_packet = session.format_packet_data(&[], dst)?;
         // Store new session in ring buffer

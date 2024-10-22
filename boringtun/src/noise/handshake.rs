@@ -566,6 +566,7 @@ impl Handshake {
     pub(super) fn receive_handshake_response(
         &mut self,
         packet: HandshakeResponse,
+        now: Instant,
     ) -> Result<Session, WireGuardError> {
         // Check if there is a handshake awaiting a response and return the correct one
         let (state, is_previous) = match (&self.state, &self.previous) {
@@ -634,7 +635,7 @@ impl Handshake {
         let temp2 = b2s_hmac(&temp1, &[0x01]);
         let temp3 = b2s_hmac2(&temp1, &temp2, &[0x02]);
 
-        let rtt_time = Instant::now().duration_since(state.time_sent);
+        let rtt_time = now.duration_since(state.time_sent);
         self.last_rtt = Some(rtt_time.as_millis() as u32);
 
         if is_previous {
