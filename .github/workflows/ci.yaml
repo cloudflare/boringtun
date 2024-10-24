@@ -14,21 +14,6 @@ env:
   RUSTDOCFLAGS: "-D warnings"
 
 jobs:
-  # Depends on all actions that are required for a "successful" CI run.
-  # Based on the ci here: https://github.com/tokio-rs/tokio/blob/master/.github/workflows/ci.yml
-  all-systems-go:
-    runs-on: ubuntu-latest
-    needs:
-      - check_features
-      - clippy
-      - rustfmt
-      - tests
-      - integration-tests
-      - test-windows
-      - semver
-    steps:
-      - run: exit 0
-
   test-windows:
     runs-on: windows-latest
     steps:
