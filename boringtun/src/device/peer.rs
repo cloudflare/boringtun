@@ -101,6 +101,10 @@ impl Peer {
         }
     }
 
+    #[cfg_attr(
+        not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")),
+        allow(unused_variables)
+    )]
     pub fn connect_endpoint(
         &self,
         port: u16,

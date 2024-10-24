@@ -215,7 +215,7 @@ impl<H: Send + Sync> EventPoll<H> {
         };
 
         let (trigger, index) = match ev.kind {
-            EventKind::FD | EventKind::Signal => (ev.event.ident as RawFd, ev.event.ident as usize),
+            EventKind::FD | EventKind::Signal => (ev.event.ident as RawFd, ev.event.ident),
             EventKind::Timer | EventKind::Notifier => (-(events.len() as RawFd) - 1, events.len()), // Custom events get negative identifiers, hopefully we will never have more than 2^31 events of each type
         };
 
@@ -291,7 +291,9 @@ impl<H: Send + Sync> EventPoll<H> {
 }
 
 impl<H> EventPoll<H> {
-    // This function is only safe to call when the event loop is not running
+    /// # Safety
+    ///
+    /// This function is only safe to call when the event loop is not running
     pub unsafe fn clear_event_by_fd(&self, index: RawFd) {
         let (mut events, index) = if index >= 0 {
             (self.events.lock(), index as usize)
