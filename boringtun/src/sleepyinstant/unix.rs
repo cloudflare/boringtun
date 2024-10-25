@@ -3,9 +3,9 @@ use std::time::Duration;
 use nix::sys::time::TimeSpec;
 use nix::time::{clock_gettime, ClockId};
 
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos", target_os = "freebsd"))]
 const CLOCK_ID: ClockId = ClockId::CLOCK_MONOTONIC;
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos", target_os = "freebsd")))]
 const CLOCK_ID: ClockId = ClockId::CLOCK_BOOTTIME;
 
 #[derive(Clone, Copy, Debug)]
