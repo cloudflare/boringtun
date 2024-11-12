@@ -198,7 +198,12 @@ impl Session {
         src: &[u8],
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
-        if dst.len() < src.len() + super::DATA_OVERHEAD_SZ {
+        let buf_len = dst.len();
+        let num_required = src.len() + super::DATA_OVERHEAD_SZ;
+
+        if buf_len < num_required {
+            tracing::warn!(%buf_len, %num_required, "Destination buffer too small for outgoing packet data");
+
             return Err(WireGuardError::DestinationBufferTooSmall);
         }
 
@@ -243,7 +248,11 @@ impl Session {
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
         let ct_len = packet.encrypted_encapsulated_packet.len();
-        if dst.len() < ct_len {
+        let buf_len = dst.len();
+
+        if buf_len < ct_len {
+            tracing::warn!(%buf_len, %ct_len, "Destination buffer too small for incoming packet data");
+
             return Err(WireGuardError::DestinationBufferTooSmall);
         }
         if packet.receiver_idx != self.receiving_index {

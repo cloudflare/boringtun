@@ -120,7 +120,10 @@ impl RateLimiter {
         mac1: &[u8],
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
-        if dst.len() < super::COOKIE_REPLY_SZ {
+        let buf_len = dst.len();
+        if buf_len < super::COOKIE_REPLY_SZ {
+            tracing::warn!(%buf_len, msg_len = %super::COOKIE_REPLY_SZ, "Destination buffer too small for cookie reply");
+
             return Err(WireGuardError::DestinationBufferTooSmall);
         }
 

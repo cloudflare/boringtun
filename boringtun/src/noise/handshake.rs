@@ -710,7 +710,10 @@ impl Handshake {
         &mut self,
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
-        if dst.len() < super::HANDSHAKE_INIT_SZ {
+        let buf_len = dst.len();
+        if buf_len < super::HANDSHAKE_INIT_SZ {
+            tracing::warn!(%buf_len, msg_len = %super::HANDSHAKE_INIT_SZ, "Destination buffer too small for handshake init message");
+
             return Err(WireGuardError::DestinationBufferTooSmall);
         }
 
@@ -790,7 +793,10 @@ impl Handshake {
         &mut self,
         dst: &'a mut [u8],
     ) -> Result<(&'a mut [u8], Session), WireGuardError> {
+        let buf_len = dst.len();
         if dst.len() < super::HANDSHAKE_RESP_SZ {
+            tracing::warn!(%buf_len, msg_len = %super::HANDSHAKE_RESP_SZ, "Destination buffer too small for handshake init message");
+
             return Err(WireGuardError::DestinationBufferTooSmall);
         }
 
