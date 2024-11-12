@@ -193,9 +193,13 @@ impl Session {
     /// src - an IP packet from the interface
     /// dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
     /// returns the size of the formatted packet
-    pub(super) fn format_packet_data<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> &'a mut [u8] {
+    pub(super) fn format_packet_data<'a>(
+        &self,
+        src: &[u8],
+        dst: &'a mut [u8],
+    ) -> Result<&'a mut [u8], WireGuardError> {
         if dst.len() < src.len() + super::DATA_OVERHEAD_SZ {
-            panic!("The destination buffer is too small");
+            return Err(WireGuardError::DestinationBufferTooSmall);
         }
 
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
@@ -226,7 +230,7 @@ impl Session {
                 .unwrap()
         };
 
-        &mut dst[..DATA_OFFSET + n]
+        Ok(&mut dst[..DATA_OFFSET + n])
     }
 
     /// packet - a data packet we received from the network
@@ -240,8 +244,7 @@ impl Session {
     ) -> Result<&'a mut [u8], WireGuardError> {
         let ct_len = packet.encrypted_encapsulated_packet.len();
         if dst.len() < ct_len {
-            // This is a very incorrect use of the library, therefore panic and not error
-            panic!("The destination buffer is too small");
+            return Err(WireGuardError::DestinationBufferTooSmall);
         }
         if packet.receiver_idx != self.receiving_index {
             return Err(WireGuardError::WrongIndex);
