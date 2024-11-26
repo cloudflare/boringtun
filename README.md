@@ -1,9 +1,11 @@
+# ⚠️ This repository is soon to be archived and is kept only for maintanance purposes. The current developement is done under: https://github.com/NordSecurity/NepTUN
+
 ![boringtun logo banner](./banner.png)
 
 # BoringTun
 
 ## Warning
-Boringtun is currently undergoing a restructuring. You should probably not rely on or link to 
+Boringtun is currently undergoing a restructuring. You should probably not rely on or link to
 the master branch right now. Instead you should use the crates.io page.
 
 - boringtun: [![crates.io](https://img.shields.io/crates/v/boringtun.svg)](https://crates.io/crates/boringtun)
@@ -11,11 +13,11 @@ the master branch right now. Instead you should use the crates.io page.
 
 **BoringTun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
 
-**BoringTun** is successfully deployed on millions of [iOS](https://apps.apple.com/us/app/1-1-1-1-faster-internet/id1423538627) and [Android](https://play.google.com/store/apps/details?id=com.cloudflare.onedotonedotonedotone&hl=en_US) consumer devices as well as thousands of Cloudflare Linux servers. 
+**BoringTun** is successfully deployed on millions of [iOS](https://apps.apple.com/us/app/1-1-1-1-faster-internet/id1423538627) and [Android](https://play.google.com/store/apps/details?id=com.cloudflare.onedotonedotonedotone&hl=en_US) consumer devices as well as thousands of Cloudflare Linux servers.
 
 The project consists of two parts:
 
-* The executable `boringtun-cli`, a [userspace WireGuard](https://www.wireguard.com/xplatform/) 
+* The executable `boringtun-cli`, a [userspace WireGuard](https://www.wireguard.com/xplatform/)
   implementation for Linux and macOS.
 * The library `boringtun` that can be used to implement fast and efficient WireGuard client apps on various platforms, including iOS and Android. It implements the underlying WireGuard protocol, without the network or tunnel stacks, those can be implemented in a platform idiomatic way.
 
