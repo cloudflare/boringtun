@@ -31,7 +31,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt"], optional = true }
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
 ring = "0.17"
-x25519-dalek = { version = "2.0.0", features = [
+x25519-dalek = { version = "2.0.1", features = [
     "reusable_secrets",
     "static_secrets",
 ] }
