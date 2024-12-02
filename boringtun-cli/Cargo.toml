@@ -12,7 +12,7 @@ edition = "2021"
 daemonize = "0.4.1"
 clap = { version = "3.1.6", features = ["env"] }
 tracing = "0.1.40"
-tracing-subscriber = "0.3.9"
+tracing-subscriber = "0.3.19"
 tracing-appender = "0.2.3"
 
 [dependencies.boringtun]
