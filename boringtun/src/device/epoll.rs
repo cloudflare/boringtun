@@ -346,14 +346,14 @@ impl<H> EventPoll<H> {
     }
 }
 
-impl<'a, H> Deref for EventGuard<'a, H> {
+impl<H> Deref for EventGuard<'_, H> {
     type Target = H;
     fn deref(&self) -> &H {
         &self.event.handler
     }
 }
 
-impl<'a, H> Drop for EventGuard<'a, H> {
+impl<H> Drop for EventGuard<'_, H> {
     fn drop(&mut self) {
         if self.event.needs_read {
             // Must read from the event to reset it before we enable it
@@ -373,7 +373,7 @@ impl<'a, H> Drop for EventGuard<'a, H> {
     }
 }
 
-impl<'a, H> EventGuard<'a, H> {
+impl<H> EventGuard<'_, H> {
     /// Get a mutable reference to the stored value
     #[allow(dead_code)]
     pub fn get_mut(&mut self) -> &mut H {

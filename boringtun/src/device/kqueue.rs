@@ -309,14 +309,14 @@ impl<H> EventPoll<H> {
     }
 }
 
-impl<'a, H> Deref for EventGuard<'a, H> {
+impl<H> Deref for EventGuard<'_, H> {
     type Target = H;
     fn deref(&self) -> &H {
         &self.event.handler
     }
 }
 
-impl<'a, H> Drop for EventGuard<'a, H> {
+impl<H> Drop for EventGuard<'_, H> {
     fn drop(&mut self) {
         unsafe {
             // Re-enable the event once EventGuard goes out of scope
@@ -325,7 +325,7 @@ impl<'a, H> Drop for EventGuard<'a, H> {
     }
 }
 
-impl<'a, H> EventGuard<'a, H> {
+impl<H> EventGuard<'_, H> {
     /// Cancel and remove the event represented by this guard
     pub fn cancel(self) {
         unsafe { self.poll.clear_event_by_fd(self.event.event.ident as RawFd) };
