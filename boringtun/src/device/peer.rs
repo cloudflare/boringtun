@@ -6,6 +6,7 @@ use socket2::{Domain, Protocol, Type};
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
+use std::time::Instant;
 
 use crate::device::{AllowedIps, Error};
 use crate::noise::{Tunn, TunnResult};
@@ -71,7 +72,7 @@ impl Peer {
     }
 
     pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.update_timers(dst)
+        self.tunnel.update_timers_at(dst, Instant::now())
     }
 
     pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
@@ -157,7 +158,7 @@ impl Peer {
     }
 
     pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
-        self.tunnel.time_since_last_handshake()
+        self.tunnel.time_since_last_handshake_at(Instant::now())
     }
 
     pub fn persistent_keepalive(&self) -> Option<u16> {

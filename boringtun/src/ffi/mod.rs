@@ -25,6 +25,7 @@ use std::ptr;
 use std::ptr::null_mut;
 use std::slice;
 use std::sync::Once;
+use std::time::Instant;
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -288,13 +289,14 @@ pub unsafe extern "C" fn new_tunnel(
         Some(keep_alive)
     };
 
-    let tunnel = Box::new(Mutex::new(Tunn::new(
+    let tunnel = Box::new(Mutex::new(Tunn::new_at(
         private_key,
         public_key,
         preshared_key,
         keep_alive,
         index,
         None,
+        Instant::now(),
     )));
 
     PANIC_HOOK.call_once(|| {
@@ -327,7 +329,7 @@ pub unsafe extern "C" fn wireguard_write(
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.encapsulate(src, dst))
+    wireguard_result::from(tunnel.encapsulate_at(src, dst, Instant::now()))
 }
 
 /// Read a UDP packet from the server.
@@ -344,7 +346,7 @@ pub unsafe extern "C" fn wireguard_read(
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.decapsulate(None, src, dst))
+    wireguard_result::from(tunnel.decapsulate_at(None, src, dst, Instant::now()))
 }
 
 /// This is a state keeping function, that need to be called periodically.
@@ -358,7 +360,7 @@ pub unsafe extern "C" fn wireguard_tick(
     let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.update_timers(dst))
+    wireguard_result::from(tunnel.update_timers_at(dst, Instant::now()))
 }
 
 /// Force the tunnel to initiate a new handshake, dst buffer must be at least 148 byte long.
@@ -371,7 +373,7 @@ pub unsafe extern "C" fn wireguard_force_handshake(
     let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.format_handshake_initiation(dst, true))
+    wireguard_result::from(tunnel.format_handshake_initiation_at(dst, true, Instant::now()))
 }
 
 /// Returns stats from the tunnel:
@@ -381,7 +383,7 @@ pub unsafe extern "C" fn wireguard_force_handshake(
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<Tunn>) -> stats {
     let tunnel = tunnel.as_ref().unwrap().lock();
-    let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt) = tunnel.stats();
+    let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt) = tunnel.stats_at(Instant::now());
     stats {
         time_since_last_handshake: time.map(|t| t.as_secs() as i64).unwrap_or(-1),
         tx_bytes,
