@@ -9,7 +9,7 @@ mod tests {
     use crate::x25519::{PublicKey, StaticSecret};
     use base64::prelude::*;
     use hex::encode;
-    use rand_core::OsRng;
+    use rand::rngs::OsRng;
     use ring::rand::{SecureRandom, SystemRandom};
     use std::fmt::Write as _;
     use std::io::{BufRead, BufReader, Read, Write};

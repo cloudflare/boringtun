@@ -1,5 +1,5 @@
 use criterion::{BatchSize, Criterion};
-use rand_core::OsRng;
+use rand::rngs::OsRng;
 
 pub fn bench_x25519_shared_key(c: &mut Criterion) {
     let mut group = c.benchmark_group("x25519_shared_key");

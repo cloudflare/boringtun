@@ -12,7 +12,7 @@ use base64::prelude::*;
 use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
 use parking_lot::Mutex;
-use rand_core::OsRng;
+use rand::rngs::OsRng;
 use tracing;
 use tracing_subscriber::fmt;
 
@@ -296,6 +296,7 @@ pub unsafe extern "C" fn new_tunnel(
         keep_alive,
         index,
         None,
+        rand::random(),
         Instant::now(),
     )));
 

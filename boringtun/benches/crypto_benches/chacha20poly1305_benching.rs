@@ -1,6 +1,6 @@
 use aead::{AeadInPlace, KeyInit};
 use criterion::{BenchmarkId, Criterion, Throughput};
-use rand_core::{OsRng, RngCore};
+use rand::{rngs::OsRng, RngCore};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 
 fn chacha20poly1305_ring(key_bytes: &[u8], buf: &mut [u8]) {

@@ -45,7 +45,7 @@ use allowed_ips::AllowedIps;
 use parking_lot::Mutex;
 use peer::{AllowedIP, Peer};
 use poll::{EventPoll, EventRef, WaitResult};
-use rand_core::{OsRng, RngCore};
+use rand::{rngs::OsRng, RngCore};
 use socket2::{Domain, Protocol, Type};
 use tun::TunSocket;
 
@@ -335,6 +335,7 @@ impl Device {
             keepalive,
             next_index,
             None,
+            rand::random(),
             Instant::now(),
         );
 

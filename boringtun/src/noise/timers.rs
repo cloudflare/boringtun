@@ -2,20 +2,23 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::errors::WireGuardError;
-use crate::noise::{Tunn, TunnResult};
+use crate::noise::{Tunn, TunnResult, N_SESSIONS};
 use std::mem;
 use std::ops::{Index, IndexMut};
 
+use rand::Rng;
+use rand::{rngs::StdRng, SeedableRng};
 use std::time::{Duration, Instant};
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
 pub(crate) const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
-const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
+pub(crate) const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
 const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
 pub(crate) const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
+pub(crate) const MAX_JITTER: Duration = Duration::from_millis(333);
 
 #[derive(Debug)]
 pub enum TimerName {
@@ -57,10 +60,19 @@ pub struct Timers {
     persistent_keepalive: usize,
     /// Should this timer call reset rr function (if not a shared rr instance)
     pub(super) should_reset_rr: bool,
+    /// When we should sent a scheduled handshake.
+    send_handshake_at: Option<Instant>,
+
+    jitter_rng: StdRng,
 }
 
 impl Timers {
-    pub(super) fn new(persistent_keepalive: Option<u16>, reset_rr: bool, now: Instant) -> Timers {
+    pub(super) fn new(
+        persistent_keepalive: Option<u16>,
+        reset_rr: bool,
+        rng_seed: u64,
+        now: Instant,
+    ) -> Timers {
         Timers {
             is_initiator: false,
             time_started: now,
@@ -70,6 +82,8 @@ impl Timers {
             want_handshake: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
+            send_handshake_at: None,
+            jitter_rng: StdRng::seed_from_u64(rng_seed),
         }
     }
 
@@ -179,6 +193,11 @@ impl Tunn {
 
         self.update_session_timers(now);
 
+        // Updating the session timer may expire our session, trigger a new one in that case.
+        if self.sessions[self.current % N_SESSIONS].is_none() {
+            handshake_initiation_required = true;
+        }
+
         // Load timers only once:
         let session_established = self.timers[TimeSessionEstablished];
         let handshake_started = self.timers[TimeLastHandshakeStarted];
@@ -227,7 +246,7 @@ impl Tunn {
                     // Once `checked_duration_since` is stable we can use that.
                     // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
                     // if a response has not been received, where jitter is some random
-                    // value between 0 and 333 ms.
+                    // value between 0 and 333 ms (`MAX_JITTER`).
                     tracing::debug!("HANDSHAKE(REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
@@ -297,8 +316,26 @@ impl Tunn {
             }
         }
 
-        if handshake_initiation_required {
+        if self
+            .timers
+            .send_handshake_at
+            .is_some_and(|deadline| deadline > time)
+        {
+            self.timers.send_handshake_at = None;
+
             return self.format_handshake_initiation_at(dst, true, time);
+        }
+
+        if handshake_initiation_required && self.timers.send_handshake_at.is_none() {
+            let jitter = self
+                .timers
+                .jitter_rng
+                .gen_range(Duration::ZERO..=MAX_JITTER);
+            self.timers.send_handshake_at = Some(time + jitter);
+
+            tracing::debug!(?jitter, "Scheduling new handshake");
+
+            return TunnResult::Done;
         }
 
         if keepalive_required {
