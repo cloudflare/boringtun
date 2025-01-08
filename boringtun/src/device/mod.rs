@@ -7,6 +7,7 @@ mod dev_lock;
 pub mod drop_privileges;
 #[cfg(test)]
 mod integration_tests;
+pub mod keylog;
 pub mod peer;
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
@@ -37,10 +38,12 @@ use std::thread::JoinHandle;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
+use crate::noise::keys_logger::KeysLogger;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::{Packet, Tunn, TunnResult};
 use crate::x25519;
 use allowed_ips::AllowedIps;
+use keylog::get_keylog_file;
 use parking_lot::Mutex;
 use peer::{AllowedIP, Peer};
 use poll::{EventPoll, EventRef, WaitResult};
@@ -327,7 +330,7 @@ impl Device {
             .as_ref()
             .expect("Private key must be set first");
 
-        let tunn = Tunn::new(
+        let mut tunn = Tunn::new(
             device_key_pair.0.clone(),
             pub_key,
             preshared_key,
@@ -335,6 +338,10 @@ impl Device {
             next_index,
             None,
         );
+
+        if let Some(keylogfile) = get_keylog_file() {
+            tunn.set_handshake_keys_listener(Arc::new(KeysLogger::new(keylogfile)));
+        }
 
         let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);
 

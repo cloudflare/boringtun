@@ -1,21 +1,33 @@
-use std::io;
+use std::{io, sync::Arc};
 
 use parking_lot::Mutex;
 
 use super::{handshake::HandshakeKeys, HandshakeKeysListener};
 
-pub struct KeyLogFile<T> {
-    stream: Mutex<T>,
+pub struct KeyLogFile {
+    stream: Mutex<Box<dyn io::Write + Send>>,
 }
 
-impl<T: io::Write> KeyLogFile<T> {}
+impl KeyLogFile {
+    pub fn new(stream: Box<dyn io::Write + Send>) -> Self {
+        Self {
+            stream: Mutex::new(stream),
+        }
+    }
+}
 
-impl<T: io::Write + Send> KeyLogger for KeyLogFile<T> {
+impl KeyLogger for KeyLogFile {
     fn log_key(&self, name: &str, keymaterial: &str) {
         let mut locked_stream = self.stream.lock();
 
         // Errors are intentionally ignored.
         let _ = writeln!(&mut *locked_stream, "{} = {}", name, keymaterial);
+    }
+}
+
+impl KeyLogger for Arc<KeyLogFile> {
+    fn log_key(&self, name: &str, keymaterial: &str) {
+        self.as_ref().log_key(name, keymaterial)
     }
 }
 
