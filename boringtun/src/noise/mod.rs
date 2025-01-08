@@ -3,10 +3,13 @@
 
 pub mod errors;
 pub mod handshake;
+pub mod keys_logger;
 pub mod rate_limiter;
 
 mod session;
 mod timers;
+
+use handshake::HandshakeKeysListener;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
@@ -239,6 +242,10 @@ impl Tunn {
         for s in &mut self.sessions {
             *s = None;
         }
+    }
+
+    pub fn set_handshake_keys_listener(&mut self, keys_listener: Arc<dyn HandshakeKeysListener>) {
+        self.handshake.set_handshake_keys_listener(keys_listener);
     }
 
     /// Encapsulate a single packet from the tunnel interface.
