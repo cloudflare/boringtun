@@ -179,6 +179,17 @@ impl Tunn {
     }
 
     pub fn update_timers_at<'a>(&mut self, dst: &'a mut [u8], time: Instant) -> TunnResult<'a> {
+        // If we have scheduled a handshake and the deadline expired, send it immediately.
+        if self
+            .timers
+            .send_handshake_at
+            .is_some_and(|deadline| time >= deadline)
+        {
+            self.timers.send_handshake_at = None;
+
+            return self.format_handshake_initiation_at(dst, true, time);
+        }
+
         let mut handshake_initiation_required = false;
         let mut keepalive_required = false;
 
@@ -314,16 +325,6 @@ impl Tunn {
                     }
                 }
             }
-        }
-
-        if self
-            .timers
-            .send_handshake_at
-            .is_some_and(|deadline| time > deadline)
-        {
-            self.timers.send_handshake_at = None;
-
-            return self.format_handshake_initiation_at(dst, true, time);
         }
 
         if handshake_initiation_required && self.timers.send_handshake_at.is_none() {
