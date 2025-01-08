@@ -875,6 +875,28 @@ mod tests {
     }
 
     #[test]
+    fn multiple_update_calls_no_duplicate_handshakes() {
+        let mut now = Instant::now();
+        let mut num_handshakes = 0;
+        let mut buf = [0u8; 200];
+
+        let (mut my_tun, _their_tun) = create_two_tuns(now);
+
+        for _ in 0..200 {
+            now += Duration::from_millis(10);
+
+            if matches!(
+                my_tun.update_timers_at(&mut buf, now),
+                TunnResult::WriteToNetwork(_)
+            ) {
+                num_handshakes += 1;
+            }
+        }
+
+        assert_eq!(num_handshakes, 1);
+    }
+
+    #[test]
     fn new_handshake_after_two_mins() {
         let mut now = Instant::now();
 
