@@ -14,6 +14,7 @@ use chacha20poly1305::XChaCha20Poly1305;
 use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 #[cfg(feature = "mock-instant")]
@@ -261,7 +262,7 @@ struct HandshakeInitSentState {
     local_index: u32,
     hash: [u8; KEY_LEN],
     chaining_key: [u8; KEY_LEN],
-    ephemeral_private: x25519::ReusableSecret,
+    ephemeral_private: x25519::StaticSecret,
     time_sent: Instant,
 }
 
@@ -308,6 +309,7 @@ pub struct Handshake {
     // TODO: make TimeStamper a singleton
     stamper: TimeStamper,
     pub(super) last_rtt: Option<u32>,
+    keys_listener: Option<Arc<dyn HandshakeKeysListener>>,
 }
 
 #[derive(Default)]
@@ -366,6 +368,17 @@ pub fn parse_handshake_anon(
         peer_index,
         peer_static_public,
     })
+}
+
+pub struct HandshakeKeys<'a> {
+    pub static_private: &'a [u8],
+    pub peer_static_public: &'a [u8],
+    pub ephemeral_private: &'a [u8],
+    pub preshared_key: Option<&'a [u8]>,
+}
+
+pub trait HandshakeKeysListener: Send + Sync {
+    fn publish_handshake_keys(&self, keys: HandshakeKeys<'_>);
 }
 
 impl NoiseParams {
@@ -431,6 +444,7 @@ impl Handshake {
             stamper: TimeStamper::new(),
             cookies: Default::default(),
             last_rtt: None,
+            keys_listener: None,
         }
     }
 
@@ -636,6 +650,8 @@ impl Handshake {
         let rtt_time = Instant::now().duration_since(state.time_sent);
         self.last_rtt = Some(rtt_time.as_millis() as u32);
 
+        self.log_successful_handshake_keys(state.ephemeral_private.as_bytes());
+
         if is_previous {
             self.previous = HandshakeState::None;
         } else {
@@ -728,7 +744,7 @@ impl Handshake {
         let mut hash = INITIAL_CHAIN_HASH;
         hash = b2s_hash(&hash, self.params.peer_static_public.as_bytes());
         // initiator.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random_from_rng(OsRng);
+        let ephemeral_private = x25519::StaticSecret::random_from_rng(OsRng);
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
         message_type.copy_from_slice(&super::HANDSHAKE_INIT.to_le_bytes());
@@ -814,7 +830,7 @@ impl Handshake {
         let (encrypted_nothing, _) = rest.split_at_mut(16);
 
         // responder.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random_from_rng(OsRng);
+        let ephemeral_private = x25519::StaticSecret::random_from_rng(OsRng);
         let local_index = self.inc_index();
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
@@ -876,7 +892,26 @@ impl Handshake {
 
         let dst = self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_RESP_SZ])?;
 
+        self.log_successful_handshake_keys(ephemeral_private.as_bytes());
+
         Ok((dst, Session::new(local_index, peer_index, temp2, temp3)))
+    }
+
+    pub fn set_handshake_keys_listener(&mut self, keys_listener: Arc<dyn HandshakeKeysListener>) {
+        self.keys_listener.replace(keys_listener);
+    }
+
+    fn log_successful_handshake_keys(&self, ephemeral_private: &[u8]) {
+        let Some(keys_listener) = self.keys_listener.as_ref() else {
+            return;
+        };
+
+        keys_listener.publish_handshake_keys(HandshakeKeys {
+            static_private: self.params.static_private.as_bytes(),
+            peer_static_public: self.params.peer_static_public.as_bytes(),
+            ephemeral_private: ephemeral_private,
+            preshared_key: self.params.preshared_key.as_ref().map(|x| x.as_ref()),
+        });
     }
 }
 

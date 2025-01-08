@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use boringtun::device::drop_privileges::drop_privileges;
+use boringtun::device::keylog::set_keylog_file;
 use boringtun::device::{DeviceConfig, DeviceHandle};
 use clap::{Arg, Command};
 use daemonize::Daemonize;
@@ -71,6 +72,11 @@ fn main() {
                 .env("WG_LOG_FILE")
                 .help("Log file")
                 .default_value("/tmp/boringtun.out"),
+            Arg::new("keylog")
+                .takes_value(true)
+                .long("keylog")
+                .env("WGKEYLOGFILE")
+                .help("WireGuard keyog file"),
             Arg::new("disable-drop-privileges")
                 .long("disable-drop-privileges")
                 .env("WG_SUDO")
@@ -142,6 +148,22 @@ fn main() {
             .pretty()
             .with_max_level(log_level)
             .init();
+    }
+
+    // Set keylog file if requested.
+    if let Some(path) = matches.get_one::<String>("keylog") {
+        match File::options().append(true).create(true).open(path) {
+            Ok(file) => {
+                if let Err(_err) = set_keylog_file(Box::new(file)) {
+                    tracing::error!(message = "keylog file is already set");
+                    exit(1);
+                }
+            }
+            Err(e) => {
+                tracing::error!(message = "Failed to open keylog file", error=?e);
+                exit(1);
+            }
+        }
     }
 
     let config = DeviceConfig {
