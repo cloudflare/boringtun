@@ -319,7 +319,7 @@ impl Tunn {
         if self
             .timers
             .send_handshake_at
-            .is_some_and(|deadline| deadline > time)
+            .is_some_and(|deadline| time > deadline)
         {
             self.timers.send_handshake_at = None;
 
