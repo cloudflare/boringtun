@@ -345,6 +345,13 @@ impl Tunn {
         TunnResult::Done
     }
 
+    /// Returns an [`Instant`] when [`Tunn::update_timers_at`] should be called again.
+    ///
+    /// If this returns `None`, you may call it at your usual desired precision (usually once a second is enough).
+    pub fn next_timer_update(&self) -> Option<Instant> {
+        self.timers.send_handshake_at
+    }
+
     #[deprecated(note = "Prefer `Tunn::time_since_last_handshake_at` to avoid time-impurity")]
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
         self.time_since_last_handshake_at(Instant::now())
