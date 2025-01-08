@@ -54,7 +54,7 @@ impl<'a, T: ?Sized> LockReadGuard<'a, T> {
     /// this can be used to tell other threads to yield their read locks temporarily. It will be passed
     /// an immutable reference to the inner value.
     ///
-    /// `mut_func` - A closure that will run once write access is gained. It iwll be passed a mutable reference
+    /// `mut_func` - A closure that will run once write access is gained. It will be passed a mutable reference
     /// to the inner value.
     ///
     pub fn try_writeable<U, P: FnOnce(&T), F: FnOnce(&mut T) -> U>(
