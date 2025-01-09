@@ -697,7 +697,7 @@ mod tests {
 
     use super::*;
     use rand::{rngs::OsRng, RngCore};
-    use timers::MAX_JITTER;
+    use timers::{MAX_JITTER, REJECT_AFTER_TIME};
 
     fn create_two_tuns(now: Instant) -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
@@ -877,10 +877,15 @@ mod tests {
     #[test]
     fn multiple_update_calls_no_duplicate_handshakes() {
         let mut now = Instant::now();
-        let mut num_handshakes = 0;
+        let mut num_handshakes_initiator = 0;
+        let mut num_handshakes_responder = 0;
         let mut buf = [0u8; 200];
 
-        let (mut my_tun, _their_tun) = create_two_tuns(now);
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now);
+
+        now += REJECT_AFTER_TIME;
+        my_tun.update_timers_at(&mut buf, now);
+        their_tun.update_timers_at(&mut buf, now);
 
         for _ in 0..200 {
             now += Duration::from_millis(10);
@@ -889,11 +894,18 @@ mod tests {
                 my_tun.update_timers_at(&mut buf, now),
                 TunnResult::WriteToNetwork(_)
             ) {
-                num_handshakes += 1;
+                num_handshakes_initiator += 1;
+            }
+            if matches!(
+                their_tun.update_timers_at(&mut buf, now),
+                TunnResult::WriteToNetwork(_)
+            ) {
+                num_handshakes_responder += 1;
             }
         }
 
-        assert_eq!(num_handshakes, 1);
+        assert_eq!(num_handshakes_initiator, 1);
+        assert_eq!(num_handshakes_responder, 0);
     }
 
     #[test]

@@ -204,8 +204,11 @@ impl Tunn {
 
         self.update_session_timers(now);
 
-        // Updating the session timer may expire our session, trigger a new one in that case.
-        if self.sessions[self.current % N_SESSIONS].is_none() && !self.handshake.is_in_progress() {
+        // Updating the session timer may expire our session, trigger a new one in that case but only iff we initiated the previous one.
+        if self.sessions[self.current % N_SESSIONS].is_none()
+            && !self.handshake.is_in_progress()
+            && self.timers.is_initiator()
+        {
             handshake_initiation_required = true;
         }
 
