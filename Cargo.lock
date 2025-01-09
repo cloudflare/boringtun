@@ -99,7 +99,6 @@ dependencies = [
  "ip_network_table",
  "jni",
  "libc",
- "mock_instant",
  "nix",
  "parking_lot",
  "rand",
@@ -680,12 +679,6 @@ checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
 dependencies = [
  "autocfg",
 ]
-
-[[package]]
-name = "mock_instant"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9366861eb2a2c436c20b12c8dbec5f798cea6b47ad99216be0282942e2c81ea0"
 
 [[package]]
 name = "nix"
