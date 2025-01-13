@@ -116,7 +116,7 @@ impl ReceivingKeyCounterValidator {
         if counter < self.next {
             // A packet arrived out of order, check if it is valid, and mark
             if self.check_bit(counter) {
-                return Err(WireGuardError::InvalidCounter);
+                return Err(WireGuardError::DuplicateCounter);
             }
             self.set_bit(counter);
             return Ok(());
@@ -294,17 +294,32 @@ mod tests {
         let mut c: ReceivingKeyCounterValidator = Default::default();
 
         assert!(c.mark_did_receive(0).is_ok());
-        assert!(c.mark_did_receive(0).is_err());
+        assert!(matches!(
+            c.mark_did_receive(0),
+            Err(WireGuardError::DuplicateCounter)
+        ));
         assert!(c.mark_did_receive(1).is_ok());
-        assert!(c.mark_did_receive(1).is_err());
+        assert!(matches!(
+            c.mark_did_receive(1),
+            Err(WireGuardError::DuplicateCounter)
+        ));
         assert!(c.mark_did_receive(63).is_ok());
-        assert!(c.mark_did_receive(63).is_err());
+        assert!(matches!(
+            c.mark_did_receive(63),
+            Err(WireGuardError::DuplicateCounter)
+        ));
         assert!(c.mark_did_receive(15).is_ok());
-        assert!(c.mark_did_receive(15).is_err());
+        assert!(matches!(
+            c.mark_did_receive(15),
+            Err(WireGuardError::DuplicateCounter)
+        ));
 
         for i in 64..N_BITS + 128 {
             assert!(c.mark_did_receive(i).is_ok());
-            assert!(c.mark_did_receive(i).is_err());
+            assert!(matches!(
+                c.mark_did_receive(i),
+                Err(WireGuardError::DuplicateCounter)
+            ));
         }
 
         assert!(c.mark_did_receive(N_BITS * 3).is_ok());
@@ -313,7 +328,10 @@ mod tests {
                 c.will_accept(i),
                 Err(WireGuardError::InvalidCounter)
             ));
-            assert!(c.mark_did_receive(i).is_err());
+            assert!(matches!(
+                c.mark_did_receive(i),
+                Err(WireGuardError::InvalidCounter)
+            ));
         }
         for i in N_BITS * 2 + 1..N_BITS * 3 {
             assert!(c.will_accept(i).is_ok());
@@ -325,7 +343,10 @@ mod tests {
 
         for i in (N_BITS * 2 + 1..N_BITS * 3).rev() {
             assert!(c.mark_did_receive(i).is_ok());
-            assert!(c.mark_did_receive(i).is_err());
+            assert!(matches!(
+                c.mark_did_receive(i),
+                Err(WireGuardError::DuplicateCounter)
+            ));
         }
 
         assert!(c.mark_did_receive(N_BITS * 3 + 70).is_ok());
@@ -334,8 +355,17 @@ mod tests {
         assert!(c.mark_did_receive(N_BITS * 3 + 72 + 125).is_ok());
         assert!(c.mark_did_receive(N_BITS * 3 + 63).is_ok());
 
-        assert!(c.mark_did_receive(N_BITS * 3 + 70).is_err());
-        assert!(c.mark_did_receive(N_BITS * 3 + 71).is_err());
-        assert!(c.mark_did_receive(N_BITS * 3 + 72).is_err());
+        assert!(matches!(
+            c.mark_did_receive(N_BITS * 3 + 70),
+            Err(WireGuardError::DuplicateCounter)
+        ));
+        assert!(matches!(
+            c.mark_did_receive(N_BITS * 3 + 71),
+            Err(WireGuardError::DuplicateCounter)
+        ));
+        assert!(matches!(
+            c.mark_did_receive(N_BITS * 3 + 72),
+            Err(WireGuardError::DuplicateCounter)
+        ));
     }
 }
