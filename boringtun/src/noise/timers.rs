@@ -179,15 +179,24 @@ impl Tunn {
     }
 
     pub fn update_timers_at<'a>(&mut self, dst: &'a mut [u8], time: Instant) -> TunnResult<'a> {
-        // If we have scheduled a handshake and the deadline expired, send it immediately.
-        if self
-            .timers
-            .send_handshake_at
-            .is_some_and(|deadline| time >= deadline)
-        {
-            self.timers.send_handshake_at = None;
+        if let Some(scheduled_handshake_at) = self.timers.send_handshake_at {
+            // If we have scheduled a handshake and the deadline expired, send it immediately.
+            if time >= scheduled_handshake_at {
+                self.timers.send_handshake_at = None;
+                return self.format_handshake_initiation_at(dst, true, time);
+            }
 
-            return self.format_handshake_initiation_at(dst, true, time);
+            debug_assert!(
+                scheduled_handshake_at
+                    .checked_duration_since(time)
+                    .is_some_and(|remaining| remaining <= MAX_JITTER),
+                "Should never suspend for longer than jitter duration"
+            );
+
+            // We have a handshake scheduled but the deadline is not expired yet.
+            // Don't do anything to avoid repeated printing of logs.
+            // The below logic would still evaluate that we need to send another handshake.
+            return TunnResult::Done;
         }
 
         let mut handshake_initiation_required = false;
@@ -330,12 +339,17 @@ impl Tunn {
             }
         }
 
-        if handshake_initiation_required && self.timers.send_handshake_at.is_none() {
+        if handshake_initiation_required {
             let jitter = self
                 .timers
                 .jitter_rng
                 .gen_range(Duration::ZERO..=MAX_JITTER);
-            self.timers.send_handshake_at = Some(time + jitter);
+
+            let existing = self.timers.send_handshake_at.replace(time + jitter);
+            debug_assert!(
+                existing.is_none(),
+                "Should never override existing handshake"
+            );
 
             tracing::debug!(?jitter, "Scheduling new handshake");
 
