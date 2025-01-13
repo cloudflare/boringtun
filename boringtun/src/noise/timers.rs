@@ -22,8 +22,6 @@ pub(crate) const MAX_JITTER: Duration = Duration::from_millis(333);
 
 #[derive(Debug)]
 pub enum TimerName {
-    /// Current time, updated each call to `update_timers`
-    TimeCurrent,
     /// Time when last handshake was completed
     TimeSessionEstablished,
     /// Time the last attempt for a new handshake began
@@ -116,7 +114,7 @@ impl IndexMut<TimerName> for Timers {
 }
 
 impl Tunn {
-    pub(super) fn timer_tick(&mut self, timer_name: TimerName) {
+    pub(super) fn timer_tick(&mut self, timer_name: TimerName, now: Instant) {
         match timer_name {
             TimeLastPacketReceived => {
                 self.timers.want_keepalive = true;
@@ -129,18 +127,17 @@ impl Tunn {
             _ => {}
         }
 
-        let time = self.timers[TimeCurrent];
-        self.timers[timer_name] = time;
+        self.timers[timer_name] = now;
     }
 
     pub(super) fn timer_tick_session_established(
         &mut self,
         is_initiator: bool,
         session_idx: usize,
+        now: Instant,
     ) {
-        self.timer_tick(TimeSessionEstablished);
-        self.timers.session_timers[session_idx % crate::noise::N_SESSIONS] =
-            Some(self.timers[TimeCurrent]);
+        self.timer_tick(TimeSessionEstablished, now);
+        self.timers.session_timers[session_idx % crate::noise::N_SESSIONS] = Some(now);
         self.timers.is_initiator = is_initiator;
     }
 
@@ -206,8 +203,6 @@ impl Tunn {
         if self.timers.should_reset_rr {
             self.rate_limiter.reset_count_at(now);
         }
-
-        self.timers[TimeCurrent] = now;
 
         self.expire_sessions(now);
 
@@ -330,7 +325,7 @@ impl Tunn {
                             >= Duration::from_secs(persistent_keepalive as _))
                     {
                         tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
-                        self.timer_tick(TimePersistentKeepalive);
+                        self.timer_tick(TimePersistentKeepalive, now);
                         keepalive_required = true;
                     }
                 }
