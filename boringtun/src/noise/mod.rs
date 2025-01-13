@@ -409,7 +409,9 @@ impl Tunn {
             remote_idx = p.sender_idx
         );
 
-        let (packet, session) = self.handshake.receive_handshake_initialization(p, dst)?;
+        let (packet, session) = self
+            .handshake
+            .receive_handshake_initialization(p, dst, now)?;
 
         // Store new session in ring buffer
         let index = session.local_index();
@@ -417,7 +419,7 @@ impl Tunn {
 
         self.timer_tick(TimerName::TimeLastPacketReceived, now);
         self.timer_tick(TimerName::TimeLastPacketSent, now);
-        self.timer_tick_session_established(false, index, now); // New session established, we are not the initiator
+        self.timer_tick_session_established(false, now); // New session established, we are not the initiator
 
         tracing::debug!(message = "Sending handshake_response", local_idx = index);
 
@@ -445,7 +447,7 @@ impl Tunn {
         self.sessions[index] = Some(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived, now);
-        self.timer_tick_session_established(true, index, now); // New session established, we are the initiator
+        self.timer_tick_session_established(true, now); // New session established, we are the initiator
         self.set_current_session(l_idx);
 
         tracing::debug!("Sending keepalive");
@@ -479,13 +481,21 @@ impl Tunn {
             // There is nothing to do, already using this session, this is the common case
             return;
         }
-        if self.sessions[cur_idx % N_SESSIONS].is_none()
-            || self.timers.session_timers[new_idx % N_SESSIONS]
-                >= self.timers.session_timers[cur_idx % N_SESSIONS]
+
+        let Some(new) = self.sessions[new_idx % N_SESSIONS].as_ref() else {
+            debug_assert!(false, "new session should always exist");
+            return;
+        };
+        if self.sessions[cur_idx % N_SESSIONS]
+            .as_ref()
+            .is_some_and(|current| current.established_at() > new.established_at())
         {
-            self.current = new_idx;
-            tracing::debug!(message = "New session", session = new_idx);
+            // The current session is "newer" than the new one, don't update.
+            return;
         }
+
+        self.current = new_idx;
+        tracing::debug!(message = "New session", session = new_idx);
     }
 
     /// Decrypts a data packet, and stores the decapsulated packet in dst.

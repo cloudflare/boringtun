@@ -48,10 +48,6 @@ pub struct Timers {
     /// Is the owner of the timer the initiator or the responder for the last handshake?
     is_initiator: bool,
     timers: [Instant; TimerName::Top as usize],
-    /// When a certain session was created.
-    ///
-    /// `None` if the current session doesn't exist.
-    pub(super) session_timers: [Option<Instant>; super::N_SESSIONS],
     /// Did we receive data without sending anything back?
     want_keepalive: bool,
     /// Did we send data without hearing back?
@@ -75,7 +71,6 @@ impl Timers {
         Timers {
             is_initiator: false,
             timers: [now; TimerName::Top as usize],
-            session_timers: [None; super::N_SESSIONS],
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
@@ -130,14 +125,8 @@ impl Tunn {
         self.timers[timer_name] = now;
     }
 
-    pub(super) fn timer_tick_session_established(
-        &mut self,
-        is_initiator: bool,
-        session_idx: usize,
-        now: Instant,
-    ) {
+    pub(super) fn timer_tick_session_established(&mut self, is_initiator: bool, now: Instant) {
         self.timer_tick(TimeSessionEstablished, now);
-        self.timers.session_timers[session_idx % crate::noise::N_SESSIONS] = Some(now);
         self.timers.is_initiator = is_initiator;
     }
 
@@ -154,19 +143,18 @@ impl Tunn {
     }
 
     fn expire_sessions(&mut self, now: Instant) {
-        for (i, maybe_session_start) in self.timers.session_timers.iter_mut().enumerate() {
-            let Some(session_start) = maybe_session_start else {
+        for maybe_session in self.sessions.iter_mut() {
+            let Some(session) = maybe_session else {
                 continue;
             };
 
-            if now.duration_since(*session_start) > REJECT_AFTER_TIME {
-                if let Some(session) = self.sessions[i].take() {
+            if now.duration_since(session.established_at()) > REJECT_AFTER_TIME {
+                if let Some(session) = maybe_session.take() {
                     tracing::debug!(
                         message = "SESSION_EXPIRED(REJECT_AFTER_TIME)",
                         session = session.receiving_index
                     );
                 }
-                *maybe_session_start = None;
             }
         }
     }

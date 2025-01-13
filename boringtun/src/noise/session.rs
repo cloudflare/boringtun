@@ -5,9 +5,13 @@ use super::PacketData;
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Instant,
+};
 
 pub struct Session {
+    established_at: Instant,
     pub(crate) receiving_index: u32,
     sending_index: u32,
     receiver: LessSafeKey,
@@ -157,8 +161,10 @@ impl Session {
         peer_index: u32,
         receiving_key: [u8; 32],
         sending_key: [u8; 32],
+        now: Instant,
     ) -> Session {
         Session {
+            established_at: now,
             receiving_index: local_index,
             sending_index: peer_index,
             receiver: LessSafeKey::new(
@@ -172,6 +178,10 @@ impl Session {
 
     pub(super) fn local_index(&self) -> usize {
         self.receiving_index as usize
+    }
+
+    pub(crate) fn established_at(&self) -> Instant {
+        self.established_at
     }
 
     /// Returns true if receiving counter is good to use

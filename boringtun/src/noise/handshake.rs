@@ -478,6 +478,7 @@ impl Handshake {
         &mut self,
         packet: HandshakeInit,
         dst: &'a mut [u8],
+        now: Instant,
     ) -> Result<(&'a mut [u8], Session), WireGuardError> {
         // initiator.chaining_key = HASH(CONSTRUCTION)
         let mut chaining_key = INITIAL_CHAIN_KEY;
@@ -555,7 +556,7 @@ impl Handshake {
             },
         );
 
-        self.format_handshake_response(dst)
+        self.format_handshake_response(dst, now)
     }
 
     pub(super) fn receive_handshake_response(
@@ -638,7 +639,7 @@ impl Handshake {
         } else {
             self.state = HandshakeState::None;
         }
-        Ok(Session::new(local_index, peer_index, temp3, temp2))
+        Ok(Session::new(local_index, peer_index, temp3, temp2, now))
     }
 
     pub(super) fn receive_cookie_reply(
@@ -789,6 +790,7 @@ impl Handshake {
     fn format_handshake_response<'a>(
         &mut self,
         dst: &'a mut [u8],
+        now: Instant,
     ) -> Result<(&'a mut [u8], Session), WireGuardError> {
         let buf_len = dst.len();
         if dst.len() < super::HANDSHAKE_RESP_SZ {
@@ -879,7 +881,10 @@ impl Handshake {
 
         let dst = self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_RESP_SZ])?;
 
-        Ok((dst, Session::new(local_index, peer_index, temp2, temp3)))
+        Ok((
+            dst,
+            Session::new(local_index, peer_index, temp2, temp3, now),
+        ))
     }
 }
 
