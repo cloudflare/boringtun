@@ -218,6 +218,7 @@ impl Tunn {
             .cookie_expiration()
             .is_some_and(|deadline| now >= deadline)
         {
+            tracing::debug!("COOKIE_EXPIRED");
             self.handshake.clear_cookie();
         }
 
@@ -275,9 +276,7 @@ impl Tunn {
                         >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
                 {
                     tracing::debug!(
-                        "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - \
-                    REKEY_TIMEOUT \
-                    (on receive))"
+                        "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))"
                     );
                     handshake_initiation_required = true;
                 }
