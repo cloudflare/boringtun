@@ -147,12 +147,11 @@ impl Tunn {
             };
 
             if now.duration_since(session.established_at()) > REJECT_AFTER_TIME {
-                if let Some(session) = maybe_session.take() {
-                    tracing::debug!(
-                        message = "SESSION_EXPIRED(REJECT_AFTER_TIME)",
-                        session = session.receiving_index
-                    );
-                }
+                tracing::debug!(
+                    message = "SESSION_EXPIRED(REJECT_AFTER_TIME)",
+                    session = session.receiving_index
+                );
+                *maybe_session = None;
             }
         }
     }
