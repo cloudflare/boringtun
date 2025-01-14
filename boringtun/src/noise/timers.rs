@@ -17,7 +17,7 @@ pub(crate) const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
 const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
 pub(crate) const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
-const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
+pub(crate) const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
 pub(crate) const MAX_JITTER: Duration = Duration::from_millis(333);
 
 #[derive(Debug)]
@@ -34,8 +34,6 @@ pub enum TimerName {
     TimeLastDataPacketReceived,
     /// Time we last send a DATA packet
     TimeLastDataPacketSent,
-    /// Time we last received a cookie
-    TimeCookieReceived,
     /// Time we last sent persistent keepalive
     TimePersistentKeepalive,
     Top,
@@ -217,8 +215,10 @@ impl Tunn {
             }
 
             // Clear cookie after COOKIE_EXPIRATION_TIME
-            if self.handshake.has_cookie()
-                && now - self.timers[TimeCookieReceived] >= COOKIE_EXPIRATION_TIME
+            if self
+                .handshake
+                .cookie_expiration()
+                .is_some_and(|deadline| now >= deadline)
             {
                 self.handshake.clear_cookie();
             }

@@ -465,9 +465,8 @@ impl Tunn {
             local_idx = p.receiver_idx
         );
 
-        self.handshake.receive_cookie_reply(p)?;
+        self.handshake.receive_cookie_reply(p, now)?;
         self.timer_tick(TimerName::TimeLastPacketReceived, now);
-        self.timer_tick(TimerName::TimeCookieReceived, now);
 
         tracing::debug!("Did set cookie");
 

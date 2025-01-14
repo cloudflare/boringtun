@@ -1,6 +1,7 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use super::timers::COOKIE_EXPIRATION_TIME;
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
@@ -309,7 +310,13 @@ pub struct Handshake {
 struct Cookies {
     last_mac1: Option<[u8; 16]>,
     index: u32,
-    write_cookie: Option<[u8; 16]>,
+    write_cookie: Option<WriteCookie>,
+}
+
+#[derive(Clone, Copy)]
+struct WriteCookie {
+    value: [u8; 16],
+    received_at: Instant,
 }
 
 #[derive(Debug)]
@@ -450,8 +457,8 @@ impl Handshake {
         matches!(self.state, HandshakeState::Expired)
     }
 
-    pub(crate) fn has_cookie(&self) -> bool {
-        self.cookies.write_cookie.is_some()
+    pub(crate) fn cookie_expiration(&self) -> Option<Instant> {
+        Some(self.cookies.write_cookie?.received_at + COOKIE_EXPIRATION_TIME)
     }
 
     pub(crate) fn clear_cookie(&mut self) {
@@ -645,6 +652,7 @@ impl Handshake {
     pub(super) fn receive_cookie_reply(
         &mut self,
         packet: PacketCookieReply,
+        now: Instant,
     ) -> Result<(), WireGuardError> {
         let mac1 = match self.cookies.last_mac1 {
             Some(mac) => mac,
@@ -672,7 +680,10 @@ impl Handshake {
         let cookie = plaintext
             .try_into()
             .map_err(|_| WireGuardError::InvalidPacket)?;
-        self.cookies.write_cookie = Some(cookie);
+        self.cookies.write_cookie = Some(WriteCookie {
+            value: cookie,
+            received_at: now,
+        });
         Ok(())
     }
 
@@ -691,11 +702,12 @@ impl Handshake {
         dst[mac1_off..mac2_off].copy_from_slice(&msg_mac1[..]);
 
         //msg.mac2 = MAC(initiator.last_received_cookie, msg[0:offsetof(msg.mac2)])
-        let msg_mac2: [u8; 16] = if let Some(cookie) = self.cookies.write_cookie {
-            b2s_keyed_mac_16(&cookie, &dst[..mac2_off])
-        } else {
-            [0u8; 16]
-        };
+        let msg_mac2: [u8; 16] =
+            if let Some(WriteCookie { value: cookie, .. }) = self.cookies.write_cookie {
+                b2s_keyed_mac_16(&cookie, &dst[..mac2_off])
+            } else {
+                [0u8; 16]
+            };
 
         dst[mac2_off..].copy_from_slice(&msg_mac2[..]);
 
