@@ -16,7 +16,7 @@ pub(crate) const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
 pub(crate) const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
 const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
 pub(crate) const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
-const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
 pub(crate) const MAX_JITTER: Duration = Duration::from_millis(333);
 
@@ -49,7 +49,9 @@ pub struct Timers {
     /// Did we receive data without sending anything back?
     want_keepalive: bool,
     /// Did we send data without hearing back?
-    want_handshake: bool,
+    ///
+    /// If `Some`, tracks the timestamp of the _first_ packet without a reply.
+    want_handshake_since: Option<Instant>,
     persistent_keepalive: usize,
     /// Should this timer call reset rr function (if not a shared rr instance)
     pub(super) should_reset_rr: bool,
@@ -70,7 +72,7 @@ impl Timers {
             is_initiator: false,
             timers: [now; TimerName::Top as usize],
             want_keepalive: Default::default(),
-            want_handshake: Default::default(),
+            want_handshake_since: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
             send_handshake_at: None,
@@ -88,7 +90,7 @@ impl Timers {
         for t in &mut self.timers[..] {
             *t = now;
         }
-        self.want_handshake = false;
+        self.want_handshake_since = None;
         self.want_keepalive = false;
     }
 }
@@ -111,11 +113,24 @@ impl Tunn {
         match timer_name {
             TimeLastPacketReceived => {
                 self.timers.want_keepalive = true;
-                self.timers.want_handshake = false;
+                self.timers.want_handshake_since = None;
             }
             TimeLastPacketSent => {
-                self.timers.want_handshake = true;
                 self.timers.want_keepalive = false;
+            }
+            TimeLastDataPacketSent => {
+                match self.timers.want_handshake_since {
+                    Some(_) => {
+                        // This isn't the first timer tick (i.e. not the first packet)
+                        // we haven't received a response to.
+                    }
+                    None => {
+                        // We sent a packet and haven't heard back yet.
+                        // Track the current time so we know when to expire
+                        // the session.
+                        self.timers.want_handshake_since = Some(now)
+                    }
+                }
             }
             _ => {}
         }
@@ -202,7 +217,6 @@ impl Tunn {
         // Load timers only once:
         let session_established = self.timers[TimeSessionEstablished];
         let handshake_started = self.timers[TimeLastHandshakeStarted];
-        let aut_packet_received = self.timers[TimeLastPacketReceived];
         let aut_packet_sent = self.timers[TimeLastPacketSent];
         let data_packet_received = self.timers[TimeLastDataPacketReceived];
         let data_packet_sent = self.timers[TimeLastDataPacketSent];
@@ -285,9 +299,10 @@ impl Tunn {
             // If we have sent a packet to a given peer but have not received a
             // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
             // we initiate a new handshake.
-            if data_packet_sent > aut_packet_received
-                && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
-                && mem::replace(&mut self.timers.want_handshake, false)
+            if self
+                .timers
+                .want_handshake_since
+                .is_some_and(|sent_at| now >= sent_at + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
             {
                 tracing::debug!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                 handshake_initiation_required = true;

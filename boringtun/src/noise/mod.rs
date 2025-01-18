@@ -713,7 +713,8 @@ mod tests {
 
     use super::*;
     use rand::{rngs::OsRng, RngCore};
-    use timers::{MAX_JITTER, REJECT_AFTER_TIME};
+    use timers::{KEEPALIVE_TIMEOUT, MAX_JITTER, REJECT_AFTER_TIME};
+    use tracing::Level;
 
     fn create_two_tuns(now: Instant) -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
@@ -996,5 +997,85 @@ mod tests {
             unreachable!();
         };
         assert_eq!(sent_packet_buf, recv_packet_buf);
+    }
+
+    #[test]
+    fn rekey_without_response() {
+        let _guard = tracing_subscriber::fmt()
+            .with_test_writer()
+            .with_max_level(Level::DEBUG)
+            .try_init();
+
+        let mut now = Instant::now();
+        let sent_packet_buf = create_ipv4_udp_packet();
+
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now);
+        let mut my_dst = [0u8; 1024];
+        let mut their_dst = [0u8; 1024];
+
+        now += Duration::from_secs(1);
+
+        // Simulate an application-level handshake.
+        let req = my_tun
+            .encapsulate_at(&sent_packet_buf, &mut my_dst, now)
+            .unwrap_network();
+        their_tun.decapsulate_at(None, req, &mut their_dst, now);
+        let res = their_tun
+            .encapsulate_at(&sent_packet_buf, &mut their_dst, now)
+            .unwrap_network();
+        my_tun.decapsulate_at(None, res, &mut my_dst, now);
+
+        // Idle the connection for 10s.
+        now += Duration::from_secs(10);
+
+        let first_unreplied_packet_sent = now;
+
+        // Start sending more traffic each second, this time without a reply.
+        for _ in 0..10 {
+            my_tun.encapsulate_at(&sent_packet_buf, &mut my_dst, now);
+            now += Duration::from_secs(1);
+
+            assert!(
+                matches!(my_tun.update_timers_at(&mut [], now), TunnResult::Done),
+                "No time based action should be necessary yet"
+            )
+        }
+
+        // Timeout should be from the first unreplied packet.
+        let rekey_at = first_unreplied_packet_sent + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT;
+
+        // Trigger the creation of a handshake.
+        // Will be scheduled with 0..333ms
+        assert!(matches!(
+            my_tun.update_timers_at(&mut [], rekey_at),
+            TunnResult::Done
+        ));
+
+        let TunnResult::WriteToNetwork(handshake) =
+            my_tun.update_timers_at(&mut my_dst, rekey_at + MAX_JITTER)
+        else {
+            panic!("Expected handshake")
+        };
+
+        assert!(matches!(
+            Tunn::parse_incoming_packet(handshake).unwrap(),
+            Packet::HandshakeInit(_)
+        ));
+    }
+
+    impl<'a> TunnResult<'a> {
+        fn unwrap_network(self) -> &'a [u8] {
+            match self {
+                TunnResult::Done => panic!("Expected `WriteToNetwork` but was `Done`"),
+                TunnResult::Err(e) => panic!("Expected `WriteToNetwork` but was `Err({e:?})`"),
+                TunnResult::WriteToNetwork(d) => d,
+                TunnResult::WriteToTunnelV4(_, _) => {
+                    panic!("Expected `WriteToNetwork` but was `WriteToTunnelV4`")
+                }
+                TunnResult::WriteToTunnelV6(_, _) => {
+                    panic!("Expected `WriteToNetwork` but was `WriteToTunnelV6`")
+                }
+            }
+        }
     }
 }
