@@ -1,7 +1,10 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::PacketData;
+use super::{
+    timers::{REJECT_AFTER_TIME, SHOULD_NOT_USE_AFTER_TIME},
+    PacketData,
+};
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
@@ -182,6 +185,14 @@ impl Session {
 
     pub(crate) fn established_at(&self) -> Instant {
         self.established_at
+    }
+
+    pub(crate) fn expired_at(&self, time: Instant) -> bool {
+        time > self.established_at + REJECT_AFTER_TIME
+    }
+
+    pub(crate) fn should_use_at(&self, time: Instant) -> bool {
+        time <= self.established_at + SHOULD_NOT_USE_AFTER_TIME
     }
 
     /// Returns true if receiving counter is good to use

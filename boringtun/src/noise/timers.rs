@@ -20,6 +20,16 @@ pub(crate) const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
 pub(crate) const MAX_JITTER: Duration = Duration::from_millis(333);
 
+/// Time-period after which a session should no longer be used for new packets.
+///
+/// In order for [`REKEY_AFTER_TIME`] to take effect, at least one data packet needs to be sent on a session.
+/// If this data packet is sent close to the expire of the session ([`REJECT_AFTER_TIME`]), the session
+/// may be expired by the time the packet reaches the receiver (and thus will not be able to be decrypted).
+///
+/// To avoid this, we stop using the session after [`REJECT_AFTER_TIME`] - [`KEEPALIVE_TIMEOUT`].
+pub(crate) const SHOULD_NOT_USE_AFTER_TIME: Duration =
+    Duration::from_secs(REJECT_AFTER_TIME.as_secs() - KEEPALIVE_TIMEOUT.as_secs());
+
 #[derive(Debug)]
 pub enum TimerName {
     /// Time when last handshake was completed
@@ -82,6 +92,10 @@ impl Timers {
 
     fn is_initiator(&self) -> bool {
         self.is_initiator
+    }
+
+    pub(crate) fn is_responder(&self) -> bool {
+        !self.is_initiator()
     }
 
     // We don't really clear the timers, but we set them to the current time to
@@ -161,7 +175,7 @@ impl Tunn {
                 continue;
             };
 
-            if now.duration_since(session.established_at()) > REJECT_AFTER_TIME {
+            if session.expired_at(now) {
                 tracing::debug!(
                     message = "SESSION_EXPIRED(REJECT_AFTER_TIME)",
                     session = session.receiving_index
