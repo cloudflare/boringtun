@@ -60,8 +60,8 @@ pub struct Timers {
     want_keepalive: bool,
     /// Did we send data without hearing back?
     ///
-    /// If `Some`, tracks the timestamp of the _first_ packet without a reply.
-    want_handshake_since: Option<Instant>,
+    /// If `Some`, tracks the timestamp when we want to initiate the new handshake.
+    want_handshake_at: Option<Instant>,
     persistent_keepalive: usize,
     /// Should this timer call reset rr function (if not a shared rr instance)
     pub(super) should_reset_rr: bool,
@@ -82,7 +82,7 @@ impl Timers {
             is_initiator: false,
             timers: [now; TimerName::Top as usize],
             want_keepalive: Default::default(),
-            want_handshake_since: Default::default(),
+            want_handshake_at: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
             send_handshake_at: None,
@@ -104,7 +104,7 @@ impl Timers {
         for t in &mut self.timers[..] {
             *t = now;
         }
-        self.want_handshake_since = None;
+        self.want_handshake_at = None;
         self.want_keepalive = false;
     }
 }
@@ -127,22 +127,22 @@ impl Tunn {
         match timer_name {
             TimeLastPacketReceived => {
                 self.timers.want_keepalive = true;
-                self.timers.want_handshake_since = None;
+                self.timers.want_handshake_at = None;
             }
             TimeLastPacketSent => {
                 self.timers.want_keepalive = false;
             }
             TimeLastDataPacketSent => {
-                match self.timers.want_handshake_since {
+                match self.timers.want_handshake_at {
                     Some(_) => {
                         // This isn't the first timer tick (i.e. not the first packet)
                         // we haven't received a response to.
                     }
                     None => {
                         // We sent a packet and haven't heard back yet.
-                        // Track the current time so we know when to expire
-                        // the session.
-                        self.timers.want_handshake_since = Some(now)
+                        // Start a timer for when we want to make a new handshake.
+                        self.timers.want_handshake_at =
+                            Some(now + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
                     }
                 }
             }
@@ -315,8 +315,8 @@ impl Tunn {
             // we initiate a new handshake.
             if self
                 .timers
-                .want_handshake_since
-                .is_some_and(|sent_at| now >= sent_at + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+                .want_handshake_at
+                .is_some_and(|handshake_at| now >= handshake_at)
             {
                 tracing::debug!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                 handshake_initiation_required = true;
