@@ -717,7 +717,8 @@ mod tests {
     use super::*;
     use rand::{rngs::OsRng, RngCore};
     use timers::{KEEPALIVE_TIMEOUT, MAX_JITTER, REJECT_AFTER_TIME, SHOULD_NOT_USE_AFTER_TIME};
-    use tracing::Level;
+    use tracing::{level_filters::LevelFilter, Level};
+    use tracing_subscriber::util::SubscriberInitExt;
 
     fn create_two_tuns(now: Instant) -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
@@ -1048,6 +1049,88 @@ mod tests {
             unreachable!();
         };
         assert_eq!(sent_packet_buf, recv_packet_buf);
+    }
+
+    #[test]
+    fn silent_without_application_traffic_and_persistent_keepalive() {
+        let _guard = tracing_subscriber::fmt()
+            .with_test_writer()
+            .with_max_level(LevelFilter::DEBUG)
+            .set_default();
+
+        let mut now = Instant::now();
+
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now);
+        assert_eq!(my_tun.persistent_keepalive(), None);
+        their_tun.set_persistent_keepalive(10);
+
+        let mut my_dst = [0u8; 1024];
+        let mut their_dst = [0u8; 1024];
+
+        now += Duration::from_secs(1);
+
+        let sent_packet_buf = create_ipv4_udp_packet();
+
+        // First, perform an application-level handshake.
+
+        {
+            // Send the request.
+
+            let data = my_tun
+                .encapsulate_at(&sent_packet_buf, &mut my_dst, now)
+                .unwrap_network();
+
+            now += Duration::from_secs(1);
+
+            let data = their_tun.decapsulate_at(None, data, &mut their_dst, now);
+            assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
+        }
+
+        now += Duration::from_secs(1);
+
+        {
+            // Send the response.
+
+            let data = their_tun
+                .encapsulate_at(&sent_packet_buf, &mut their_dst, now)
+                .unwrap_network();
+
+            now += Duration::from_secs(1);
+
+            let data = my_tun.decapsulate_at(None, data, &mut my_dst, now);
+            assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
+        }
+
+        // Wait for `KEEPALIVE_TIMEOUT`.
+
+        now += KEEPALIVE_TIMEOUT;
+
+        let keepalive = my_tun.update_timers_at(&mut my_dst, now).unwrap_network();
+        parse_keepalive(&mut their_tun, keepalive, now);
+
+        // Idle for 60 seconds.
+
+        for _ in 0..60 {
+            now += Duration::from_secs(1);
+
+            // `my_tun` stays silent (i.e. does not respond to keepalives with keepalives).
+            assert!(matches!(
+                my_tun.update_timers_at(&mut my_dst, now),
+                TunnResult::Done
+            ));
+
+            // `their_tun` will emit persistent keep-alives as we idle.
+            match their_tun.update_timers_at(&mut their_dst, now) {
+                TunnResult::Done => {}
+                TunnResult::Err(wire_guard_error) => panic!("{wire_guard_error}"),
+                TunnResult::WriteToNetwork(keepalive) => {
+                    parse_keepalive(&mut my_tun, keepalive, now)
+                }
+                TunnResult::WriteToTunnelV4(_, _) | TunnResult::WriteToTunnelV6(_, _) => {
+                    unreachable!()
+                }
+            }
+        }
     }
 
     #[test]
