@@ -15,7 +15,7 @@ use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::ops::BitOrAssign;
 use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
@@ -149,12 +149,14 @@ impl Connection {
         let (udp4, udp6) = device_guard.open_listen_socket().await?;
         drop(device_guard);
         
-        let outgoing = tokio::spawn(Device::handle_outgoing(device.clone())).into();
-        let timers = tokio::spawn(Device::handle_timers(device.clone())).into();
         let udp4 = Arc::new(udp4);
         let udp6 = Arc::new(udp6);
-        let incoming_ipv4 = tokio::spawn(Device::handle_incoming(device.clone(), udp4.clone())).into();
-        let incoming_ipv6 = tokio::spawn(Device::handle_incoming(device.clone(), udp6.clone())).into();
+        
+        let outgoing = tokio::spawn(Device::handle_outgoing(Arc::downgrade(&device), udp4.clone(), udp6.clone())).into();
+        let timers = tokio::spawn(Device::handle_timers(Arc::downgrade(&device), udp4.clone(), udp6.clone())).into();
+        let incoming_ipv4 = tokio::spawn(Device::handle_incoming(Arc::downgrade(&device), udp4.clone())).into();
+        let incoming_ipv6 = tokio::spawn(Device::handle_incoming(Arc::downgrade(&device), udp6.clone())).into();
+
         Ok(Connection {
             listen_port: udp4.local_addr()?.port(),
             udp4,
@@ -165,25 +167,6 @@ impl Connection {
             outgoing,
         })
     }
-}
-
-/// The tasks that drive a [Device].
-#[derive(Default)]
-pub(crate) struct Tasks {
-    /// The task that reads IPv4 traffic from the UDP socket.
-    incoming_ipv4: Option<Task>,
-
-    /// The task that reads IPv6 traffic from the UDP socket.
-    incoming_ipv6: Option<Task>,
-
-    /// The task tha handles keepalives/heartbeats/etc.
-    timers: Option<Task>,
-
-    /// The task that reads traffic from the TUN device.
-    outgoing: Option<Task>,
-
-    /// The task that responds to API requests.
-    api: Option<Task>,
 }
 
 impl DeviceHandle {
@@ -198,6 +181,8 @@ impl DeviceHandle {
     }
 
     async fn stop_inner(device: Arc<RwLock<Device>>) {
+        log::debug!("Stopping boringtun device");
+
         let mut device = device.write().await;
 
         if let Some(api_task) = device.api.take() {
@@ -346,7 +331,7 @@ impl Device {
         let device = Arc::new(RwLock::new(device));
 
         if let Some(channel) = config.api {
-            device.write().await.api = Some(tokio::spawn(Device::handle_api(Arc::clone(&device), channel)).into());
+            device.write().await.api = Some(tokio::spawn(Device::handle_api(Arc::downgrade(&device), channel)).into());
         }
 
         #[cfg(target_os = "macos")]
@@ -448,7 +433,7 @@ impl Device {
         self.peers_by_ip.clear();
     }
 
-    async fn handle_timers(device: Arc<RwLock<Self>>) {
+    async fn handle_timers(device: Weak<RwLock<Self>>, udp4: Arc<UdpSocket>, udp6: Arc<UdpSocket>) {
         // TODO: fix rate limiting
         /*
         self.queue.new_periodic_event(
@@ -465,16 +450,14 @@ impl Device {
 
         let mut dst_buf = [0u8; MAX_UDP_SIZE];
 
-        let device_lock = device.read().await;
-        // TODO: pass in peers and sockets instead of device?
-        let udp4 = device_lock.connection.as_ref().expect("missing udp4 socket").udp4.clone();
-        let udp6 = device_lock.connection.as_ref().expect("missing udp6 socket").udp6.clone();
-        drop(device_lock);
-
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
 
+            let Some(device) = device.upgrade() else {
+                break;
+            };
             let device = device.read().await;
+            // TODO: pass in peers instead?
             let peer_map = &device.peers;
 
             // Go over each peer and invoke the timer function
@@ -502,8 +485,9 @@ impl Device {
     }
 
     /// Read from UDP socket, decapsulate, write to tunnel device
-    async fn handle_incoming(device: Arc<RwLock<Self>>, udp: Arc<UdpSocket>) -> Result<(), Error> {
-        let device_lock = device.read().await;
+    async fn handle_incoming(device: Weak<RwLock<Self>>, udp: Arc<UdpSocket>) -> Result<(), Error> {
+        let Some(device_arc) = device.upgrade() else { return Ok(()) };
+        let device_lock = device_arc.read().await;
 
         // TODO: check every time. TODO: ordering
         // TODO: wrap MTU in arc, and clone it
@@ -518,16 +502,16 @@ impl Device {
         let rate_limiter = device_lock.rate_limiter.clone().unwrap();
 
         drop(device_lock);
+        drop(device_arc);
 
         loop {
             // Loop while we have packets on the anonymous connection
 
-            // Safety: the `recv_from` implementation promises not to write uninitialised
-            // bytes to the buffer, so this casting is safe.
             let (packet_len, addr) = udp.recv_from(&mut src_buf[..]).await.map_err(|e| {
                 log::error!("UDP recv_from error {e:?}");
                 Error::IoError(e)
             })?;
+            log::debug!("rx'd {} bytes, udp", packet_len);
 
             let packet = &src_buf[..packet_len];
             let parsed_packet =
@@ -539,6 +523,8 @@ impl Device {
                     }
                     Err(_) => continue,
                 };
+
+            let Some(device) = device.upgrade() else { break };
             let device_guard = &device.read().await;
             let peers = &device_guard.peers;
             let peers_by_idx = &device_guard.peers_by_idx;
@@ -568,6 +554,7 @@ impl Device {
                 }
                 TunnResult::WriteToTunnelV4(packet, addr) => {
                     if p.is_allowed_ip(addr) {
+                        log::debug!("tun sent {} bytes", packet.len());
                         tun.send(packet).await.unwrap();
                     }
                 }
@@ -586,15 +573,18 @@ impl Device {
                 }
             }
         }
+
+        Ok(())
     }
 
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
-    async fn handle_outgoing(device: Arc<RwLock<Self>>) {
-        let device_lock = device.read().await;
+    async fn handle_outgoing(device: Weak<RwLock<Self>>, udp4: Arc<UdpSocket>, udp6: Arc<UdpSocket>) {
+        let Some(device_arc) = device.upgrade() else {
+            return;
+        };
+        let device_lock = device_arc.read().await;
 
         // TODO: pass in peers and sockets instead of device?
-        let udp4 = device_lock.connection.as_ref().expect("missing udp4 socket").udp4.clone();
-        let udp6 = device_lock.connection.as_ref().expect("missing udp6 socket").udp6.clone();
 
         // TODO: check every time. TODO: ordering
         let mtu = usize::from(device_lock.mtu.load(Ordering::SeqCst));
@@ -604,6 +594,9 @@ impl Device {
         let mut dst_buf = [0u8; MAX_UDP_SIZE];
 
         drop(device_lock);
+        drop(device_arc);
+
+        log::debug!("tun lol");
 
         loop {
             let n = match tun.recv(&mut src_buf[..mtu]).await {
@@ -613,13 +606,17 @@ impl Device {
                     continue;
                 }
             };
+            log::debug!("tun received {n} bytes");
             let src = &src_buf[..n];
 
             let dst_addr = match Tunn::dst_address(src) {
                 Some(addr) => addr,
                 None => continue,
             };
-
+            
+            let Some(device) = device.upgrade() else {
+                break;
+            };
             let peers = &device.read().await.peers_by_ip;
             let mut peer = match peers.find(dst_addr) {
                 Some(peer) => peer.lock().await,
@@ -634,6 +631,7 @@ impl Device {
                 TunnResult::WriteToNetwork(packet) => {
                     let endpoint_addr = peer.endpoint().addr;
                     if let Some(addr @ SocketAddr::V4(_)) = endpoint_addr {
+                        log::debug!("sending {} bytes, udp4", packet.len());
                         let _: Result<_, _> = udp4.send_to(packet, addr).await;
                     } else if let Some(addr @ SocketAddr::V6(_)) = endpoint_addr {
                         let _: Result<_, _> = udp6.send_to(packet, addr).await;
@@ -713,8 +711,12 @@ impl Connection {
 impl Task {
     async fn stop(mut self) {
         if let Some(handle) = self.handle.take() {
-            if let Err(e) = handle.await {
-                log::error!("task panicked: {e:#?}");
+            handle.abort();
+            match handle.await {
+                Err(e) if e.is_panic() => {
+                    log::error!("task panicked: {e:#?}");
+                }
+                _ => {}
             }
         }
     }
@@ -749,5 +751,11 @@ where T: Send + 'static,
         Task {
             handle: Some(handle),
         }
+    }
+}
+
+impl Drop for Device {
+    fn drop(&mut self) {
+        log::info!("Stopping Device");
     }
 }

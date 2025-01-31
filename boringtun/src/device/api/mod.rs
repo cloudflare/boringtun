@@ -4,7 +4,7 @@
 pub mod command;
 
 use super::peer::AllowedIP;
-use super::{Connection, Device, Error, Reconfigure, Task};
+use super::{Connection, Device, Error, Reconfigure};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{bail, eyre, Context};
@@ -12,7 +12,7 @@ use libc::EINVAL;
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::Weak;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 const SOCK_DIR: &str = "/var/run/wireguard/";
@@ -200,13 +200,14 @@ fn create_sock_dir() {
 }
 
 impl Device {
-    pub(super) async fn handle_api(device: Arc<RwLock<Self>>, mut channel: ConfigRx) {
+    pub(super) async fn handle_api(device: Weak<RwLock<Self>>, mut channel: ConfigRx) {
         loop {
             let Some((request, respond)) = channel.recv().await else {
                 // The remote side is closed
                 return;
             };
 
+            let Some(device) = device.upgrade() else { return };
             let response = match request {
                 Request::Get(get) => {
                     let device_guard = device.read().await;
