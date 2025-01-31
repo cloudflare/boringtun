@@ -17,22 +17,17 @@ pub mod peer;
 //#[path = "epoll.rs"]
 //pub mod poll;
 
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-#[path = "tun_darwin.rs"]
-pub mod tun;
 
-#[cfg(target_os = "linux")]
-#[path = "tun_linux.rs"]
-pub mod tun;
 
 use std::collections::HashMap;
 use std::io::{self, Write as _};
 use std::mem::MaybeUninit;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -40,11 +35,10 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::{Packet, Tunn, TunnResult};
 use crate::x25519;
 use allowed_ips::AllowedIps;
-use parking_lot::Mutex;
 use peer::{AllowedIP, Peer};
 use rand_core::{OsRng, RngCore};
 use socket2::{Domain, Protocol, Type};
-use tun::TunSocket;
+use tun::{AbstractDevice};
 
 //use dev_lock::LockReadGuard;
 
@@ -134,7 +128,7 @@ pub struct Device {
     listen_port: u16,
     fwmark: Option<u32>,
 
-    tun: Arc<TunSocket>,
+    tun: Arc<tun::AsyncDevice>,
     udp4: Option<socket2::Socket>,
     udp6: Option<socket2::Socket>,
 
@@ -147,15 +141,15 @@ pub struct Device {
 
     cleanup_paths: Vec<String>,
 
-    mtu: AtomicUsize,
+    mtu: AtomicU16,
 
     rate_limiter: Option<Arc<RateLimiter>>,
 }
 
 impl DeviceHandle {
-    pub async fn new(tun_name_or_fd: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
-        log::warn!("YOU TRYING TO CREATE A DEVICE?!?! BAHAHAH GOOD LUCK. {tun_name_or_fd}");
-        let device = Device::new(tun_name_or_fd, config).await?;
+    pub async fn new(tun: tun::AsyncDevice, config: DeviceConfig) -> Result<DeviceHandle, Error> {
+        log::warn!("YOU TRYING TO CREATE A DEVICE?!?! BAHAHAH GOOD LUCK.");
+        let device = Device::new(tun, config).await?;
 
         //let mut threads = vec![];
         //
@@ -277,7 +271,7 @@ impl Device {
         if let Some(peer) = self.peers.remove(pub_key) {
             // Found a peer to remove, now purge all references to it:
             {
-                let p = peer.lock();
+                let p = peer.blocking_lock();
                 p.shutdown_endpoint(); // close open udp socket and free the closure
                 self.peers_by_idx.remove(&p.index());
             }
@@ -341,15 +335,17 @@ impl Device {
         log::info!("Peer added");
     }
 
-    pub async fn new(tun_name_or_fd: &str, config: DeviceConfig) -> Result<Arc<RwLock<Device>>, Error> {
+    pub async fn new(tun: tun::AsyncDevice, config: DeviceConfig) -> Result<Arc<RwLock<Device>>, Error> {
         // Create a tunnel device
         //let tun = Arc::new(TunSocket::new(tun_name_or_fd)?.set_non_blocking()?);
         // TODO: nonblocking
-        let tun = Arc::new(TunSocket::new(tun_name_or_fd)?);
-        let mtu = tun.mtu()?;
+        //let tun = Arc::new(TunSocket::new(tun_name_or_fd)?);
+
+        //let tun = Arc::new(tun::create_as_async(tun_conf));
+        let mtu = tun.mtu().expect("get mtu");
 
         let device = Device {
-            tun,
+            tun: Arc::new(tun),
             fwmark: Default::default(),
             key_pair: Default::default(),
             listen_port: Default::default(),
@@ -360,7 +356,7 @@ impl Device {
             udp4: Default::default(),
             udp6: Default::default(),
             cleanup_paths: Default::default(),
-            mtu: AtomicUsize::new(mtu),
+            mtu: AtomicU16::new(mtu),
             rate_limiter: None,
         };
 
@@ -398,7 +394,7 @@ impl Device {
         let mut self_ = device.write().await;
 
         for peer in self_.peers.values() {
-            peer.lock().shutdown_endpoint();
+            peer.lock().await.shutdown_endpoint();
         }
 
         // Then open new sockets and bind to the port
@@ -453,7 +449,7 @@ impl Device {
         let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
 
         for peer in self.peers.values_mut() {
-            peer.lock().tunnel.set_static_private(
+            peer.blocking_lock().tunnel.set_static_private(
                 private_key.clone(),
                 public_key,
                 Some(Arc::clone(&rate_limiter)),
@@ -485,7 +481,7 @@ impl Device {
 
         // Then on all currently connected sockets
         for peer in self.peers.values() {
-            if let Some(ref sock) = peer.lock().endpoint().conn {
+            if let Some(ref sock) = peer.blocking_lock().endpoint().conn {
                 sock.set_mark(mark)?
             }
         }
@@ -559,7 +555,7 @@ impl Device {
 
                 // Go over each peer and invoke the timer function
                 for peer in peer_map.values() {
-                    let mut p = peer.lock();
+                    let mut p = peer.blocking_lock();
                     let endpoint_addr = match p.endpoint().addr {
                         Some(addr) => addr,
                         None => continue,
@@ -618,7 +614,7 @@ impl Device {
 
         // TODO: check every time. TODO: ordering
         // TODO: wrap MTU in arc, and clone it
-        let iface = device_lock.tun.clone();
+        let tun = device_lock.tun.clone();
 
         let mut src_buf = [0u8; MAX_UDP_SIZE];
         let mut dst_buf = [0u8; MAX_UDP_SIZE];
@@ -674,7 +670,7 @@ impl Device {
                     Some(peer) => peer,
                 };
 
-                let mut p = peer.lock();
+                let mut p = peer.lock().await;
 
                 // We found a peer, use it to decapsulate the message+
                 let mut flush = false; // Are there packets to send from the queue?
@@ -691,14 +687,14 @@ impl Device {
                     TunnResult::WriteToTunnelV4(packet, addr) => {
                         if p.is_allowed_ip(addr) {
                             log::info!("wrote stuff, {}", packet.len());
-                            iface.write4(packet);
+                            tun.send(packet).await.unwrap();
                         } else {
                             log::info!("ip not allowed >:(, {}", addr);
                         }
                     }
                     TunnResult::WriteToTunnelV6(packet, addr) => {
                         if p.is_allowed_ip(addr) {
-                            iface.write6(packet);
+                            tun.send(packet).await.unwrap();
                         }
                     }
                 };
@@ -798,7 +794,7 @@ impl Device {
         //let udp6 = self.udp4.as_ref().unwrap().try_clone().unwrap();
 
         // TODO: check every time. TODO: ordering
-        let mtu = device_lock.mtu.load(Ordering::SeqCst);
+        let mtu = usize::from(device_lock.mtu.load(Ordering::SeqCst));
         let tun = device_lock.tun.clone();
 
         let mut src_buf = [0u8; MAX_UDP_SIZE];
@@ -809,23 +805,15 @@ impl Device {
         loop {
             log::info!("reading from tun device");
             // TODO: async read/write
-            let src = match tokio::task::block_in_place(|| tun.read(&mut src_buf[..mtu])) {
+            let n = match tun.recv(&mut src_buf[..mtu]).await {
                 Ok(src) => src,
-                Err(Error::IfaceRead(e)) => {
-                    let ek = e.kind();
-                    if ek == io::ErrorKind::Interrupted || ek == io::ErrorKind::WouldBlock {
-                        log::error!("Interrupted | WouldBlock");
-                        continue;
-                    }
-                    log::error!("Fatal read error on tun interface: {:?}", e);
-                    continue;
-                }
                 Err(e) => {
                     log::error!("Unexpected error on tun interface: {:?}", e);
                     continue;
                 }
             };
-            log::info!("read {} bytes from tun device", src.len());
+            log::info!("read {} bytes from tun device", n);
+            let src = &src_buf[..n];
 
             let dst_addr = match Tunn::dst_address(src) {
                 Some(addr) => addr,
@@ -834,7 +822,7 @@ impl Device {
 
             let peers = &device.read().await.peers_by_ip;
             let mut peer = match peers.find(dst_addr) {
-                Some(peer) => peer.lock(),
+                Some(peer) => peer.lock().await,
                 None => continue,
             };
 

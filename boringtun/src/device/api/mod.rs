@@ -270,7 +270,7 @@ fn api_get(_: Get, d: &Device) -> GetResponse {
         .map(|(public_key, peer)| {
             log::debug!("!!! here is a peer");
 
-            let peer = peer.lock(); // TODO: is this ok?
+            let peer = peer.blocking_lock(); // TODO: is this ok?
             let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
             let endpoint = peer.endpoint().addr;
 
