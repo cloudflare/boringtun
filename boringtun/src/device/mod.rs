@@ -4,6 +4,7 @@
 pub mod allowed_ips;
 
 pub mod api;
+#[cfg(unix)]
 pub mod drop_privileges;
 #[cfg(test)]
 mod integration_tests;
@@ -105,7 +106,6 @@ pub struct DeviceConfig {
     #[cfg(target_os = "linux")]
     pub use_multi_queue: bool,
 
-    #[cfg(target_os = "linux")]
     pub api: Option<api::ConfigRx>,
 }
 
@@ -116,7 +116,6 @@ impl Default for DeviceConfig {
             //use_connected_socket: true,
             #[cfg(target_os = "linux")]
             use_multi_queue: true,
-            #[cfg(target_os = "linux")]
             api: None,
         }
     }

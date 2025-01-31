@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::device::Error;
+#[cfg(unix)]
 use libc::{gid_t, setgid, setuid, uid_t};
 use std::io;
 

@@ -3,6 +3,7 @@
 
 pub mod command;
 
+#[cfg(unix)]
 use super::drop_privileges::get_saved_ids;
 use super::peer::AllowedIP;
 use super::{Device, Error};
@@ -13,6 +14,7 @@ use libc::*;
 use std::fmt::Debug;
 use std::fs::create_dir;
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixListener;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -127,6 +129,7 @@ impl ConfigRx {
         (ConfigTx { tx }, ConfigRx { rx })
     }
 
+    #[cfg(unix)]
     pub fn default_unix_socket(interface_name: &str) -> eyre::Result<Self> {
         let path = format!("{SOCK_DIR}/{interface_name}.sock");
 
@@ -178,6 +181,7 @@ impl Debug for ConfigRx {
     }
 }
 
+#[cfg(unix)]
 fn create_sock_dir() {
     let _ = create_dir(SOCK_DIR); // Create the directory if it does not exist
 
@@ -330,6 +334,7 @@ fn api_set(set: Set, device_arc: &Arc<RwLock<Device>>, device: &mut Device) -> S
         //    return SetResponse { errno: EADDRINUSE };
         //}
     }
+    #[cfg(target_os = "linux")]
     if let Some(fwmark) = fwmark {
         if device.set_fwmark(fwmark).is_err() {
             return SetResponse { errno: EADDRINUSE };

@@ -241,6 +241,7 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
                             target_os = "fuchsia",
                             target_os = "linux"
                         ))]
+                        #[cfg(target_os = "linux")]
                         "fwmark" => match val.parse::<u32>() {
                             Ok(mark) => match device.set_fwmark(mark) {
                                 Ok(()) => {}
