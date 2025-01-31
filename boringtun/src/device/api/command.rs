@@ -378,7 +378,7 @@ impl FromStr for Set {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut lines = s.lines().peekable();
         ensure!(
-            lines.next().as_deref() == Some("set=1"),
+            lines.next() == Some("set=1"),
             "Set commands must start with 'set=1'"
         );
 

@@ -192,9 +192,9 @@ impl DeviceHandle {
     }*/
 
     pub async fn clean(&mut self) {
-        for path in &self.device.blocking_read().cleanup_paths {
+        for path in &self.device.read().await.cleanup_paths {
             // attempt to remove any file we created in the work dir
-            let _ = std::fs::remove_file(path);
+            let _ = tokio::fs::remove_file(path).await;
         }
     }
 
@@ -276,6 +276,7 @@ impl DeviceHandle {
 impl Drop for DeviceHandle {
     fn drop(&mut self) {
         //self.device.read().trigger_exit();
+        // TODO
         self.clean();
     }
 }

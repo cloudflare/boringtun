@@ -3,21 +3,18 @@
 
 pub mod command;
 
-use super::dev_lock::{Lock, LockReadGuard};
 use super::drop_privileges::get_saved_ids;
 use super::peer::AllowedIP;
 use super::{Device, Error};
-use crate::device::Action;
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
-use eyre::{bail, eyre, Context, WrapErr};
+use eyre::{bail, eyre, Context};
 use libc::*;
 use std::fmt::Debug;
 use std::fs::create_dir;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixListener;
 use std::str::FromStr;
-use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Arc};
 use tokio::sync::RwLock;
 
