@@ -29,7 +29,7 @@ pub struct ConfigTx {
 impl ConfigTx {
     pub async fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
-        log::info!("Sending request to boringtun: {request:?}");
+        log::trace!("Handling API request: {request:?}");
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send((request, response_tx))
@@ -37,20 +37,20 @@ impl ConfigTx {
             .map_err(|_| eyre!("Channel closed"))?;
         response_rx
             .await
-            .inspect(|response| log::info!("Response: {response:?}"))
+            .inspect(|response| log::trace!("Sending API response: {response:?}"))
             .map_err(|_| eyre!("Channel closed"))
     }
 
     pub fn send_sync(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
-        log::info!("Sending request to boringtun: {request:?}");
+        log::trace!("Handling API request: {request:?}");
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .blocking_send((request, response_tx))
             .map_err(|_| eyre!("Channel closed"))?;
         response_rx
             .blocking_recv()
-            .inspect(|response| log::info!("Response: {response:?}"))
+            .inspect(|response| log::trace!("Sending API response: {response:?}"))
             .map_err(|_| eyre!("Channel closed"))
     }
 }
