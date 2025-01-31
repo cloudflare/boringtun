@@ -11,6 +11,7 @@ mod integration_tests;
 pub mod peer;
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::ops::BitOrAssign;
@@ -74,8 +75,7 @@ pub enum Error {
 }
 
 pub struct DeviceHandle {
-    device: Arc<RwLock<Device>>, // The interface this handle owns
-                                 //threads: Vec<JoinHandle<()>>,
+    device: Arc<RwLock<Device>>,
 }
 
 #[derive(Debug)]
@@ -123,6 +123,7 @@ pub struct Device {
 }
 
 struct Task {
+    name: &'static str,
     handle: Option<JoinHandle<()>>,
 }
 pub(crate) struct Connection {
@@ -152,28 +153,22 @@ impl Connection {
         let udp4 = Arc::new(udp4);
         let udp6 = Arc::new(udp6);
 
-        let outgoing = tokio::spawn(Device::handle_outgoing(
-            Arc::downgrade(&device),
-            udp4.clone(),
-            udp6.clone(),
-        ))
-        .into();
-        let timers = tokio::spawn(Device::handle_timers(
-            Arc::downgrade(&device),
-            udp4.clone(),
-            udp6.clone(),
-        ))
-        .into();
-        let incoming_ipv4 = tokio::spawn(Device::handle_incoming(
-            Arc::downgrade(&device),
-            udp4.clone(),
-        ))
-        .into();
-        let incoming_ipv6 = tokio::spawn(Device::handle_incoming(
-            Arc::downgrade(&device),
-            udp6.clone(),
-        ))
-        .into();
+        let outgoing = Task::spawn(
+            "handle_outgoing",
+            Device::handle_outgoing(Arc::downgrade(&device), udp4.clone(), udp6.clone()),
+        );
+        let timers = Task::spawn(
+            "handle_timers",
+            Device::handle_timers(Arc::downgrade(&device), udp4.clone(), udp6.clone()),
+        );
+        let incoming_ipv4 = Task::spawn(
+            "handle_incoming ipv4",
+            Device::handle_incoming(Arc::downgrade(&device), udp4.clone()),
+        );
+        let incoming_ipv6 = Task::spawn(
+            "handle_incoming ipv6",
+            Device::handle_incoming(Arc::downgrade(&device), udp6.clone()),
+        );
 
         Ok(Connection {
             listen_port: udp4.local_addr()?.port(),
@@ -349,8 +344,10 @@ impl Device {
         let device = Arc::new(RwLock::new(device));
 
         if let Some(channel) = config.api {
-            device.write().await.api =
-                Some(tokio::spawn(Device::handle_api(Arc::downgrade(&device), channel)).into());
+            device.write().await.api = Some(Task::spawn(
+                "handle_api",
+                Device::handle_api(Arc::downgrade(&device), channel),
+            ));
         }
 
         #[cfg(target_os = "macos")]
@@ -539,7 +536,6 @@ impl Device {
                 log::error!("UDP recv_from error {e:?}");
                 Error::IoError(e)
             })?;
-            log::debug!("rx'd {} bytes, udp", packet_len);
 
             let packet = &src_buf[..packet_len];
             let parsed_packet =
@@ -584,7 +580,6 @@ impl Device {
                 }
                 TunnResult::WriteToTunnelV4(packet, addr) => {
                     if p.is_allowed_ip(addr) {
-                        log::debug!("tun sent {} bytes", packet.len());
                         tun.send(packet).await.unwrap();
                     }
                 }
@@ -630,8 +625,6 @@ impl Device {
         drop(device_lock);
         drop(device_arc);
 
-        log::debug!("tun lol");
-
         loop {
             let n = match tun.recv(&mut src_buf[..mtu]).await {
                 Ok(src) => src,
@@ -640,14 +633,13 @@ impl Device {
                     continue;
                 }
             };
-            log::debug!("tun received {n} bytes");
             let src = &src_buf[..n];
 
             let dst_addr = match Tunn::dst_address(src) {
                 Some(addr) => addr,
                 None => continue,
             };
-            
+
             let Some(device) = device.upgrade() else {
                 break;
             };
@@ -665,7 +657,6 @@ impl Device {
                 TunnResult::WriteToNetwork(packet) => {
                     let endpoint_addr = peer.endpoint().addr;
                     if let Some(addr @ SocketAddr::V4(_)) = endpoint_addr {
-                        log::debug!("sending {} bytes, udp4", packet.len());
                         let _: Result<_, _> = udp4.send_to(packet, addr).await;
                     } else if let Some(addr @ SocketAddr::V6(_)) = endpoint_addr {
                         let _: Result<_, _> = udp6.send_to(packet, addr).await;
@@ -756,9 +747,11 @@ impl Task {
             handle.abort();
             match handle.await {
                 Err(e) if e.is_panic() => {
-                    log::error!("task panicked: {e:#?}");
+                    log::error!("task {} panicked: {e:#?}", self.name);
                 }
-                _ => {}
+                _ => {
+                    log::debug!("stopped task {}", self.name);
+                }
             }
         }
     }
@@ -767,32 +760,44 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         if let Some(handle) = self.handle.take() {
+            log::debug!("dropped task {}", self.name);
             handle.abort();
         }
     }
 }
 
-impl From<tokio::task::JoinHandle<()>> for Task {
-    fn from(handle: tokio::task::JoinHandle<()>) -> Self {
-        Task {
-            handle: Some(handle),
+trait TaskOutput: Sized + Send + 'static {
+    fn handle(self) {}
+}
+
+impl TaskOutput for () {}
+
+impl<T, E> TaskOutput for Result<T, E>
+where
+    Self: Send + 'static,
+    E: std::fmt::Debug,
+{
+    fn handle(self) {
+        if let Err(e) = self {
+            log::error!("task errored {e:?}");
         }
     }
 }
 
-impl<T, E> From<tokio::task::JoinHandle<Result<T, E>>> for Task
-where
-    T: Send + 'static,
-    E: std::fmt::Debug + Send + 'static,
-{
-    fn from(handle: tokio::task::JoinHandle<Result<T, E>>) -> Self {
-        let handle = tokio::spawn(async {
-            if let Err(e) = handle.await {
-                log::error!("task errored {e:?}");
-            }
+impl Task {
+    pub fn spawn<Fut, O>(name: &'static str, fut: Fut) -> Self
+    where
+        Fut: Future<Output = O> + Send + 'static,
+        O: TaskOutput,
+    {
+        let handle = tokio::spawn(async move {
+            let output = fut.await;
+            log::debug!("task {name:?} exited"); // TODO: trace?
+            TaskOutput::handle(output);
         });
 
         Task {
+            name,
             handle: Some(handle),
         }
     }
