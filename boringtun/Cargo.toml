@@ -45,6 +45,9 @@ mock_instant = { version = "0.3", optional = true }
 socket2 = { version = "0.4.7", features = ["all"], optional = true }
 thiserror = { version = "1", optional = true }
 tokio = { version = "1.43.0", features = ["full"] }
+eyre = "*" # TODO
+log = "*" # TODO
+typed-builder = "0.20.0"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.25", default-features = false, features = [

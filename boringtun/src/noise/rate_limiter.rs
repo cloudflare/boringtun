@@ -29,6 +29,7 @@ type Cookie = [u8; COOKIE_SIZE];
 /// There are two places where WireGuard requires "randomness" for cookies
 /// * The 24 byte nonce in the cookie massage - here the only goal is to avoid nonce reuse
 /// * A secret value that changes every two minutes
+///
 /// Because the main goal of the cookie is simply for a party to prove ownership of an IP address
 /// we can relax the randomness definition a bit, in order to avoid locking, because using less
 /// resources is the main goal of any DoS prevention mechanism.

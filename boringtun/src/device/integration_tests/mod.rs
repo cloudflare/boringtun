@@ -20,6 +20,8 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
+    use tokio::test;
+
     static NEXT_IFACE_IDX: AtomicUsize = AtomicUsize::new(100); // utun 100+ should be vacant during testing on CI
     static NEXT_PORT: AtomicUsize = AtomicUsize::new(61111); // Use ports starting with 61111, hoping we don't run into a taken port 🤷
     static NEXT_IP: AtomicUsize = AtomicUsize::new(0xc0000200); // Use 192.0.2.0/24 for those tests, we might use more than 256 addresses though, usize must be >=32 bits on all supported platforms
@@ -255,26 +257,31 @@ mod tests {
 
     impl WGHandle {
         /// Create a new interface for the tunnel with the given address
-        fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
+        async fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
             WGHandle::init_with_config(
                 addr_v4,
                 addr_v6,
                 DeviceConfig {
                     n_threads: 2,
-                    use_connected_socket: true,
+                    //use_connected_socket: true,
                     #[cfg(target_os = "linux")]
                     use_multi_queue: true,
                     #[cfg(target_os = "linux")]
                     uapi_fd: -1,
                 },
             )
+            .await
         }
 
         /// Create a new interface for the tunnel with the given address
-        fn init_with_config(addr_v4: IpAddr, addr_v6: IpAddr, config: DeviceConfig) -> WGHandle {
+        async fn init_with_config(
+            addr_v4: IpAddr,
+            addr_v6: IpAddr,
+            config: DeviceConfig,
+        ) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let _device = DeviceHandle::new(&name, config).unwrap();
+            let _device = DeviceHandle::new(&name, config).await.unwrap();
             WGHandle {
                 _device,
                 name,
@@ -465,8 +472,8 @@ mod tests {
     #[test]
     #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can read from
-    fn test_wireguard_get() {
-        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
+    async fn test_wireguard_get() {
+        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
         let response = wg.wg_get();
         assert!(response.ends_with("errno=0\n\n"));
     }
@@ -474,12 +481,12 @@ mod tests {
     #[test]
     #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can use to set settings
-    fn test_wireguard_set() {
+    async fn test_wireguard_set() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
         let own_public_key = PublicKey::from(&private_key);
 
-        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
+        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
         assert!(wg.wg_get().ends_with("errno=0\n\n"));
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -539,9 +546,9 @@ mod tests {
     }
 
     /// Test if wireguard can handle simple ipv4 connections, don't use a connected socket
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn test_wg_start_ipv4_non_connected() {
+    async fn test_wg_start_ipv4_non_connected() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
         let public_key = PublicKey::from(&private_key);
@@ -553,13 +560,14 @@ mod tests {
             addr_v6,
             DeviceConfig {
                 n_threads: 2,
-                use_connected_socket: false,
+                //use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
                 #[cfg(target_os = "linux")]
                 uapi_fd: -1,
             },
-        );
+        )
+        .await;
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -586,16 +594,16 @@ mod tests {
     }
 
     /// Test if wireguard can handle simple ipv4 connections
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn test_wg_start_ipv4() {
+    async fn test_wg_start_ipv4() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -621,17 +629,17 @@ mod tests {
         assert_eq!(response, encode(PublicKey::from(&peer.key).as_bytes()));
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore]
     /// Test if wireguard can handle simple ipv6 connections
-    fn test_wg_start_ipv6() {
+    async fn test_wg_start_ipv6() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -657,17 +665,17 @@ mod tests {
     }
 
     /// Test if wireguard can handle connection with an ipv6 endpoint
-    #[test]
+    #[tokio::test]
     #[ignore]
     #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
-    fn test_wg_start_ipv6_endpoint() {
+    async fn test_wg_start_ipv6_endpoint() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -696,10 +704,10 @@ mod tests {
     }
 
     /// Test if wireguard can handle connection with an ipv6 endpoint
-    #[test]
+    #[tokio::test]
     #[ignore]
     #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
-    fn test_wg_start_ipv6_endpoint_not_connected() {
+    async fn test_wg_start_ipv6_endpoint_not_connected() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
         let public_key = PublicKey::from(&private_key);
@@ -711,13 +719,14 @@ mod tests {
             addr_v6,
             DeviceConfig {
                 n_threads: 2,
-                use_connected_socket: false,
+                //use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
                 #[cfg(target_os = "linux")]
                 uapi_fd: -1,
             },
-        );
+        )
+        .await;
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -746,16 +755,16 @@ mod tests {
     }
 
     /// Test many concurrent connections
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn test_wg_concurrent() {
+    async fn test_wg_concurrent() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -797,16 +806,16 @@ mod tests {
     }
 
     /// Test many concurrent connections
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn test_wg_concurrent_v6() {
+    async fn test_wg_concurrent_v6() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6);
+        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");

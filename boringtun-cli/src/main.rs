@@ -25,7 +25,8 @@ fn check_tun_name(_v: String) -> Result<(), String> {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let matches = Command::new("boringtun")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Vlad Krasnov <vlad@cloudflare.com>")
@@ -75,9 +76,9 @@ fn main() {
                 .long("disable-drop-privileges")
                 .env("WG_SUDO")
                 .help("Do not drop sudo privileges"),
-            Arg::new("disable-connected-udp")
-                .long("disable-connected-udp")
-                .help("Disable connected UDP sockets to each peer"),
+            //Arg::new("disable-connected-udp")
+            //    .long("disable-connected-udp")
+            //    .help("Disable connected UDP sockets to each peer"),
             #[cfg(target_os = "linux")]
             Arg::new("disable-multi-queue")
                 .long("disable-multi-queue")
@@ -148,12 +149,12 @@ fn main() {
         n_threads,
         #[cfg(target_os = "linux")]
         uapi_fd,
-        use_connected_socket: !matches.is_present("disable-connected-udp"),
+        //use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),
     };
 
-    let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config) {
+    let _device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config).await {
         Ok(d) => d,
         Err(e) => {
             // Notify parent that tunnel initialization failed
@@ -177,5 +178,6 @@ fn main() {
 
     tracing::info!("BoringTun started successfully");
 
-    device_handle.wait();
+    // TODO: abort somehow
+    tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;
 }
