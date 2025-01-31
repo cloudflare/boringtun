@@ -17,10 +17,10 @@ use std::ops::BitOrAssign;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
+use tokio::join;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
-use tokio::join;
 use tokio::task::JoinHandle;
 
 use crate::noise::errors::WireGuardError;
@@ -114,7 +114,7 @@ pub struct Device {
     mtu: AtomicU16,
 
     rate_limiter: Option<Arc<RateLimiter>>,
-    
+
     port: u16,
     connection: Option<Connection>,
 
@@ -126,21 +126,21 @@ struct Task {
     handle: Option<JoinHandle<()>>,
 }
 pub(crate) struct Connection {
-        udp4: Arc<tokio::net::UdpSocket>,
-        udp6: Arc<tokio::net::UdpSocket>,
-        listen_port: u16,
-    
-        /// The task that reads IPv4 traffic from the UDP socket.
-        incoming_ipv4: Task,
+    udp4: Arc<tokio::net::UdpSocket>,
+    udp6: Arc<tokio::net::UdpSocket>,
+    listen_port: u16,
 
-        /// The task that reads IPv6 traffic from the UDP socket.
-        incoming_ipv6: Task,
-    
-        /// The task tha handles keepalives/heartbeats/etc.
-        timers: Task,
-    
-        /// The task that reads traffic from the TUN device.
-        outgoing: Task,
+    /// The task that reads IPv4 traffic from the UDP socket.
+    incoming_ipv4: Task,
+
+    /// The task that reads IPv6 traffic from the UDP socket.
+    incoming_ipv6: Task,
+
+    /// The task tha handles keepalives/heartbeats/etc.
+    timers: Task,
+
+    /// The task that reads traffic from the TUN device.
+    outgoing: Task,
 }
 
 impl Connection {
@@ -148,14 +148,32 @@ impl Connection {
         let device_guard = device.read().await;
         let (udp4, udp6) = device_guard.open_listen_socket().await?;
         drop(device_guard);
-        
+
         let udp4 = Arc::new(udp4);
         let udp6 = Arc::new(udp6);
-        
-        let outgoing = tokio::spawn(Device::handle_outgoing(Arc::downgrade(&device), udp4.clone(), udp6.clone())).into();
-        let timers = tokio::spawn(Device::handle_timers(Arc::downgrade(&device), udp4.clone(), udp6.clone())).into();
-        let incoming_ipv4 = tokio::spawn(Device::handle_incoming(Arc::downgrade(&device), udp4.clone())).into();
-        let incoming_ipv6 = tokio::spawn(Device::handle_incoming(Arc::downgrade(&device), udp6.clone())).into();
+
+        let outgoing = tokio::spawn(Device::handle_outgoing(
+            Arc::downgrade(&device),
+            udp4.clone(),
+            udp6.clone(),
+        ))
+        .into();
+        let timers = tokio::spawn(Device::handle_timers(
+            Arc::downgrade(&device),
+            udp4.clone(),
+            udp6.clone(),
+        ))
+        .into();
+        let incoming_ipv4 = tokio::spawn(Device::handle_incoming(
+            Arc::downgrade(&device),
+            udp4.clone(),
+        ))
+        .into();
+        let incoming_ipv6 = tokio::spawn(Device::handle_incoming(
+            Arc::downgrade(&device),
+            udp6.clone(),
+        ))
+        .into();
 
         Ok(Connection {
             listen_port: udp4.local_addr()?.port(),
@@ -192,7 +210,7 @@ impl DeviceHandle {
         if let Some(connection) = device.connection.take() {
             connection.stop().await;
         }
-        
+
         for path in &device.cleanup_paths {
             // attempt to remove any file we created in the work dir
             let _ = tokio::fs::remove_file(path).await;
@@ -331,7 +349,8 @@ impl Device {
         let device = Arc::new(RwLock::new(device));
 
         if let Some(channel) = config.api {
-            device.write().await.api = Some(tokio::spawn(Device::handle_api(Arc::downgrade(&device), channel)).into());
+            device.write().await.api =
+                Some(tokio::spawn(Device::handle_api(Arc::downgrade(&device), channel)).into());
         }
 
         #[cfg(target_os = "macos")]
@@ -366,19 +385,26 @@ impl Device {
         let udp_sock4 = tokio::net::UdpSocket::bind(addrv4).await?;
         if port == 0 {
             // Random port was assigned
-            port = udp_sock4.local_addr()?.port();
+            // TODO: we need REUSEADDR or something for both sockets to share a port.
+            //port = udp_sock4.local_addr()?.port();
         }
 
         let addrv6 = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0);
         let udp_sock6 = tokio::net::UdpSocket::bind(addrv6).await?;
 
+        #[cfg(target_os = "linux")]
+        if let Some(mark) = self.fwmark {
+            use nix::sys::socket::{setsockopt, sockopt};
+            use std::os::fd::AsRawFd;
+            // TODO: errors
+            setsockopt(udp_sock4.as_raw_fd(), sockopt::Mark, &mark).unwrap();
+            setsockopt(udp_sock6.as_raw_fd(), sockopt::Mark, &mark).unwrap();
+        }
+
         Ok((udp_sock4, udp_sock6))
     }
 
-    async fn set_key(
-        &mut self,
-        private_key: x25519::StaticSecret,
-    ) -> Reconfigure {
+    async fn set_key(&mut self, private_key: x25519::StaticSecret) -> Reconfigure {
         let public_key = x25519::PublicKey::from(&private_key);
         let key_pair = Some((private_key.clone(), public_key));
 
@@ -406,23 +432,23 @@ impl Device {
 
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
+        use nix::sys::socket::{setsockopt, sockopt};
+        use std::os::fd::AsRawFd;
+
         self.fwmark = Some(mark);
 
-        // First set fwmark on listeners
-        if let Some(ref sock) = self.udp4 {
-            sock.set_mark(mark)?;
+        if let Some(conn) = &mut self.connection {
+            // TODO: errors
+            setsockopt(conn.udp4.as_raw_fd(), sockopt::Mark, &mark).unwrap();
+            setsockopt(conn.udp6.as_raw_fd(), sockopt::Mark, &mark).unwrap();
         }
 
-        if let Some(ref sock) = self.udp6 {
-            sock.set_mark(mark)?;
-        }
-
-        // Then on all currently connected sockets
-        for peer in self.peers.values() {
-            if let Some(ref sock) = peer.blocking_lock().endpoint().conn {
-                sock.set_mark(mark)?
-            }
-        }
+        // // Then on all currently connected sockets
+        // for peer in self.peers.values() {
+        //     if let Some(ref sock) = peer.blocking_lock().endpoint().conn {
+        //         sock.set_mark(mark)?
+        //     }
+        // }
 
         Ok(())
     }
@@ -486,7 +512,9 @@ impl Device {
 
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(device: Weak<RwLock<Self>>, udp: Arc<UdpSocket>) -> Result<(), Error> {
-        let Some(device_arc) = device.upgrade() else { return Ok(()) };
+        let Some(device_arc) = device.upgrade() else {
+            return Ok(());
+        };
         let device_lock = device_arc.read().await;
 
         // TODO: check every time. TODO: ordering
@@ -524,7 +552,9 @@ impl Device {
                     Err(_) => continue,
                 };
 
-            let Some(device) = device.upgrade() else { break };
+            let Some(device) = device.upgrade() else {
+                break;
+            };
             let device_guard = &device.read().await;
             let peers = &device_guard.peers;
             let peers_by_idx = &device_guard.peers_by_idx;
@@ -578,7 +608,11 @@ impl Device {
     }
 
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
-    async fn handle_outgoing(device: Weak<RwLock<Self>>, udp4: Arc<UdpSocket>, udp6: Arc<UdpSocket>) {
+    async fn handle_outgoing(
+        device: Weak<RwLock<Self>>,
+        udp4: Arc<UdpSocket>,
+        udp6: Arc<UdpSocket>,
+    ) {
         let Some(device_arc) = device.upgrade() else {
             return;
         };
@@ -696,7 +730,15 @@ impl Default for IndexLfsr {
 
 impl Connection {
     async fn stop(self) {
-        let Self { udp4, udp6, listen_port: _, incoming_ipv4, incoming_ipv6, timers, outgoing } = self;
+        let Self {
+            udp4,
+            udp6,
+            listen_port: _,
+            incoming_ipv4,
+            incoming_ipv6,
+            timers,
+            outgoing,
+        } = self;
         drop((udp4, udp6));
 
         join!(
@@ -739,8 +781,10 @@ impl From<tokio::task::JoinHandle<()>> for Task {
 }
 
 impl<T, E> From<tokio::task::JoinHandle<Result<T, E>>> for Task
-where T: Send + 'static,
-      E: std::fmt::Debug + Send + 'static {
+where
+    T: Send + 'static,
+    E: std::fmt::Debug + Send + 'static,
+{
     fn from(handle: tokio::task::JoinHandle<Result<T, E>>) -> Self {
         let handle = tokio::spawn(async {
             if let Err(e) = handle.await {

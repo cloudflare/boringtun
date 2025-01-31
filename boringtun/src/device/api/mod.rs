@@ -84,7 +84,6 @@ impl ConfigTx {
             let mut lines = String::new();
 
             for line in r.lines() {
-                dbg!(&line);
                 let Ok(line) = line else {
                     if !lines.is_empty() {
                         if let Err(e) = make_request(&lines) {
@@ -190,7 +189,7 @@ fn create_sock_dir() {
             let c_path = std::ffi::CString::new(SOCK_DIR).unwrap();
             // The directory is under the root user, but we want to be able to
             // delete the files there when we exit, so we need to change the owner
-            chown(
+            libc::chown(
                 c_path.as_bytes_with_nul().as_ptr() as _,
                 saved_uid,
                 saved_gid,
@@ -207,7 +206,9 @@ impl Device {
                 return;
             };
 
-            let Some(device) = device.upgrade() else { return };
+            let Some(device) = device.upgrade() else {
+                return;
+            };
             let response = match request {
                 Request::Get(get) => {
                     let device_guard = device.read().await;
@@ -362,7 +363,12 @@ async fn api_set(set: Set, device: &mut Device) -> (SetResponse, Reconfigure) {
         #[cfg(target_os = "linux")]
         if device.set_fwmark(fwmark).is_err() {
             // TODO: roll back changes and don't reconfigure
-            return (SetResponse { errno: libc::EADDRINUSE }, reconfigure);
+            return (
+                SetResponse {
+                    errno: libc::EADDRINUSE,
+                },
+                reconfigure,
+            );
         }
         // fwmark only applies on Linux
         // TODO: return error?

@@ -54,6 +54,7 @@ tun = { version = "0.7", features = ["async"] }
 nix = { version = "0.25", default-features = false, features = [
     "time",
     "user",
+	"socket",
 ] }
 
 [dev-dependencies]
