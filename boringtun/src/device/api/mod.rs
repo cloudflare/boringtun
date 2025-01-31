@@ -212,7 +212,7 @@ impl Device {
             let response = match request {
                 Request::Get(get) => {
                     let device_guard = device.read().await;
-                    Response::Get(api_get(get, &device_guard))
+                    Response::Get(api_get(get, &device_guard).await)
                 }
                 Request::Set(set) => {
                     let mut device_guard = device.write().await;
@@ -278,39 +278,32 @@ impl Device {
     }
 }
 
-fn api_get(_: Get, d: &Device) -> GetResponse {
-    log::debug!("!!! api_get");
+async fn api_get(_: Get, d: &Device) -> GetResponse {
+    let mut peers = vec![];
+    for (public_key, peer) in d.peers.iter() {
+        let peer = peer.lock().await;
+        let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
+        let endpoint = peer.endpoint().addr;
 
-    let peers = d
-        .peers
-        .iter()
-        .map(|(public_key, peer)| {
-            log::debug!("!!! here is a peer");
-
-            let peer = peer.blocking_lock(); // TODO: is this ok?
-            let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
-            let endpoint = peer.endpoint().addr;
-
-            GetPeer {
-                peer: Peer {
-                    public_key: KeyBytes(*public_key.as_bytes()),
-                    preshared_key: None, // TODO
-                    endpoint,
-                    persistent_keepalive_interval: peer.persistent_keepalive(),
-                    allowed_ip: peer
-                        .allowed_ips()
-                        .map(|(addr, cidr)| AllowedIP { addr, cidr })
-                        .collect(),
-                },
-                last_handshake_time_sec: peer.time_since_last_handshake().map(|d| d.as_secs()),
-                last_handshake_time_nsec: peer
-                    .time_since_last_handshake()
-                    .map(|d| d.subsec_nanos()),
-                rx_bytes: Some(rx_bytes as u64),
-                tx_bytes: Some(tx_bytes as u64),
-            }
-        })
-        .collect();
+        peers.push(GetPeer {
+            peer: Peer {
+                public_key: KeyBytes(*public_key.as_bytes()),
+                preshared_key: None, // TODO
+                endpoint,
+                persistent_keepalive_interval: peer.persistent_keepalive(),
+                allowed_ip: peer
+                    .allowed_ips()
+                    .map(|(addr, cidr)| AllowedIP { addr, cidr })
+                    .collect(),
+            },
+            last_handshake_time_sec: peer.time_since_last_handshake().map(|d| d.as_secs()),
+            last_handshake_time_nsec: peer
+                .time_since_last_handshake()
+                .map(|d| d.subsec_nanos()),
+            rx_bytes: Some(rx_bytes as u64),
+            tx_bytes: Some(tx_bytes as u64),
+        });
+    }
 
     GetResponse {
         private_key: d.key_pair.as_ref().map(|k| KeyBytes(k.0.to_bytes())),
