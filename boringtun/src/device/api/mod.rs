@@ -3,19 +3,14 @@
 
 pub mod command;
 
-#[cfg(unix)]
-use super::drop_privileges::get_saved_ids;
 use super::peer::AllowedIP;
-use super::{Device, Error};
+use super::{Connection, Device, Error, Reconfigure, Task};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{bail, eyre, Context};
-use libc::*;
+use libc::EINVAL;
 use std::fmt::Debug;
-use std::fs::create_dir;
 use std::io::{BufRead, BufReader, Read, Write};
-#[cfg(unix)]
-use std::os::unix::net::UnixListener;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -53,7 +48,8 @@ impl ConfigTx {
         self.tx
             .blocking_send((request, response_tx))
             .map_err(|_| eyre!("Channel closed"))?;
-        response_rx.blocking_recv()
+        response_rx
+            .blocking_recv()
             .inspect(|response| log::info!("Response: {response:?}"))
             .map_err(|_| eyre!("Channel closed"))
     }
@@ -131,6 +127,8 @@ impl ConfigRx {
 
     #[cfg(unix)]
     pub fn default_unix_socket(interface_name: &str) -> eyre::Result<Self> {
+        use std::os::unix::net::UnixListener;
+
         let path = format!("{SOCK_DIR}/{interface_name}.sock");
 
         create_sock_dir();
@@ -183,7 +181,9 @@ impl Debug for ConfigRx {
 
 #[cfg(unix)]
 fn create_sock_dir() {
-    let _ = create_dir(SOCK_DIR); // Create the directory if it does not exist
+    use super::drop_privileges::get_saved_ids;
+
+    let _ = std::fs::create_dir(SOCK_DIR); // Create the directory if it does not exist
 
     if let Ok((saved_uid, saved_gid)) = get_saved_ids() {
         unsafe {
@@ -200,37 +200,48 @@ fn create_sock_dir() {
 }
 
 impl Device {
-    pub fn register_api_handler(device: &Arc<RwLock<Self>>, mut channel: ConfigRx) {
-        let device = device.clone();
-        tokio::spawn(async move {
-            loop {
-                let Some((request, respond)) = channel.recv().await else {
-                    // The remote side is closed
-                    return;
-                };
+    pub(super) async fn handle_api(device: Arc<RwLock<Self>>, mut channel: ConfigRx) {
+        loop {
+            let Some((request, respond)) = channel.recv().await else {
+                // The remote side is closed
+                return;
+            };
 
+            let response = match request {
+                Request::Get(get) => {
+                    let device_guard = device.read().await;
+                    Response::Get(api_get(get, &device_guard))
+                }
+                Request::Set(set) => {
+                    let mut device_guard = device.write().await;
+                    let (response, reconfigure) = api_set(set, &mut device_guard).await;
+                    drop(device_guard);
 
-                let response = match request {
-                    Request::Get(get) => {
-                        let device_guard = device.read().await;
-                        Response::Get(api_get(get, &device_guard))
+                    if reconfigure == Reconfigure::Yes {
+                        match Connection::set_up(device.clone()).await {
+                            Ok(con) => {
+                                let mut device_guard = device.write().await;
+                                device_guard.connection = Some(con);
+                                Response::Set(response)
+                            }
+                            Err(err) => {
+                                // TODO: error message
+                                log::error!("Failed to set up stuff: {err}");
+                                // TODO: response code
+                                Response::Set(SetResponse { errno: EINVAL })
+                            }
+                        }
+                    } else {
+                        Response::Set(response)
                     }
-                    Request::Set(set) => {
-                        log::info!("handling set");
+                } //_ => EIO,
+            };
 
-                        let mut device_guard = device.write().await;
-                        log::info!("locked!");
+            let _ = respond.send(response);
 
-                        Response::Set(api_set(set, &device, &mut device_guard))
-                    } //_ => EIO,
-                };
-
-                let _ = respond.send(response);
-
-                // The protocol requires to return an error code as the response, or zero on success
-                //channel.tx.send(format!("errno={}\n", status)).ok();
-            }
-        });
+            // The protocol requires to return an error code as the response, or zero on success
+            //channel.tx.send(format!("errno={}\n", status)).ok();
+        }
     }
 
     fn register_monitor(&self, _path: String) -> Result<(), Error> {
@@ -301,16 +312,19 @@ fn api_get(_: Get, d: &Device) -> GetResponse {
 
     GetResponse {
         private_key: d.key_pair.as_ref().map(|k| KeyBytes(k.0.to_bytes())),
-        listen_port: Some(d.listen_port),
+        listen_port: Some(
+            d.connection
+                .as_ref()
+                .map(|con| con.listen_port)
+                .unwrap_or(0),
+        ),
         fwmark: d.fwmark,
         peers,
         errno: 0,
     }
 }
 
-fn api_set(set: Set, device_arc: &Arc<RwLock<Device>>, device: &mut Device) -> SetResponse {
-    log::debug!("!!! api_set");
-
+async fn api_set(set: Set, device: &mut Device) -> (SetResponse, Reconfigure) {
     let Set {
         private_key,
         listen_port,
@@ -320,31 +334,39 @@ fn api_set(set: Set, device_arc: &Arc<RwLock<Device>>, device: &mut Device) -> S
         peers,
     } = set;
 
+    if let Some(protocol_version) = protocol_version {
+        if protocol_version != "1" {
+            log::warn!("Invalid API protocol version: {protocol_version}");
+            return (SetResponse { errno: EINVAL }, Reconfigure::No);
+        }
+    }
+
+    let mut reconfigure: Reconfigure = Reconfigure::No;
+
     if replace_peers {
         device.clear_peers();
     }
 
     if let Some(private_key) = private_key {
-        device.set_key(device_arc.to_owned(), x25519_dalek::StaticSecret::from(private_key.0));
-    }
-    if let Some(listen_port) = listen_port {
-        device.set_port(listen_port);
-        //Device::open_listen_socket(;, port)
-        //f device.open_listen_socket(listen_port).is_err() {
-        //    return SetResponse { errno: EADDRINUSE };
-        //}
-    }
-    #[cfg(target_os = "linux")]
-    if let Some(fwmark) = fwmark {
-        if device.set_fwmark(fwmark).is_err() {
-            return SetResponse { errno: EADDRINUSE };
-        }
+        reconfigure |= device
+            .set_key(x25519_dalek::StaticSecret::from(private_key.0))
+            .await;
     }
 
-    if let Some(protocol_version) = protocol_version {
-        if protocol_version != "1" {
-            todo!("handle invalid protocol version");
+    if let Some(listen_port) = listen_port {
+        reconfigure |= device.set_port(listen_port).await;
+    }
+
+    if let Some(fwmark) = fwmark {
+        #[cfg(target_os = "linux")]
+        if device.set_fwmark(fwmark).is_err() {
+            // TODO: roll back changes and don't reconfigure
+            return (SetResponse { errno: libc::EADDRINUSE }, reconfigure);
         }
+        // fwmark only applies on Linux
+        // TODO: return error?
+        #[cfg(not(target_os = "linux"))]
+        let _ = fwmark;
     }
 
     for peer in peers {
@@ -384,5 +406,5 @@ fn api_set(set: Set, device_arc: &Arc<RwLock<Device>>, device: &mut Device) -> S
         );
     }
 
-    SetResponse { errno: 0 }
+    (SetResponse { errno: 0 }, reconfigure)
 }

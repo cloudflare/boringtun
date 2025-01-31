@@ -2,18 +2,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use parking_lot::RwLock;
-use socket2::{Domain, Protocol, Type};
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 
-use crate::device::{AllowedIps, Error};
+use crate::device::AllowedIps;
 use crate::noise::{Tunn, TunnResult};
 
 #[derive(Default, Debug)]
 pub struct Endpoint {
     pub addr: Option<SocketAddr>,
-    pub conn: Option<socket2::Socket>,
 }
 
 pub struct Peer {
@@ -63,7 +61,6 @@ impl Peer {
             index,
             endpoint: RwLock::new(Endpoint {
                 addr: endpoint,
-                conn: None,
             }),
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
@@ -76,72 +73,6 @@ impl Peer {
 
     pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
         self.endpoint.read()
-    }
-
-    pub(crate) fn endpoint_mut(&self) -> parking_lot::RwLockWriteGuard<'_, Endpoint> {
-        self.endpoint.write()
-    }
-
-    pub fn shutdown_endpoint(&self) {
-        if let Some(conn) = self.endpoint.write().conn.take() {
-            log::info!("Disconnecting from endpoint");
-            conn.shutdown(Shutdown::Both).unwrap();
-        }
-    }
-
-    pub fn set_endpoint(&self, addr: SocketAddr) {
-        let mut endpoint = self.endpoint.write();
-        if endpoint.addr != Some(addr) {
-            // We only need to update the endpoint if it differs from the current one
-            if let Some(conn) = endpoint.conn.take() {
-                conn.shutdown(Shutdown::Both).unwrap();
-            }
-
-            endpoint.addr = Some(addr);
-        }
-    }
-
-    pub fn connect_endpoint(
-        &self,
-        port: u16,
-        fwmark: Option<u32>,
-    ) -> Result<socket2::Socket, Error> {
-        let mut endpoint = self.endpoint.write();
-
-        if endpoint.conn.is_some() {
-            return Err(Error::Connect("Connected".to_owned()));
-        }
-
-        let addr = endpoint
-            .addr
-            .expect("Attempt to connect to undefined endpoint");
-
-        let udp_conn =
-            socket2::Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::UDP))?;
-        udp_conn.set_reuse_address(true)?;
-        let bind_addr = if addr.is_ipv4() {
-            SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into()
-        } else {
-            SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0).into()
-        };
-        udp_conn.bind(&bind_addr)?;
-        udp_conn.connect(&addr.into())?;
-        udp_conn.set_nonblocking(true)?;
-
-        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-        if let Some(fwmark) = fwmark {
-            udp_conn.set_mark(fwmark)?;
-        }
-
-        log::info!(
-            "Connected endpoint: {} {:?}",
-            port,
-            endpoint.addr
-        );
-
-        endpoint.conn = Some(udp_conn.try_clone().unwrap());
-
-        Ok(udp_conn)
     }
 
     pub fn is_allowed_ip<I: Into<IpAddr>>(&self, addr: I) -> bool {
