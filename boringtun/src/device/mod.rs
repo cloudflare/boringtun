@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub mod allowed_ips;
-// #[path = "api_old.rs"]
-// pub mod api;
-#[path = "api/mod.rs"]
+
 pub mod api;
-mod dev_lock;
 pub mod drop_privileges;
 #[cfg(test)]
 mod integration_tests;
@@ -49,7 +46,7 @@ use rand_core::{OsRng, RngCore};
 use socket2::{Domain, Protocol, Type};
 use tun::TunSocket;
 
-use dev_lock::LockReadGuard;
+//use dev_lock::LockReadGuard;
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 
@@ -99,22 +96,23 @@ enum Action {
 }
 
 // Event handler function
-type Handler = Box<dyn Fn(&mut LockReadGuard<Device>, &mut ThreadData) -> Action + Send + Sync>;
+//type Handler = Box<dyn Fn(&mut LockReadGuard<Device>, &mut ThreadData) -> Action + Send + Sync>;
 
 pub struct DeviceHandle {
     device: Arc<RwLock<Device>>, // The interface this handle owns
                                  //threads: Vec<JoinHandle<()>>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct DeviceConfig {
     pub n_threads: usize,
     // TODO: support connected sockets?
     //pub use_connected_socket: bool,
     #[cfg(target_os = "linux")]
     pub use_multi_queue: bool,
+
     #[cfg(target_os = "linux")]
-    pub uapi_fd: i32,
+    pub api: Option<api::ConfigRx>,
 }
 
 impl Default for DeviceConfig {
@@ -125,7 +123,7 @@ impl Default for DeviceConfig {
             #[cfg(target_os = "linux")]
             use_multi_queue: true,
             #[cfg(target_os = "linux")]
-            uapi_fd: -1,
+            api: None,
         }
     }
 }
@@ -136,7 +134,7 @@ pub struct Device {
     listen_port: u16,
     fwmark: Option<u32>,
 
-    iface: Arc<TunSocket>,
+    tun: Arc<TunSocket>,
     udp4: Option<socket2::Socket>,
     udp6: Option<socket2::Socket>,
 
@@ -147,28 +145,17 @@ pub struct Device {
     peers_by_idx: HashMap<u32, Arc<Mutex<Peer>>>,
     next_index: IndexLfsr,
 
-    config: DeviceConfig,
-
     cleanup_paths: Vec<String>,
 
     mtu: AtomicUsize,
 
     rate_limiter: Option<Arc<RateLimiter>>,
-
-    #[cfg(target_os = "linux")]
-    uapi_fd: i32,
-}
-
-struct ThreadData {
-    iface: Arc<TunSocket>,
-    src_buf: [u8; MAX_UDP_SIZE],
-    dst_buf: [u8; MAX_UDP_SIZE],
 }
 
 impl DeviceHandle {
-    pub async fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
-        let device = Device::new(name, config)?;
-        Device::open_listen_socket(Arc::clone(&device), 0).await?; // Start listening on a random port
+    pub async fn new(tun_name_or_fd: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
+        log::warn!("YOU TRYING TO CREATE A DEVICE?!?! BAHAHAH GOOD LUCK. {tun_name_or_fd}");
+        let device = Device::new(tun_name_or_fd, config).await?;
 
         //let mut threads = vec![];
         //
@@ -191,10 +178,10 @@ impl DeviceHandle {
         }
     }*/
 
-    pub async fn clean(&mut self) {
-        for path in &self.device.read().await.cleanup_paths {
+    pub fn clean(&mut self) {
+        for path in &self.device.blocking_read().cleanup_paths {
             // attempt to remove any file we created in the work dir
-            let _ = tokio::fs::remove_file(path).await;
+            let _ = std::fs::remove_file(path);
         }
     }
 
@@ -265,7 +252,7 @@ impl DeviceHandle {
                         }
                         handler.cancel();
                     }
-                    WaitResult::Error(e) => tracing::error!(message = "Poll error", error = ?e),
+                    WaitResult::Error(e) => log::error!(message = "Poll error", error = ?e),
                 }
             }
         }
@@ -297,7 +284,7 @@ impl Device {
             self.peers_by_ip
                 .remove(&|p: &Arc<Mutex<Peer>>| Arc::ptr_eq(&peer, p));
 
-            tracing::info!("Peer removed");
+            log::info!("Peer removed");
         }
     }
 
@@ -312,6 +299,8 @@ impl Device {
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
     ) {
+        log::debug!("!!! update_peer");
+
         if remove {
             // Completely remove a peer
             return self.remove_peer(&pub_key);
@@ -349,22 +338,18 @@ impl Device {
                 .insert(*addr, *cidr as _, Arc::clone(&peer));
         }
 
-        tracing::info!("Peer added");
+        log::info!("Peer added");
     }
 
-    pub fn new(name: &str, config: DeviceConfig) -> Result<Arc<RwLock<Device>>, Error> {
+    pub async fn new(tun_name_or_fd: &str, config: DeviceConfig) -> Result<Arc<RwLock<Device>>, Error> {
         // Create a tunnel device
-        let iface = Arc::new(TunSocket::new(name)?.set_non_blocking()?);
-        let mtu = iface.mtu()?;
-
-        #[cfg(not(target_os = "linux"))]
-        let uapi_fd = -1;
-        #[cfg(target_os = "linux")]
-        let uapi_fd = config.uapi_fd;
+        //let tun = Arc::new(TunSocket::new(tun_name_or_fd)?.set_non_blocking()?);
+        // TODO: nonblocking
+        let tun = Arc::new(TunSocket::new(tun_name_or_fd)?);
+        let mtu = tun.mtu()?;
 
         let device = Device {
-            iface,
-            config,
+            tun,
             fwmark: Default::default(),
             key_pair: Default::default(),
             listen_port: Default::default(),
@@ -377,17 +362,18 @@ impl Device {
             cleanup_paths: Default::default(),
             mtu: AtomicUsize::new(mtu),
             rate_limiter: None,
-            #[cfg(target_os = "linux")]
-            uapi_fd,
         };
 
-        /*if uapi_fd >= 0 {
-            device.register_api_fd(uapi_fd)?;
-        } else {
-            device.register_api_handler()?;
-        }*/
-        // ^ TODO: not important
         let device = Arc::new(RwLock::new(device));
+
+        if let Some(channel) = config.api {
+            Device::register_api_handler(&device, channel);
+        }
+
+        // Start listening on a random port
+        // TODO: remove Option from Device::udp*
+        Device::open_listen_socket(Arc::clone(&device), 0).await?;
+
         tokio::spawn(Self::handle_outgoing(Arc::clone(&device)));
         //device.register_notifiers()?;
         Self::register_timers(Arc::clone(&device))?;
@@ -396,7 +382,7 @@ impl Device {
         {
             // Only for macOS write the actual socket name into WG_TUN_NAME_FILE
             if let Ok(name_file) = std::env::var("WG_TUN_NAME_FILE") {
-                if name == "utun" {
+                if tun_name_or_fd == "utun" {
                     std::fs::write(&name_file, device.iface.name().unwrap().as_bytes()).unwrap();
                     device.cleanup_paths.push(name_file);
                 }
@@ -431,6 +417,9 @@ impl Device {
         udp_sock6.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0).into())?;
         udp_sock6.set_nonblocking(true)?;
 
+        self_.listen_port = port;
+
+        /*
         tokio::spawn(Self::handle_incoming(
             device.clone(),
             udp_sock4.try_clone().unwrap(),
@@ -439,16 +428,19 @@ impl Device {
             device.clone(),
             udp_sock6.try_clone().unwrap(),
         ));
+        */
 
         self_.udp4 = Some(udp_sock4);
         self_.udp6 = Some(udp_sock6);
 
-        self_.listen_port = port;
-
         Ok(())
     }
 
-    fn set_key(&mut self, private_key: x25519::StaticSecret) {
+    fn set_port(&mut self, port: u16) {
+        self.listen_port = port;
+    }
+
+    fn set_key(&mut self, device_arc: Arc<RwLock<Device>>, private_key: x25519::StaticSecret) {
         let public_key = x25519::PublicKey::from(&private_key);
         let key_pair = Some((private_key.clone(), public_key));
 
@@ -470,6 +462,12 @@ impl Device {
 
         self.key_pair = key_pair;
         self.rate_limiter = Some(rate_limiter);
+
+        // TODO stuff
+        // TODO: ipv6
+        let udp = self.udp4.as_ref().unwrap().try_clone().unwrap();
+
+        tokio::spawn(Device::handle_incoming(device_arc, udp));
     }
 
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
@@ -543,6 +541,8 @@ impl Device {
             // TODO: ipv6 isn't important. fixme
             //let udp6 = self.udp4.as_ref().unwrap().try_clone().unwrap();
 
+            drop(device_lock);
+
             loop {
                 tokio::time::sleep(Duration::from_millis(250)).await;
 
@@ -570,7 +570,7 @@ impl Device {
                         TunnResult::Err(WireGuardError::ConnectionExpired) => {
                             p.shutdown_endpoint(); // close open udp socket
                         }
-                        TunnResult::Err(e) => tracing::error!(message = "Timer error", error = ?e),
+                        TunnResult::Err(e) => log::error!("Timer error = {e:?}: {e:?}"),
                         TunnResult::WriteToNetwork(packet) => {
                             match endpoint_addr {
                                 SocketAddr::V4(_) => {
@@ -612,12 +612,13 @@ impl Device {
 
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(device: Arc<RwLock<Self>>, udp: socket2::Socket) -> Result<(), Error> {
+        log::info!("handle_incoming!");
+
         let device_lock = device.read().await;
 
         // TODO: check every time. TODO: ordering
         // TODO: wrap MTU in arc, and clone it
-        let mtu = device_lock.mtu.load(Ordering::SeqCst);
-        let iface = device_lock.iface.clone();
+        let iface = device_lock.tun.clone();
 
         let mut src_buf = [0u8; MAX_UDP_SIZE];
         let mut dst_buf = [0u8; MAX_UDP_SIZE];
@@ -629,8 +630,8 @@ impl Device {
 
         // TOOD: these 3 need to be updated. or task needs to be restarted if they change
         //let use_connected_socket = device_lock.config.use_connected_socket;
-        let listen_port = device_lock.listen_port;
-        let fwmark = device_lock.fwmark;
+        //let listen_port = device_lock.listen_port;
+        //let fwmark = device_lock.fwmark;
 
         drop(device_lock);
 
@@ -689,7 +690,10 @@ impl Device {
                     }
                     TunnResult::WriteToTunnelV4(packet, addr) => {
                         if p.is_allowed_ip(addr) {
+                            log::info!("wrote stuff, {}", packet.len());
                             iface.write4(packet);
+                        } else {
+                            log::info!("ip not allowed >:(, {}", addr);
                         }
                     }
                     TunnResult::WriteToTunnelV6(packet, addr) => {
@@ -795,7 +799,7 @@ impl Device {
 
         // TODO: check every time. TODO: ordering
         let mtu = device_lock.mtu.load(Ordering::SeqCst);
-        let iface = device_lock.iface.clone();
+        let tun = device_lock.tun.clone();
 
         let mut src_buf = [0u8; MAX_UDP_SIZE];
         let mut dst_buf = [0u8; MAX_UDP_SIZE];
@@ -803,22 +807,25 @@ impl Device {
         drop(device_lock);
 
         loop {
+            log::info!("reading from tun device");
             // TODO: async read/write
-            let src = match iface.read(&mut src_buf[..mtu]) {
+            let src = match tokio::task::block_in_place(|| tun.read(&mut src_buf[..mtu])) {
                 Ok(src) => src,
                 Err(Error::IfaceRead(e)) => {
                     let ek = e.kind();
                     if ek == io::ErrorKind::Interrupted || ek == io::ErrorKind::WouldBlock {
-                        break;
+                        log::error!("Interrupted | WouldBlock");
+                        continue;
                     }
-                    eprintln!("Fatal read error on tun interface: {:?}", e);
-                    break;
+                    log::error!("Fatal read error on tun interface: {:?}", e);
+                    continue;
                 }
                 Err(e) => {
-                    eprintln!("Unexpected error on tun interface: {:?}", e);
-                    break;
+                    log::error!("Unexpected error on tun interface: {:?}", e);
+                    continue;
                 }
             };
+            log::info!("read {} bytes from tun device", src.len());
 
             let dst_addr = match Tunn::dst_address(src) {
                 Some(addr) => addr,
@@ -834,20 +841,22 @@ impl Device {
             match peer.tunnel.encapsulate(src, &mut dst_buf) {
                 TunnResult::Done => {}
                 TunnResult::Err(e) => {
-                    tracing::error!(message = "Encapsulate error", error = ?e)
+                    log::error!("Encapsulate error={e:?}: {e:?}");
                 }
                 TunnResult::WriteToNetwork(packet) => {
                     let mut endpoint = peer.endpoint_mut();
                     if let Some(conn) = endpoint.conn.as_mut() {
                         // Prefer to send using the connected socket
+                        // TODO: async
                         let _: Result<_, _> = conn.write(packet);
                     } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
+                        // TODO: async
                         let _: Result<_, _> = udp4.send_to(packet, &addr.into());
                     } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
                         // FIXME
                         // let _: Result<_, _> = udp6.send_to(packet, &addr.into());
                     } else {
-                        tracing::error!("No endpoint");
+                        log::error!("No endpoint");
                     }
                 }
                 _ => panic!("Unexpected result from encapsulate"),

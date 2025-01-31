@@ -66,11 +66,15 @@ impl TunSocket {
         // If the provided name appears to be a FD, use that.
         let provided_fd = name.parse::<i32>();
         if let Ok(fd) = provided_fd {
+
+            log::debug!("TunSocket::new({name})");
             return Ok(TunSocket {
                 fd,
                 name: name.to_string(),
             });
         }
+
+        log::debug!("TunSocket::new(), no fd");
 
         let fd = match unsafe { open(b"/dev/net/tun\0".as_ptr() as _, O_RDWR) } {
             -1 => return Err(Error::Socket(io::Error::last_os_error())),

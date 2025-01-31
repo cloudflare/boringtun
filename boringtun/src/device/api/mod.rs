@@ -15,28 +15,45 @@ use std::fs::create_dir;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixListener;
 use std::str::FromStr;
-use std::sync::{mpsc, Arc};
-use tokio::sync::RwLock;
+use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
 pub struct ConfigRx {
-    // TODO: oneshot
-    rx: mpsc::Receiver<(Request, mpsc::Sender<Response>)>,
+    rx: mpsc::Receiver<(Request, oneshot::Sender<Response>)>,
 }
 
 #[derive(Clone)]
 pub struct ConfigTx {
-    tx: mpsc::Sender<(Request, mpsc::Sender<Response>)>,
+    tx: mpsc::Sender<(Request, oneshot::Sender<Response>)>,
 }
 
 impl ConfigTx {
-    pub fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
-        let (response_tx, response_rx) = mpsc::channel();
+    pub async fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
+        let request = request.into();
+        log::info!("Sending request to boringtun: {request:?}");
+        let (response_tx, response_rx) = oneshot::channel();
         self.tx
-            .send((request.into(), response_tx))
+            .send((request, response_tx))
+            .await
             .map_err(|_| eyre!("Channel closed"))?;
-        response_rx.recv().map_err(|_| eyre!("Channel closed"))
+        response_rx
+            .await
+            .inspect(|response| log::info!("Response: {response:?}"))
+            .map_err(|_| eyre!("Channel closed"))
+    }
+
+    pub fn send_sync(&self, request: impl Into<Request>) -> eyre::Result<Response> {
+        let request = request.into();
+        log::info!("Sending request to boringtun: {request:?}");
+        let (response_tx, response_rx) = oneshot::channel();
+        self.tx
+            .blocking_send((request, response_tx))
+            .map_err(|_| eyre!("Channel closed"))?;
+        response_rx.blocking_recv()
+            .inspect(|response| log::info!("Response: {response:?}"))
+            .map_err(|_| eyre!("Channel closed"))
     }
 }
 
@@ -54,7 +71,7 @@ impl ConfigTx {
             let make_request = |s: &str| {
                 let request = Request::from_str(s).wrap_err("Failed to parse command")?;
 
-                let Some(response) = self.send(request).ok() else {
+                let Some(response) = self.send_sync(request).ok() else {
                     bail!("Server hung up");
                 };
 
@@ -105,7 +122,7 @@ impl ConfigTx {
 
 impl ConfigRx {
     pub fn new() -> (ConfigTx, ConfigRx) {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel(100);
 
         (ConfigTx { tx }, ConfigRx { rx })
     }
@@ -148,14 +165,10 @@ impl ConfigRx {
         rx
     }
 
-    pub fn recv(&mut self) -> Option<(Request, impl FnOnce(Response))> {
-        let (request, response_tx) = self.rx.recv().ok()?;
+    pub async fn recv(&mut self) -> Option<(Request, oneshot::Sender<Response>)> {
+        let (request, response_tx) = self.rx.recv().await?;
 
-        let respond = move |response| {
-            let _ = response_tx.send(response);
-        };
-
-        Some((request, respond))
+        Some((request, response_tx))
     }
 }
 
@@ -187,10 +200,11 @@ impl Device {
         let device = device.clone();
         tokio::spawn(async move {
             loop {
-                let Some((request, respond)) = channel.recv() else {
+                let Some((request, respond)) = channel.recv().await else {
                     // The remote side is closed
                     return;
                 };
+
 
                 let response = match request {
                     Request::Get(get) => {
@@ -198,12 +212,16 @@ impl Device {
                         Response::Get(api_get(get, &device_guard))
                     }
                     Request::Set(set) => {
+                        log::info!("handling set");
+
                         let mut device_guard = device.write().await;
-                        Response::Set(api_set(set, &mut device_guard))
+                        log::info!("locked!");
+
+                        Response::Set(api_set(set, &device, &mut device_guard))
                     } //_ => EIO,
                 };
 
-                respond(response);
+                let _ = respond.send(response);
 
                 // The protocol requires to return an error code as the response, or zero on success
                 //channel.tx.send(format!("errno={}\n", status)).ok();
@@ -211,7 +229,7 @@ impl Device {
         });
     }
 
-    fn register_monitor(&self, path: String) -> Result<(), Error> {
+    fn register_monitor(&self, _path: String) -> Result<(), Error> {
         /*
         self.queue.new_periodic_event(
             Box::new(move |d, _| {
@@ -244,10 +262,14 @@ impl Device {
 }
 
 fn api_get(_: Get, d: &Device) -> GetResponse {
+    log::debug!("!!! api_get");
+
     let peers = d
         .peers
         .iter()
         .map(|(public_key, peer)| {
+            log::debug!("!!! here is a peer");
+
             let peer = peer.lock(); // TODO: is this ok?
             let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
             let endpoint = peer.endpoint().addr;
@@ -282,7 +304,9 @@ fn api_get(_: Get, d: &Device) -> GetResponse {
     }
 }
 
-fn api_set(set: Set, device: &mut Device) -> SetResponse {
+fn api_set(set: Set, device_arc: &Arc<RwLock<Device>>, device: &mut Device) -> SetResponse {
+    log::debug!("!!! api_set");
+
     let Set {
         private_key,
         listen_port,
@@ -297,10 +321,10 @@ fn api_set(set: Set, device: &mut Device) -> SetResponse {
     }
 
     if let Some(private_key) = private_key {
-        device.set_key(x25519_dalek::StaticSecret::from(private_key.0));
+        device.set_key(device_arc.to_owned(), x25519_dalek::StaticSecret::from(private_key.0));
     }
     if let Some(listen_port) = listen_port {
-        unimplemented!("change port");
+        device.set_port(listen_port);
         //Device::open_listen_socket(;, port)
         //f device.open_listen_socket(listen_port).is_err() {
         //    return SetResponse { errno: EADDRINUSE };

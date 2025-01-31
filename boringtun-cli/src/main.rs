@@ -132,9 +132,9 @@ async fn main() {
             });
 
         match daemonize.start() {
-            Ok(_) => tracing::info!("BoringTun started successfully"),
+            Ok(_) => log::info!("BoringTun started successfully"),
             Err(e) => {
-                tracing::error!(error = ?e);
+                log::error!("error = {e:?}");
                 exit(1);
             }
         }
@@ -148,7 +148,7 @@ async fn main() {
     let config = DeviceConfig {
         n_threads,
         #[cfg(target_os = "linux")]
-        uapi_fd,
+        api: None, // TODO
         //use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),
@@ -158,7 +158,7 @@ async fn main() {
         Ok(d) => d,
         Err(e) => {
             // Notify parent that tunnel initialization failed
-            tracing::error!(message = "Failed to initialize tunnel", error=?e);
+            log::error!("Failed to initialize tunnel: {e:?}");
             sock1.send(&[0]).unwrap();
             exit(1);
         }
@@ -166,7 +166,7 @@ async fn main() {
 
     if !matches.is_present("disable-drop-privileges") {
         if let Err(e) = drop_privileges() {
-            tracing::error!(message = "Failed to drop privileges", error = ?e);
+            log::error!("Failed to drop privileges: {e:?}");
             sock1.send(&[0]).unwrap();
             exit(1);
         }
@@ -176,7 +176,7 @@ async fn main() {
     sock1.send(&[1]).unwrap();
     drop(sock1);
 
-    tracing::info!("BoringTun started successfully");
+    log::info!("BoringTun started successfully");
 
     // TODO: abort somehow
     tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;

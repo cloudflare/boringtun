@@ -267,7 +267,7 @@ mod tests {
                     #[cfg(target_os = "linux")]
                     use_multi_queue: true,
                     #[cfg(target_os = "linux")]
-                    uapi_fd: -1,
+                    api: None,
                 },
             )
             .await
@@ -564,7 +564,7 @@ mod tests {
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
                 #[cfg(target_os = "linux")]
-                uapi_fd: -1,
+                api: None,
             },
         )
         .await;
@@ -723,7 +723,7 @@ mod tests {
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
                 #[cfg(target_os = "linux")]
-                uapi_fd: -1,
+                api: None,
             },
         )
         .await;

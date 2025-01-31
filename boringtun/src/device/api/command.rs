@@ -12,20 +12,23 @@ use typed_builder::TypedBuilder;
 
 use crate::{device::peer::AllowedIP, serialization::KeyBytes};
 
+#[derive(Debug)]
 pub enum Request {
     Get(Get),
     Set(Set),
 }
 
+#[derive(Debug)]
 pub enum Response {
     Get(GetResponse),
     Set(SetResponse),
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 #[non_exhaustive]
 pub struct Get;
 
+#[derive(Debug)]
 #[derive(TypedBuilder)]
 #[non_exhaustive]
 pub struct GetPeer {
@@ -50,7 +53,7 @@ pub struct GetPeer {
     pub tx_bytes: Option<u64>,
 }
 
-#[derive(TypedBuilder, Default)]
+#[derive(TypedBuilder, Default, Debug)]
 #[non_exhaustive]
 pub struct GetResponse {
     /// The private key of the interface
@@ -71,7 +74,7 @@ pub struct GetResponse {
     pub errno: i32,
 }
 
-#[derive(TypedBuilder, Default)]
+#[derive(TypedBuilder, Default, Debug)]
 #[non_exhaustive]
 pub struct Set {
     /// The private key of the interface. If this key is all zero, it indicates that the private key
@@ -102,7 +105,7 @@ pub struct Set {
     pub peers: Vec<SetPeer>,
 }
 
-#[derive(TypedBuilder)]
+#[derive(TypedBuilder, Debug)]
 #[non_exhaustive]
 pub struct SetPeer {
     pub peer: Peer,
@@ -116,11 +119,13 @@ pub struct SetPeer {
     pub update_only: bool,
 }
 
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct SetResponse {
     pub errno: i32,
 }
 
+#[derive(Debug)]
 /// A config value which may be either set to something, or to nothing.
 pub enum SetUnset<T> {
     /// Set the value to `T`
@@ -130,7 +135,7 @@ pub enum SetUnset<T> {
     Unset,
 }
 
-#[derive(TypedBuilder)]
+#[derive(TypedBuilder, Debug)]
 #[non_exhaustive]
 pub struct Peer {
     /// The public key of a peer entry.
