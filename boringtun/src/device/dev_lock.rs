@@ -45,7 +45,7 @@ pub struct LockReadGuard<'a, T: 'a + ?Sized> {
     inner: RwLockReadGuard<'a, T>,
 }
 
-impl<'a, T: ?Sized> LockReadGuard<'a, T> {
+impl<T: ?Sized> LockReadGuard<'_, T> {
     /// Perform a closure on a mutable reference of the inner locked value.
     ///
     /// # Parameters
@@ -99,7 +99,7 @@ impl<'a, T: ?Sized> LockReadGuard<'a, T> {
     }
 }
 
-impl<'a, T: ?Sized> Deref for LockReadGuard<'a, T> {
+impl<T: ?Sized> Deref for LockReadGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &T {

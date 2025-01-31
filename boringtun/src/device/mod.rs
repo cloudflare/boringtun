@@ -362,7 +362,7 @@ impl Device {
         #[cfg(target_os = "linux")]
         let uapi_fd = config.uapi_fd;
 
-        let mut device = Device {
+        let device = Device {
             iface,
             config,
             fwmark: Default::default(),

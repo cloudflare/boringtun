@@ -195,11 +195,11 @@ impl Device {
                 let response = match request {
                     Request::Get(get) => {
                         let device_guard = device.read().await;
-                        Response::Get(api_get(get, &*device_guard))
+                        Response::Get(api_get(get, &device_guard))
                     }
                     Request::Set(set) => {
                         let mut device_guard = device.write().await;
-                        Response::Set(api_set(set, &mut *device_guard))
+                        Response::Set(api_set(set, &mut device_guard))
                     } //_ => EIO,
                 };
 
