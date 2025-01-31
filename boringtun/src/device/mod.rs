@@ -29,6 +29,7 @@ use std::collections::HashMap;
 use std::io::{self, Write as _};
 use std::mem::MaybeUninit;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -384,11 +385,12 @@ impl Device {
             uapi_fd,
         };
 
-        if uapi_fd >= 0 {
+        /*if uapi_fd >= 0 {
             device.register_api_fd(uapi_fd)?;
         } else {
             device.register_api_handler()?;
-        }
+        }*/
+        // ^ TODO: not important
         device.register_iface_handler(Arc::clone(&device.iface))?;
         device.register_notifiers()?;
         device.register_timers()?;
@@ -763,7 +765,75 @@ impl Device {
         Ok(())
     }
 
-    fn register_iface_handler(&self, iface: Arc<TunSocket>) -> Result<(), Error> {
+    fn register_iface_handler(
+        self: Arc<Self>,
+        iface: Arc<TunSocket>,
+    ) -> Result<(), Error> {
+        // TODO
+        let udp4 = self.udp4.as_ref().unwrap().try_clone().unwrap();
+        // TODO: ipv6 isn't important. fixme
+        //let udp6 = self.udp4.as_ref().unwrap().try_clone().unwrap();
+
+        // TODO: check every time. TODO: ordering
+        let mtu = self.mtu.load(Ordering::SeqCst);
+
+        tokio::spawn(async move {
+            let mut src_buf = [0u8; MAX_UDP_SIZE];
+            let mut dst_buf = [0u8; MAX_UDP_SIZE];
+
+            loop {
+                let peers = self.peers_by_ip;
+                // TODO: async read/write
+                let src = match iface.read(&mut src_buf[..mtu]) {
+                    Ok(src) => src,
+                    Err(Error::IfaceRead(e)) => {
+                        let ek = e.kind();
+                        if ek == io::ErrorKind::Interrupted || ek == io::ErrorKind::WouldBlock {
+                            break;
+                        }
+                        eprintln!("Fatal read error on tun interface: {:?}", e);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("Unexpected error on tun interface: {:?}", e);
+                        break;
+                    }
+                };
+
+                let dst_addr = match Tunn::dst_address(src) {
+                    Some(addr) => addr,
+                    None => continue,
+                };
+
+                let mut peer = match peers.find(dst_addr) {
+                    Some(peer) => peer.lock(),
+                    None => continue,
+                };
+
+                match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
+                    TunnResult::Done => {}
+                    TunnResult::Err(e) => {
+                        tracing::error!(message = "Encapsulate error", error = ?e)
+                    }
+                    TunnResult::WriteToNetwork(packet) => {
+                        let mut endpoint = peer.endpoint_mut();
+                        if let Some(conn) = endpoint.conn.as_mut() {
+                            // Prefer to send using the connected socket
+                            let _: Result<_, _> = conn.write(packet);
+                        } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
+                            let _: Result<_, _> = udp4.send_to(packet, &addr.into());
+                        } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
+                            // FIXME
+                            //let _: Result<_, _> = udp6.send_to(packet, &addr.into());
+                        } else {
+                            tracing::error!("No endpoint");
+                        }
+                    }
+                    _ => panic!("Unexpected result from encapsulate"),
+                };
+            }
+        });
+
         self.queue.new_event(
             iface.as_raw_fd(),
             Box::new(move |d, t| {
