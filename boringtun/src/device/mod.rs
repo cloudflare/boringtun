@@ -810,7 +810,7 @@ impl Device {
                     None => continue,
                 };
 
-                match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
+                match peer.tunnel.encapsulate(src, &mut dst_buf) {
                     TunnResult::Done => {}
                     TunnResult::Err(e) => {
                         tracing::error!(message = "Encapsulate error", error = ?e)
