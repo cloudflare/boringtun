@@ -509,29 +509,23 @@ impl Device {
 
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(device: Weak<RwLock<Self>>, udp: Arc<UdpSocket>) -> Result<(), Error> {
-        let Some(device_arc) = device.upgrade() else {
-            return Ok(());
-        };
-        let device_lock = device_arc.read().await;
-
-        // TODO: check every time. TODO: ordering
-        // TODO: wrap MTU in arc, and clone it
-        let tun = device_lock.tun.clone();
-
         let mut src_buf = [0u8; MAX_UDP_SIZE];
         let mut dst_buf = [0u8; MAX_UDP_SIZE];
 
-        // TODO: restart task if key pair is modified
-        // Handler that handles anonymous packets over UDP
-        let (private_key, public_key) = device_lock.key_pair.clone().expect("Key not set");
-        let rate_limiter = device_lock.rate_limiter.clone().unwrap();
+        let (tun, private_key, public_key, rate_limiter) = {
+            let Some(device) = device.upgrade() else {
+                return Ok(());
+            };
+            let device = device.read().await;
 
-        drop(device_lock);
-        drop(device_arc);
+            let tun = device.tun.clone();
+            let (private_key, public_key) = device.key_pair.clone().expect("Key not set");
+            let rate_limiter = device.rate_limiter.clone().unwrap();
+            (tun, private_key, public_key, rate_limiter)
+        };
 
         loop {
-            // Loop while we have packets on the anonymous connection
-
+            // Read packets from the socket.
             let (packet_len, addr) = udp.recv_from(&mut src_buf[..]).await.map_err(|e| {
                 log::error!("UDP recv_from error {e:?}");
                 Error::IoError(e)
@@ -562,13 +556,10 @@ impl Device {
                 Packet::PacketCookieReply(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
                 Packet::PacketData(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
             };
-            let peer = match peer {
-                None => continue,
-                Some(peer) => peer,
-            };
-            let mut p = peer.lock().await;
+            let Some(peer) = peer else { continue };
+            let mut peer = peer.lock().await;
             let mut flush = false;
-            match p
+            match peer
                 .tunnel
                 .handle_verified_packet(parsed_packet, &mut dst_buf[..])
             {
@@ -579,22 +570,31 @@ impl Device {
                     let _: Result<_, _> = udp.send_to(packet, &addr).await;
                 }
                 TunnResult::WriteToTunnelV4(packet, addr) => {
-                    if p.is_allowed_ip(addr) {
+                    if peer.is_allowed_ip(addr) {
                         tun.send(packet).await.unwrap();
                     }
                 }
                 TunnResult::WriteToTunnelV6(packet, addr) => {
-                    if p.is_allowed_ip(addr) {
+                    if peer.is_allowed_ip(addr) {
                         tun.send(packet).await.unwrap();
                     }
                 }
             };
             if flush {
                 // Flush pending queue
-                while let TunnResult::WriteToNetwork(packet) =
-                    p.tunnel.decapsulate(None, &[], &mut dst_buf[..])
-                {
-                    let _: Result<_, _> = udp.send_to(packet, &addr).await;
+                loop {
+                    match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
+                        TunnResult::WriteToNetwork(packet) => {
+                            // TODO: why do we ignore this error?
+                            let _ = udp.send_to(packet, &addr).await;
+                        }
+                        TunnResult::Done => break,
+                        // TODO: why do we ignore this error?
+                        TunnResult::Err(_) => continue,
+
+                        // TODO: fix the types so we can't end up here.
+                        _ => panic!("unexpected TunnResult"),
+                    }
                 }
             }
         }
@@ -608,22 +608,22 @@ impl Device {
         udp4: Arc<UdpSocket>,
         udp6: Arc<UdpSocket>,
     ) {
-        let Some(device_arc) = device.upgrade() else {
-            return;
+        let (mtu, tun) = {
+            let Some(device) = device.upgrade() else {
+                return;
+            };
+            let device = device.read().await;
+
+            // TODO: pass in peers and sockets instead of device?
+
+            // TODO: check every time. TODO: ordering
+            let mtu = usize::from(device.mtu.load(Ordering::SeqCst));
+            let tun = device.tun.clone();
+            (mtu, tun)
         };
-        let device_lock = device_arc.read().await;
-
-        // TODO: pass in peers and sockets instead of device?
-
-        // TODO: check every time. TODO: ordering
-        let mtu = usize::from(device_lock.mtu.load(Ordering::SeqCst));
-        let tun = device_lock.tun.clone();
 
         let mut src_buf = [0u8; MAX_UDP_SIZE];
         let mut dst_buf = [0u8; MAX_UDP_SIZE];
-
-        drop(device_lock);
-        drop(device_arc);
 
         loop {
             let n = match tun.recv(&mut src_buf[..mtu]).await {

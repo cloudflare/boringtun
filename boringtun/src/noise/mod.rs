@@ -153,7 +153,7 @@ impl Tunn {
                 nonce: &src[8..32],
                 encrypted_cookie: &src[32..64],
             }),
-            (DATA, DATA_OVERHEAD_SZ..=std::usize::MAX) => Packet::PacketData(PacketData {
+            (DATA, DATA_OVERHEAD_SZ..=usize::MAX) => Packet::PacketData(PacketData {
                 receiver_idx: u32::from_le_bytes(src[4..8].try_into().unwrap()),
                 counter: u64::from_le_bytes(src[8..16].try_into().unwrap()),
                 encrypted_encapsulated_packet: &src[16..],
@@ -320,9 +320,7 @@ impl Tunn {
         p: HandshakeInit,
         dst: &'a mut [u8],
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        log::debug!(
-            "Received handshake_initiation: {}", p.sender_idx
-        );
+        log::debug!("Received handshake_initiation: {}", p.sender_idx);
 
         let (packet, session) = self.handshake.receive_handshake_initialization(p, dst)?;
 
@@ -371,10 +369,7 @@ impl Tunn {
         &mut self,
         p: PacketCookieReply,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        log::debug!(
-            "Received cookie_reply: {}",
-             p.receiver_idx
-        );
+        log::debug!("Received cookie_reply: {}", p.receiver_idx);
 
         self.handshake.receive_cookie_reply(p)?;
         self.timer_tick(TimerName::TimeLastPacketReceived);

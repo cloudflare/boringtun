@@ -297,9 +297,7 @@ async fn api_get(_: Get, d: &Device) -> GetResponse {
                     .collect(),
             },
             last_handshake_time_sec: peer.time_since_last_handshake().map(|d| d.as_secs()),
-            last_handshake_time_nsec: peer
-                .time_since_last_handshake()
-                .map(|d| d.subsec_nanos()),
+            last_handshake_time_nsec: peer.time_since_last_handshake().map(|d| d.subsec_nanos()),
             rx_bytes: Some(rx_bytes as u64),
             tx_bytes: Some(tx_bytes as u64),
         });
