@@ -35,8 +35,8 @@ use _instant_boottime::Instant;
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
 pub(crate) const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
-const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
-const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
+pub(crate) const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
+pub(crate) const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
 pub(crate) const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
@@ -232,9 +232,14 @@ impl Tunn {
             // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
             if now - session_established >= REJECT_AFTER_TIME * 3 {
                 tracing::error!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
-                self.handshake.set_expired();
                 self.clear_all();
-                return TunnResult::Err(WireGuardError::ConnectionExpired);
+
+                if persistent_keepalive > 0 {
+                    handshake_initiation_required = true;
+                } else {
+                    self.handshake.set_expired();
+                    return TunnResult::Err(WireGuardError::ConnectionExpired);
+                }
             }
 
             if let Some(time_init_sent) = self.handshake.timer() {
@@ -245,9 +250,14 @@ impl Tunn {
                     // up to be sent. If a packet is explicitly queued up to be sent, then
                     // this timer is reset.
                     tracing::error!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
-                    self.handshake.set_expired();
                     self.clear_all();
-                    return TunnResult::Err(WireGuardError::ConnectionExpired);
+
+                    if persistent_keepalive > 0 {
+                        handshake_initiation_required = true;
+                    } else {
+                        self.handshake.set_expired();
+                        return TunnResult::Err(WireGuardError::ConnectionExpired);
+                    }
                 }
 
                 if time_init_sent.elapsed() >= REKEY_TIMEOUT {

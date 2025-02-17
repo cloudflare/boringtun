@@ -637,8 +637,11 @@ impl Tunn {
 
 #[cfg(test)]
 mod tests {
+    use crate::noise::timers::{
+        REJECT_AFTER_TIME, REKEY_AFTER_TIME, REKEY_ATTEMPT_TIME, REKEY_TIMEOUT,
+    };
     #[cfg(feature = "mock-instant")]
-    use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
+    use mock_instant::MockClock;
 
     use super::*;
     use rand_core::{OsRng, RngCore};
@@ -780,6 +783,150 @@ mod tests {
         assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
     }
 
+    #[cfg(feature = "mock-instant")]
+    #[test]
+    fn no_handshake_if_no_keepalive() {
+        // if no keepalive is set and no activity happens, expect silence
+        let (mut my_tun, _) = create_two_tuns();
+
+        let mut my_dst = [0u8; 1024];
+        assert!(matches!(
+            my_tun.update_timers(&mut my_dst),
+            TunnResult::Done
+        ));
+    }
+
+    #[cfg(feature = "mock-instant")]
+    #[test]
+    fn handshake_if_keepalive() {
+        // if keepalive is set, then it should be a trigger for handshake
+        let (mut my_tun, _) = create_two_tuns();
+
+        my_tun.set_persistent_keepalive(25);
+
+        let mut my_dst = [0u8; 1024];
+        assert!(matches!(
+            my_tun.update_timers(&mut my_dst),
+            TunnResult::WriteToNetwork(_)
+        ));
+    }
+
+    #[cfg(feature = "mock-instant")]
+    #[test]
+    fn handshake_if_keepalive_after_wg_rekey_attempt_time() {
+        // From the sender's perspective: failing to establish a
+        // handshake for REKEY_ATTEMPT_TIME but having keepalive set
+        // must force new handshake attempt instead of ceasing action.
+        let (mut my_tun, _) = create_two_tuns();
+
+        my_tun.set_persistent_keepalive(25);
+
+        let mut my_dst = [0u8; 1024];
+        assert!(matches!(
+            my_tun.update_timers(&mut my_dst),
+            TunnResult::WriteToNetwork(_)
+        ));
+
+        MockClock::advance(REKEY_ATTEMPT_TIME.into());
+        // TODO: fast-forwarding right onto boundary seems to be silent so fast-forwarding
+        // by an additional second to combat this off-by-one issue
+        MockClock::advance(Duration::from_secs(1));
+        assert!(matches!(
+            my_tun.update_timers(&mut my_dst),
+            TunnResult::WriteToNetwork(_)
+        ));
+    }
+
+    #[cfg(feature = "mock-instant")]
+    #[test]
+    fn no_handshake_if_no_keepalive_after_wg_rekey_attempt_time() {
+        // From the sender's perspective: failing to establish a
+        // handshake for REKEY_ATTEMPT_TIME with no keepalive set
+        // should result in ceased attempts.
+        let (mut my_tun, _) = create_two_tuns();
+
+        // First lets trigger the handshake
+        let mut my_dst = [0u8; 1024];
+
+        let sent_packet_buf = create_ipv4_udp_packet();
+        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
+
+        MockClock::advance(REKEY_ATTEMPT_TIME.into());
+
+        // TODO: Fast forwarding right onto boundary seems to attempt one more handshake, something
+        // seems to be off-by-one somewhere
+        MockClock::advance(Duration::from_secs(1));
+
+        assert!(matches!(
+            my_tun.update_timers(&mut my_dst),
+            TunnResult::Err(WireGuardError::ConnectionExpired)
+        ));
+    }
+    #[cfg(feature = "mock-instant")]
+    #[test]
+    fn assert_no_handshake_if_no_keepalive_after_3x_wg_reject_after_time() {
+        // WireGuard#6.3:
+        // <...>
+        // If no new secure session is created after (Reject-After-Time × 3) seconds,
+        // the current secure session, the previous secure session, and potentially
+        // the next secure session are discarded and zeroed out, in addition to any
+        // possible partially-completed handshake states and ephemeral keys.
+        // <...>
+
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+
+        let mut my_dst = [0u8; 1024];
+
+        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
+        assert!(matches!(
+            my_tun.update_timers(&mut my_dst),
+            TunnResult::Done
+        ));
+        let sent_packet_buf = create_ipv4_udp_packet();
+        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
+
+        // Expire the session
+        MockClock::advance((REJECT_AFTER_TIME * 3).into());
+
+        assert!(matches!(
+            my_tun.update_timers(&mut []),
+            TunnResult::Err(WireGuardError::ConnectionExpired)
+        ));
+    }
+
+    #[cfg(feature = "mock-instant")]
+    #[test]
+    fn assert_handshake_if_keepalive_after_3x_wg_reject_after_time() {
+        // WireGuard#6.3:
+        // <...>
+        // If no new secure session is created after (Reject-After-Time × 3) seconds,
+        // the current secure session, the previous secure session, and potentially
+        // the next secure session are discarded and zeroed out, in addition to any
+        // possible partially-completed handshake states and ephemeral keys.
+        // <...>
+
+        let (mut my_tun, _) = create_two_tuns();
+
+        // Persistent-Keepalive value doesn't matter, while it's non zero
+        my_tun.set_persistent_keepalive(25);
+
+        let mut my_dst = [0u8; 1024];
+
+        assert!(matches!(
+            my_tun.update_timers(&mut my_dst),
+            TunnResult::WriteToNetwork(_)
+        ));
+
+        // Expire the session
+        MockClock::advance((REJECT_AFTER_TIME * 3).into());
+
+        assert!(matches!(
+            my_tun.update_timers(&mut my_dst),
+            TunnResult::WriteToNetwork(_)
+        ));
+    }
     #[test]
     #[cfg(feature = "mock-instant")]
     fn new_handshake_after_two_mins() {
@@ -788,7 +935,7 @@ mod tests {
 
         // Advance time 1 second and "send" 1 packet so that we send a handshake
         // after the timeout
-        mock_instant::MockClock::advance(Duration::from_secs(1));
+        MockClock::advance(Duration::from_secs(1));
         assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
         assert!(matches!(
             my_tun.update_timers(&mut my_dst),
@@ -799,7 +946,7 @@ mod tests {
         assert!(matches!(data, TunnResult::WriteToNetwork(_)));
 
         //Advance to timeout
-        mock_instant::MockClock::advance(REKEY_AFTER_TIME.into());
+        MockClock::advance(REKEY_AFTER_TIME.into());
         assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
         update_timer_results_in_handshake(&mut my_tun);
     }
