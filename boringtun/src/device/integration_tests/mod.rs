@@ -3,7 +3,7 @@
 
 // This module contains some integration tests for boringtun
 // Those tests require docker and sudo privileges to run
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(test, not(target_os = "macos"), not(target_os = "windows")))]
 mod tests {
     use crate::device::{DeviceConfig, DeviceHandle};
     use crate::x25519::{PublicKey, StaticSecret};
