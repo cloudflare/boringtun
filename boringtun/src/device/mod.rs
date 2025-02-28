@@ -20,8 +20,8 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::join;
 use tokio::net::UdpSocket;
-use tokio::sync::{mpsc, Mutex};
 use tokio::sync::RwLock;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::noise::errors::WireGuardError;
@@ -86,7 +86,7 @@ pub struct DeviceConfig {
     pub api: Option<api::ConfigRx>,
 
     /// Used on Android to bypass UDP sockets.
-    pub on_bind: Option<Box<dyn FnMut (&UdpSocket) + Send + Sync>>,
+    pub on_bind: Option<Box<dyn FnMut(&UdpSocket) + Send + Sync>>,
 }
 
 impl Default for DeviceConfig {
@@ -97,7 +97,6 @@ impl Default for DeviceConfig {
             use_multi_queue: true,
             api: None,
             on_bind: None,
-
         }
     }
 }
@@ -126,7 +125,7 @@ pub struct Device {
     api: Option<Task>,
 
     /// Used on Android to bypass UDP sockets.
-    pub on_bind: Option<Box<dyn FnMut (&UdpSocket) + Send + Sync>>,
+    pub on_bind: Option<Box<dyn FnMut(&UdpSocket) + Send + Sync>>,
 }
 
 struct Task {
@@ -406,7 +405,6 @@ impl Device {
             setsockopt(udp_sock6.as_raw_fd(), sockopt::Mark, &mark).unwrap();
         }
 
-
         if let Some(bypass) = &mut self.on_bind {
             bypass(&udp_sock4);
             bypass(&udp_sock6);
@@ -523,8 +521,9 @@ impl Device {
 
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(device: Weak<RwLock<Self>>, udp: Arc<UdpSocket>) -> Result<(), Error> {
-        let mut src_buf = [0u8; MAX_UDP_SIZE];
         let mut dst_buf = [0u8; MAX_UDP_SIZE];
+
+        let (buf_tx, mut buf_rx) = mpsc::unbounded_channel::<Box<[u8; 4096]>>();
 
         let (tun, private_key, public_key, rate_limiter) = {
             let Some(device) = device.upgrade() else {
@@ -538,8 +537,8 @@ impl Device {
             (tun, private_key, public_key, rate_limiter)
         };
 
-        let (dec_tx, mut dec_rx): (mpsc::Sender<(Box<[u8]>, SocketAddr)>, _) = mpsc::channel(5000);
-        
+        let (dec_tx, mut dec_rx): (mpsc::Sender<(PacketBuf, SocketAddr)>, _) = mpsc::channel(5000);
+
         // let (send_tx, mut send_rx): (mpsc::Sender<(Box<[u8]>, SocketAddr)>, _) = mpsc::channel(5000);
         // let udp2 = udp.clone();
         // tokio::task::spawn(async move {
@@ -550,16 +549,19 @@ impl Device {
 
         let udp3 = udp.clone();
         tokio::task::spawn(async move {
-            while let Some((packet, addr)) = dec_rx.recv().await {
-                let parsed_packet =
-                    match rate_limiter.verify_packet(Some(addr.ip()), &packet, &mut dst_buf) {
-                        Ok(packet) => packet,
-                        Err(TunnResult::WriteToNetwork(cookie)) => {
-                            let _: Result<_, _> = udp3.send_to(cookie, &addr).await;
-                            continue;
-                        }
-                        Err(_) => continue,
-                    };
+            while let Some((packet_owned, addr)) = dec_rx.recv().await {
+                let parsed_packet = match rate_limiter.verify_packet(
+                    Some(addr.ip()),
+                    packet_owned.packet(),
+                    &mut dst_buf,
+                ) {
+                    Ok(packet) => packet,
+                    Err(TunnResult::WriteToNetwork(cookie)) => {
+                        let _: Result<_, _> = udp3.send_to(cookie, &addr).await;
+                        continue;
+                    }
+                    Err(_) => continue,
+                };
 
                 let Some(device) = device.upgrade() else {
                     break;
@@ -600,6 +602,10 @@ impl Device {
                         }
                     }
                 };
+
+                // Send the buffer back to be reclaimed
+                let _ = buf_tx.send(packet_owned.buf);
+
                 if flush {
                     // Flush pending queue
                     loop {
@@ -621,16 +627,21 @@ impl Device {
         });
 
         loop {
+            let mut buf = buf_rx.try_recv().unwrap_or_else(|_| datagram_buffer());
+
             // Read packets from the socket.
-            let (packet_len, addr) = udp.recv_from(&mut src_buf[..]).await.map_err(|e| {
+            let (packet_len, addr) = udp.recv_from(&mut buf[..]).await.map_err(|e| {
                 log::error!("UDP recv_from error {e:?}");
                 Error::IoError(e)
             })?;
 
-            let boxed = Box::from(&src_buf[..packet_len]);
-            if let Err(mpsc::error::TrySendError::Full((boxed, addr))) =dec_tx.try_send((boxed, addr)) {
+            let packet_buf = PacketBuf { packet_len, buf };
+
+            if let Err(mpsc::error::TrySendError::Full((packet_buf, addr))) =
+                dec_tx.try_send((packet_buf, addr))
+            {
                 log::warn!("Back-pressure on dec_tx"); // TODO: remove this log
-                if dec_tx.send((boxed, addr)).await.is_err() {
+                if dec_tx.send((packet_buf, addr)).await.is_err() {
                     return Ok(()); // Decryption task has been dropped
                 }
             }
@@ -716,6 +727,28 @@ struct IndexLfsr {
     initial: u32,
     lfsr: u32,
     mask: u32,
+}
+
+/// Creates and returns a buffer on the heap with enough space to contain any possible
+/// UDP datagram.
+///
+/// This is put on the heap and in a separate function to avoid the 64k buffer from ending
+/// up on the stack and blowing up the size of the futures using it.
+#[inline(never)]
+pub fn datagram_buffer() -> Box<[u8; 4096]> {
+    log::info!("allocating new buf hehe");
+    Box::new([0u8; 4096])
+}
+
+struct PacketBuf {
+    pub packet_len: usize,
+    pub buf: Box<[u8; 4096]>,
+}
+
+impl PacketBuf {
+    pub fn packet(&self) -> &[u8] {
+        &self.buf[..self.packet_len]
+    }
 }
 
 impl IndexLfsr {
