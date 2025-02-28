@@ -558,9 +558,13 @@ impl Device {
                     Ok(packet) => packet,
                     Err(TunnResult::WriteToNetwork(cookie)) => {
                         let _: Result<_, _> = udp3.send_to(cookie, &addr).await;
+                        let _ = buf_tx.send(packet_owned.buf);
                         continue;
                     }
-                    Err(_) => continue,
+                    Err(_) => {
+                        let _ = buf_tx.send(packet_owned.buf);
+                        continue;
+                    }
                 };
 
                 let Some(device) = device.upgrade() else {
@@ -577,7 +581,10 @@ impl Device {
                     Packet::PacketCookieReply(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
                     Packet::PacketData(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
                 };
-                let Some(peer) = peer else { continue };
+                let Some(peer) = peer else {
+                    let _ = buf_tx.send(packet_owned.buf);
+                    continue;
+                };
                 let mut peer = peer.lock().await;
                 let mut flush = false;
                 match peer
@@ -585,7 +592,10 @@ impl Device {
                     .handle_verified_packet(parsed_packet, &mut dst_buf[..])
                 {
                     TunnResult::Done => {}
-                    TunnResult::Err(_) => continue,
+                    TunnResult::Err(_) => {
+                        let _ = buf_tx.send(packet_owned.buf);
+                        continue;
+                    }
                     TunnResult::WriteToNetwork(packet) => {
                         flush = true;
                         // TODO: mpsc send
