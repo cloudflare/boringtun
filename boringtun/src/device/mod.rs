@@ -78,13 +78,15 @@ pub struct DeviceHandle {
     device: Arc<RwLock<Device>>,
 }
 
-#[derive(Debug)]
 pub struct DeviceConfig {
     pub n_threads: usize,
     #[cfg(target_os = "linux")]
     pub use_multi_queue: bool,
 
     pub api: Option<api::ConfigRx>,
+
+    /// Used on Android to bypass UDP sockets.
+    pub on_bind: Option<Box<dyn FnMut (&UdpSocket) + Send + Sync>>,
 }
 
 impl Default for DeviceConfig {
@@ -94,6 +96,8 @@ impl Default for DeviceConfig {
             #[cfg(target_os = "linux")]
             use_multi_queue: true,
             api: None,
+            on_bind: None,
+
         }
     }
 }
@@ -120,6 +124,9 @@ pub struct Device {
 
     /// The task that responds to API requests.
     api: Option<Task>,
+
+    /// Used on Android to bypass UDP sockets.
+    pub on_bind: Option<Box<dyn FnMut (&UdpSocket) + Send + Sync>>,
 }
 
 struct Task {
@@ -146,7 +153,7 @@ pub(crate) struct Connection {
 
 impl Connection {
     pub async fn set_up(device: Arc<RwLock<Device>>) -> Result<Self, Error> {
-        let device_guard = device.read().await;
+        let mut device_guard = device.write().await;
         let (udp4, udp6) = device_guard.open_listen_socket().await?;
         drop(device_guard);
 
@@ -339,6 +346,7 @@ impl Device {
             rate_limiter: None,
             port: 0,
             connection: None,
+            on_bind: config.on_bind,
         };
 
         let device = Arc::new(RwLock::new(device));
@@ -375,7 +383,7 @@ impl Device {
 
     /// Bind two UDP sockets. One for IPv4, one for IPv6.
     async fn open_listen_socket(
-        &self,
+        &mut self,
     ) -> Result<(tokio::net::UdpSocket, tokio::net::UdpSocket), Error> {
         let mut port = self.port;
         let addrv4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
@@ -396,6 +404,12 @@ impl Device {
             // TODO: errors
             setsockopt(udp_sock4.as_raw_fd(), sockopt::Mark, &mark).unwrap();
             setsockopt(udp_sock6.as_raw_fd(), sockopt::Mark, &mark).unwrap();
+        }
+
+
+        if let Some(bypass) = &mut self.on_bind {
+            bypass(&udp_sock4);
+            bypass(&udp_sock6);
         }
 
         Ok((udp_sock4, udp_sock6))
@@ -427,7 +441,7 @@ impl Device {
         Reconfigure::Yes
     }
 
-    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    #[cfg(any(target_os = "fuchsia", target_os = "linux"))]
     fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
         use nix::sys::socket::{setsockopt, sockopt};
         use std::os::fd::AsRawFd;
