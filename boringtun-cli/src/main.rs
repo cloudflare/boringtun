@@ -152,6 +152,7 @@ async fn main() {
         //use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),
+        on_bind: None,
     };
 
     let _device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config).await {

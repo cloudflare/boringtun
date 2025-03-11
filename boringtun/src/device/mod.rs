@@ -78,6 +78,8 @@ pub struct DeviceHandle {
     device: Arc<RwLock<Device>>,
 }
 
+type OnBindCallback = Box<dyn FnMut(&UdpSocket) + Send + Sync>;
+
 pub struct DeviceConfig {
     pub n_threads: usize,
     #[cfg(target_os = "linux")]
@@ -86,7 +88,7 @@ pub struct DeviceConfig {
     pub api: Option<api::ConfigRx>,
 
     /// Used on Android to bypass UDP sockets.
-    pub on_bind: Option<Box<dyn FnMut(&UdpSocket) + Send + Sync>>,
+    pub on_bind: Option<OnBindCallback>,
 }
 
 impl Default for DeviceConfig {
@@ -125,7 +127,7 @@ pub struct Device {
     api: Option<Task>,
 
     /// Used on Android to bypass UDP sockets.
-    pub on_bind: Option<Box<dyn FnMut(&UdpSocket) + Send + Sync>>,
+    pub on_bind: Option<OnBindCallback>,
 }
 
 struct Task {
@@ -384,7 +386,7 @@ impl Device {
     async fn open_listen_socket(
         &mut self,
     ) -> Result<(tokio::net::UdpSocket, tokio::net::UdpSocket), Error> {
-        let mut port = self.port;
+        let port = self.port;
         let addrv4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
         let udp_sock4 = tokio::net::UdpSocket::bind(addrv4).await?;
         if port == 0 {

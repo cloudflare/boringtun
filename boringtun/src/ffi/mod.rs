@@ -226,16 +226,12 @@ pub unsafe extern "C" fn set_logging_function(
         fmt()
             .event_format(format)
             .with_writer(std::sync::Mutex::new(writer))
-            .with_max_level(log::Level::TRACE)
+            .with_max_level(tracing::Level::TRACE)
             .with_ansi(false)
             .try_init()
             .is_ok()
     });
-    if let Ok(value) = result {
-        value
-    } else {
-        false
-    }
+    result.unwrap_or(false)
 }
 
 /// Allocate a new tunnel, return NULL on failure.

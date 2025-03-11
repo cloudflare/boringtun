@@ -268,6 +268,7 @@ mod tests {
                     use_multi_queue: true,
                     #[cfg(target_os = "linux")]
                     api: None,
+                    on_bind: None,
                 },
             )
             .await
@@ -565,6 +566,7 @@ mod tests {
                 use_multi_queue: true,
                 #[cfg(target_os = "linux")]
                 api: None,
+                on_bind: None,
             },
         )
         .await;
@@ -724,6 +726,7 @@ mod tests {
                 use_multi_queue: true,
                 #[cfg(target_os = "linux")]
                 api: None,
+                on_bind: None,
             },
         )
         .await;
