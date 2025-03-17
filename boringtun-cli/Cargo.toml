@@ -14,7 +14,7 @@ clap = { version = "3.1.6", features = ["env"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.9"
 tracing-appender = "0.2.1"
-log = "*"
+log = "0.4"
 tokio = { version = "1.43.0", features = ["full"] }
 
 [dependencies.boringtun]

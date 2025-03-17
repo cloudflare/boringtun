@@ -55,16 +55,6 @@ async fn main() {
                 .possible_values(["error", "info", "debug", "trace"])
                 .help("Log verbosity")
                 .default_value("error"),
-            Arg::new("uapi-fd")
-                .long("uapi-fd")
-                .env("WG_UAPI_FD")
-                .help("File descriptor for the user API")
-                .default_value("-1"),
-            Arg::new("tun-fd")
-                .long("tun-fd")
-                .env("WG_TUN_FD")
-                .help("File descriptor for an already-existing TUN device")
-                .default_value("-1"),
             Arg::new("log")
                 .takes_value(true)
                 .long("log")
@@ -87,13 +77,7 @@ async fn main() {
         .get_matches();
 
     let background = !matches.is_present("foreground");
-    #[cfg(target_os = "linux")]
-    let uapi_fd: i32 = matches.value_of_t("uapi-fd").unwrap_or_else(|e| e.exit());
-    let tun_fd: isize = matches.value_of_t("tun-fd").unwrap_or_else(|e| e.exit());
-    let mut tun_name = matches.value_of("INTERFACE_NAME").unwrap();
-    if tun_fd >= 0 {
-        tun_name = matches.value_of("tun-fd").unwrap();
-    }
+    let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
     let n_threads: usize = matches.value_of_t("threads").unwrap_or_else(|e| e.exit());
     let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
 
@@ -145,10 +129,12 @@ async fn main() {
             .init();
     }
 
+    let api = boringtun::device::api::ApiServer::default_unix_socket(tun_name).unwrap();
+
     let config = DeviceConfig {
         n_threads,
         #[cfg(target_os = "linux")]
-        api: None, // TODO
+        api: Some(api),
         //use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),
