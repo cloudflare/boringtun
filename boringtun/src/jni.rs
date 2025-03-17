@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 // temporary, we need to do some verification around these bindings later
-#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::missing_safety_doc, unused_attributes)]
 
 /// JNI bindings for BoringTun library
 use std::os::raw::c_char;

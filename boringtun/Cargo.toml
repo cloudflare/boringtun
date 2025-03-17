@@ -1,7 +1,7 @@
 [package]
 name = "boringtun"
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
-version = "0.6.0"
+version = "0.6.1"
 authors = [
     "Noah Kennedy <nkennedy@cloudflare.com>",
     "Andy Grover <agrover@cloudflare.com>",
