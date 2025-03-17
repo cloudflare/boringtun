@@ -9,9 +9,9 @@ use std::time::Instant;
 use aead::generic_array::GenericArray;
 use aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{Key, XChaCha20Poly1305};
+use constant_time_eq::constant_time_eq;
 use parking_lot::Mutex;
 use rand::{rngs::OsRng, RngCore};
-use ring::constant_time::verify_slices_are_equal;
 
 const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can optimize out the division
 const COOKIE_SIZE: usize = 16;
@@ -200,8 +200,9 @@ impl RateLimiter {
             let (mac1, mac2) = macs.split_at(16);
 
             let computed_mac1 = b2s_keyed_mac_16(&self.mac1_key, msg);
-            verify_slices_are_equal(&computed_mac1[..16], mac1)
-                .map_err(|_| TunnResult::Err(WireGuardError::InvalidMac))?;
+            if !constant_time_eq(&computed_mac1[..16], mac1) {
+                return Err(TunnResult::Err(WireGuardError::InvalidMac));
+            }
 
             if self.is_under_load() {
                 let addr = match src_addr {
@@ -213,7 +214,7 @@ impl RateLimiter {
                 let cookie = self.current_cookie(addr, now);
                 let computed_mac2 = b2s_keyed_mac_16_2(&cookie, msg, mac1);
 
-                if verify_slices_are_equal(&computed_mac2[..16], mac2).is_err() {
+                if !constant_time_eq(&computed_mac2[..16], mac2) {
                     let cookie_packet = self
                         .format_cookie_reply(sender_idx, cookie, mac1, dst)
                         .map_err(TunnResult::Err)?;
