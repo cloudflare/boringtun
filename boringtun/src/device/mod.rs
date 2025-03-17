@@ -85,7 +85,7 @@ pub struct DeviceConfig {
     #[cfg(target_os = "linux")]
     pub use_multi_queue: bool,
 
-    pub api: Option<api::ConfigRx>,
+    pub api: Option<api::ApiServer>,
 
     /// Used on Android to bypass UDP sockets.
     pub on_bind: Option<OnBindCallback>,

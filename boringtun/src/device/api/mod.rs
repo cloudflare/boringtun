@@ -17,16 +17,20 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
-pub struct ConfigRx {
+/// A server that receives [Request]s. Should be passed a [Device] when created.
+pub struct ApiServer {
     rx: mpsc::Receiver<(Request, oneshot::Sender<Response>)>,
 }
 
+/// An api client to a boringtun [Device].
+///
+/// Use [ApiClient::send] or [ApiClient::send_sync] to configure the [Device] by adding peers, etc.
 #[derive(Clone)]
-pub struct ConfigTx {
+pub struct ApiClient {
     tx: mpsc::Sender<(Request, oneshot::Sender<Response>)>,
 }
 
-impl ConfigTx {
+impl ApiClient {
     pub async fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
         log::trace!("Handling API request: {request:?}");
@@ -55,9 +59,11 @@ impl ConfigTx {
     }
 }
 
-impl ConfigTx {
-    /// Wrap a [Read] + [Write] and spawn a thread to convert between the textual config format and
-    /// [Request]/[Response].
+impl ApiClient {
+    /// Wrap a [Read] + [Write] and spawn a thread to convert between the textual configuration
+    /// protocol and [Request]/[Response].
+    ///
+    /// <https://www.wireguard.com/xplatform/#configuration-protocol>
     pub fn wrap_read_write<RW>(self, rw: RW)
     where
         for<'a> &'a RW: Read + Write,
@@ -117,18 +123,20 @@ impl ConfigTx {
     }
 }
 
-impl ConfigRx {
-    pub fn new() -> (ConfigTx, ConfigRx) {
+impl ApiServer {
+    pub fn new() -> (ApiClient, ApiServer) {
         let (tx, rx) = mpsc::channel(100);
 
-        (ConfigTx { tx }, ConfigRx { rx })
+        (ApiClient { tx }, ApiServer { rx })
     }
 
+    /// Spawn a unix socket in [`SOCK_DIR`] called `<name>.sock`. This socket speaks the official
+    /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     #[cfg(unix)]
-    pub fn default_unix_socket(interface_name: &str) -> eyre::Result<Self> {
+    pub fn default_unix_socket(name: &str) -> eyre::Result<Self> {
         use std::os::unix::net::UnixListener;
 
-        let path = format!("{SOCK_DIR}/{interface_name}.sock");
+        let path = format!("{SOCK_DIR}/{name}.sock");
 
         create_sock_dir();
 
@@ -138,7 +146,7 @@ impl ConfigRx {
         let api_listener =
             UnixListener::bind(&path).map_err(|e| eyre!("Failed to bidd unix socket: {e}"))?;
 
-        let (tx, rx) = ConfigRx::new();
+        let (tx, rx) = ApiServer::new();
 
         std::thread::spawn(move || loop {
             let Ok((stream, _)) = api_listener.accept() else {
@@ -155,6 +163,8 @@ impl ConfigRx {
         //self.cleanup_paths.push(path.clone());
     }
 
+    /// Create an [ApiServer] from a reader+writer that speaks the official
+    /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     pub fn from_read_write<RW>(rw: RW) -> Self
     where
         RW: Send + Sync + 'static,
@@ -165,16 +175,17 @@ impl ConfigRx {
         rx
     }
 
-    pub async fn recv(&mut self) -> Option<(Request, oneshot::Sender<Response>)> {
+    /// Wait for a [Request]. The response should be sent on the provided [`oneshot`].
+    pub(crate) async fn recv(&mut self) -> Option<(Request, oneshot::Sender<Response>)> {
         let (request, response_tx) = self.rx.recv().await?;
 
         Some((request, response_tx))
     }
 }
 
-impl Debug for ConfigRx {
+impl Debug for ApiServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ApiChannel").finish()
+        f.debug_tuple("ApiServer").finish()
     }
 }
 
@@ -199,9 +210,9 @@ fn create_sock_dir() {
 }
 
 impl Device {
-    pub(super) async fn handle_api(device: Weak<RwLock<Self>>, mut channel: ConfigRx) {
+    pub(super) async fn handle_api(device: Weak<RwLock<Self>>, mut api: ApiServer) {
         loop {
-            let Some((request, respond)) = channel.recv().await else {
+            let Some((request, respond)) = api.recv().await else {
                 // The remote side is closed
                 return;
             };
@@ -212,11 +223,11 @@ impl Device {
             let response = match request {
                 Request::Get(get) => {
                     let device_guard = device.read().await;
-                    Response::Get(api_get(get, &device_guard).await)
+                    Response::Get(on_api_get(get, &device_guard).await)
                 }
                 Request::Set(set) => {
                     let mut device_guard = device.write().await;
-                    let (response, reconfigure) = api_set(set, &mut device_guard).await;
+                    let (response, reconfigure) = on_api_set(set, &mut device_guard).await;
                     drop(device_guard);
 
                     if reconfigure == Reconfigure::Yes {
@@ -247,6 +258,8 @@ impl Device {
     }
 
     fn register_monitor(&self, _path: String) -> Result<(), Error> {
+        // TODO: fix this
+
         /*
         self.queue.new_periodic_event(
             Box::new(move |d, _| {
@@ -278,7 +291,8 @@ impl Device {
     }
 }
 
-async fn api_get(_: Get, d: &Device) -> GetResponse {
+/// Handle a [Get] request.
+async fn on_api_get(_: Get, d: &Device) -> GetResponse {
     let mut peers = vec![];
     for (public_key, peer) in d.peers.iter() {
         let peer = peer.lock().await;
@@ -317,7 +331,8 @@ async fn api_get(_: Get, d: &Device) -> GetResponse {
     }
 }
 
-async fn api_set(set: Set, device: &mut Device) -> (SetResponse, Reconfigure) {
+/// Handle a [Set] request.
+async fn on_api_set(set: Set, device: &mut Device) -> (SetResponse, Reconfigure) {
     let Set {
         private_key,
         listen_port,
