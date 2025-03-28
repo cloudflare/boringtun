@@ -32,7 +32,7 @@ use crate::x25519;
 use allowed_ips::AllowedIps;
 use peer::{AllowedIP, Peer};
 use rand_core::{OsRng, RngCore};
-use tun::AbstractDevice;
+use tun::{AbstractDevice, AsyncDevice};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 
@@ -193,6 +193,12 @@ impl Connection {
 }
 
 impl DeviceHandle {
+    pub async fn new(tun: AsyncDevice, config: DeviceConfig) -> Result<DeviceHandle, Error> {
+        Ok(DeviceHandle {
+            device: Device::new(tun, config).await?,
+        })
+    }
+
     pub async fn from_tun_name(
         tun_name: &str,
         config: DeviceConfig,
@@ -202,9 +208,7 @@ impl DeviceHandle {
         #[cfg(target_os = "macos")]
         tun_config.platform_config(|p| p.enable_routing(false));
         let tun = tun::create_as_async(&tun_config)?;
-        Ok(DeviceHandle {
-            device: Device::new(tun, config).await?,
-        })
+        DeviceHandle::new(tun, config).await
     }
 
     pub async fn stop(self) {
