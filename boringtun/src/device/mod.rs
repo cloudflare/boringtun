@@ -407,6 +407,7 @@ impl Device {
             //port = udp_sock4.local_addr()?.port();
         }
 
+        let port = port + 1; // HACK: remove when we fix REUSEADDR
         let addrv6 = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0);
         let udp_sock6 = tokio::net::UdpSocket::bind(addrv6)
             .await
