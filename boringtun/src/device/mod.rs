@@ -396,22 +396,34 @@ impl Device {
     async fn open_listen_socket(
         &mut self,
     ) -> Result<(tokio::net::UdpSocket, tokio::net::UdpSocket), Error> {
-        let port = self.port;
+        // Construct the socket using `socket2` because we need to set the reuse_address flag.
+        let bind_socket = |addr: SocketAddr| -> Result<_, Error> {
+            let domain = match addr {
+                SocketAddr::V4(..) => socket2::Domain::IPV4,
+                SocketAddr::V6(..) => socket2::Domain::IPV6,
+            };
+            let udp_sock4 =
+                socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
+            udp_sock4.set_nonblocking(true)?;
+            udp_sock4.set_reuse_address(true)?;
+            udp_sock4
+                .bind(&addr.into())
+                .map_err(|e| Error::Bind(e, format!("Failed to bind UDP socket to {addr}")))?;
+            let udp_sock4 = tokio::net::UdpSocket::from_std(udp_sock4.into())?;
+
+            Ok(udp_sock4)
+        };
+
+        let mut port = self.port;
         let addrv4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
-        let udp_sock4 = tokio::net::UdpSocket::bind(addrv4)
-            .await
-            .map_err(|e| Error::Bind(e, format!("Failed to bind UDP socket to {addrv4}")))?;
+        let udp_sock4 = bind_socket(addrv4.into())?;
         if port == 0 {
-            // Random port was assigned
-            // TODO: we need REUSEADDR or something for both sockets to share a port.
-            //port = udp_sock4.local_addr()?.port();
+            // The socket is using a random port, copy it so we can re-use it for IPv6.
+            port = udp_sock4.local_addr()?.port();
         }
 
-        let port = port + 1; // HACK: remove when we fix REUSEADDR
         let addrv6 = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0);
-        let udp_sock6 = tokio::net::UdpSocket::bind(addrv6)
-            .await
-            .map_err(|e| Error::Bind(e, format!("Failed to bind UDP socket to {addrv6}")))?;
+        let udp_sock6 = bind_socket(addrv6.into())?;
 
         #[cfg(target_os = "linux")]
         if let Some(mark) = self.fwmark {
