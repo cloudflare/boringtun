@@ -44,8 +44,8 @@ pub enum Error {
     IoError(#[from] io::Error),
     #[error("{0}")]
     Socket(io::Error),
-    #[error("{0}")]
-    Bind(String),
+    #[error("{1}: {0}")]
+    Bind(#[source] io::Error, String),
     #[error("{0}")]
     FCntl(io::Error),
     #[error("{0}")]
@@ -398,7 +398,9 @@ impl Device {
     ) -> Result<(tokio::net::UdpSocket, tokio::net::UdpSocket), Error> {
         let port = self.port;
         let addrv4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
-        let udp_sock4 = tokio::net::UdpSocket::bind(addrv4).await?;
+        let udp_sock4 = tokio::net::UdpSocket::bind(addrv4)
+            .await
+            .map_err(|e| Error::Bind(e, format!("Failed to bind UDP socket to {addrv4}")))?;
         if port == 0 {
             // Random port was assigned
             // TODO: we need REUSEADDR or something for both sockets to share a port.
@@ -406,7 +408,9 @@ impl Device {
         }
 
         let addrv6 = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0);
-        let udp_sock6 = tokio::net::UdpSocket::bind(addrv6).await?;
+        let udp_sock6 = tokio::net::UdpSocket::bind(addrv6)
+            .await
+            .map_err(|e| Error::Bind(e, format!("Failed to bind UDP socket to {addrv6}")))?;
 
         #[cfg(target_os = "linux")]
         if let Some(mark) = self.fwmark {
