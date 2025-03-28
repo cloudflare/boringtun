@@ -282,7 +282,7 @@ mod tests {
         ) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let _device = DeviceHandle::new(&name, config).await.unwrap();
+            let _device = DeviceHandle::from_tun_name(&name, config).await.unwrap();
             WGHandle {
                 _device,
                 name,

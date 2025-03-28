@@ -155,7 +155,7 @@ async fn main() {
         on_bind: None,
     };
 
-    let _device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config).await {
+    let _device_handle: DeviceHandle = match DeviceHandle::from_tun_name(tun_name, config).await {
         Ok(d) => d,
         Err(e) => {
             // Notify parent that tunnel initialization failed

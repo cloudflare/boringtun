@@ -72,6 +72,8 @@ pub enum Error {
     DropPrivileges(String),
     #[error("API socket error: {0}")]
     ApiSocket(io::Error),
+    #[error("Device error: {0}")]
+    OpenDevice(#[from] tun::Error),
 }
 
 pub struct DeviceHandle {
@@ -191,7 +193,11 @@ impl Connection {
 }
 
 impl DeviceHandle {
-    pub async fn new(tun: tun::AsyncDevice, config: DeviceConfig) -> Result<DeviceHandle, Error> {
+    pub async fn from_tun_name(
+        tun_name: &str,
+        config: DeviceConfig,
+    ) -> Result<DeviceHandle, Error> {
+        let tun = tun::create_as_async(tun::Configuration::default().tun_name(tun_name))?;
         Ok(DeviceHandle {
             device: Device::new(tun, config).await?,
         })
