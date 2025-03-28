@@ -48,7 +48,7 @@ tokio = { version = "1.43.0", features = ["full"] }
 eyre = "*" # TODO
 log = "*" # TODO
 typed-builder = "0.20.0"
-tun = { version = "0.7", features = ["async"] }
+tun = { version = "0.7.13", features = ["async"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.25", default-features = false, features = [

@@ -197,7 +197,11 @@ impl DeviceHandle {
         tun_name: &str,
         config: DeviceConfig,
     ) -> Result<DeviceHandle, Error> {
-        let tun = tun::create_as_async(tun::Configuration::default().tun_name(tun_name))?;
+        let mut tun_config = tun::Configuration::default();
+        tun_config.tun_name(tun_name);
+        #[cfg(target_os = "macos")]
+        tun_config.platform_config(|p| p.enable_routing(false));
+        let tun = tun::create_as_async(&tun_config)?;
         Ok(DeviceHandle {
             device: Device::new(tun, config).await?,
         })
