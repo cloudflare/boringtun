@@ -394,6 +394,7 @@ async fn on_api_set(set: Set, device: &mut Device) -> (SetResponse, Reconfigure)
                 },
             remove,
             update_only,
+            replace_allowed_ips,
         } = peer;
 
         let public_key = x25519_dalek::PublicKey::from(public_key.0);
@@ -410,8 +411,7 @@ async fn on_api_set(set: Set, device: &mut Device) -> (SetResponse, Reconfigure)
         device.update_peer(
             public_key,
             remove,
-            //replace_allowed_ips,
-            false,
+            replace_allowed_ips,
             endpoint,
             allowed_ip.as_slice(),
             persistent_keepalive_interval,

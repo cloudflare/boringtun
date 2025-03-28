@@ -279,7 +279,7 @@ impl Device {
         &mut self,
         pub_key: x25519::PublicKey,
         remove: bool,
-        _replace_ips: bool,
+        replace_ips: bool,
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
@@ -318,6 +318,10 @@ impl Device {
         let peer = Arc::new(Mutex::new(peer));
         self.peers.insert(pub_key, Arc::clone(&peer));
         self.peers_by_idx.insert(next_index, Arc::clone(&peer));
+
+        if replace_ips {
+            log::warn!("not implemented: replace_allowed_ips");
+        }
 
         for AllowedIP { addr, cidr } in allowed_ips {
             self.peers_by_ip

@@ -28,8 +28,7 @@ pub enum Response {
 #[non_exhaustive]
 pub struct Get;
 
-#[derive(Debug)]
-#[derive(TypedBuilder)]
+#[derive(Debug, TypedBuilder)]
 #[non_exhaustive]
 pub struct GetPeer {
     pub peer: Peer,
@@ -117,6 +116,10 @@ pub struct SetPeer {
     /// Only perform the operation if the peer already exists as part of the interface.
     #[builder(setter(strip_bool))]
     pub update_only: bool,
+
+    /// This key/value combo indicates that the allowed IPs (perhaps an empty list) should replace any existing ones of the previously added peer entry, rather than append to the existing allowed IPs list.
+    #[builder(setter(strip_bool))]
+    pub replace_allowed_ips: bool,
 }
 
 #[derive(Debug)]
@@ -202,6 +205,7 @@ impl SetPeer {
             peer: Peer::new(public_key),
             remove: false,
             update_only: false,
+            replace_allowed_ips: false,
         }
     }
 }
@@ -453,6 +457,7 @@ impl SetPeer {
                 },
             remove,
             update_only,
+            replace_allowed_ips,
         } = &mut set_peer;
 
         loop {
@@ -475,6 +480,7 @@ impl SetPeer {
                 "persistent_keepalive_interval" => parse_opt!(k, v, persistent_keepalive_interval),
                 "remove" => parse_bool!(k, v, remove),
                 "update_only" => parse_bool!(k, v, update_only),
+                "replace_allowed_ips" => parse_bool!(k, v, replace_allowed_ips),
                 "allowed_ip" => allowed_ip.push(v.parse().map_err(|err| eyre!("{err}"))?),
 
                 _ => bail!("Key {k:?} in {line:?} is not allowed in command set/peer"),
