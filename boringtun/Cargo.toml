@@ -10,7 +10,7 @@ authors = [
 license = "BSD-3-Clause"
 readme = "../README.md"
 repository = "https://github.com/cloudflare/boringtun"
-documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
+readme = "../README.md"
 edition = "2018"
 
 [features]
