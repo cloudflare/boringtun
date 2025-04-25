@@ -23,7 +23,7 @@ fn check_tun_name(_v: String) -> Result<(), String> {
         */
         Ok(())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
     {
         Ok(())
     }
