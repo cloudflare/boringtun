@@ -59,9 +59,7 @@ impl Peer {
         Peer {
             tunnel,
             index,
-            endpoint: RwLock::new(Endpoint {
-                addr: endpoint,
-            }),
+            endpoint: RwLock::new(Endpoint { addr: endpoint }),
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
         }
