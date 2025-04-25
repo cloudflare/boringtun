@@ -13,11 +13,15 @@ use tracing::Level;
 fn check_tun_name(_v: String) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     {
+        // TODO: fix validation
+        /*
         if boringtun::device::tun::parse_utun_name(&_v).is_ok() {
             Ok(())
         } else {
             Err("Tunnel name must have the format 'utun[0-9]+', use 'utun' for automatic assignment".to_owned())
         }
+        */
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -133,7 +137,6 @@ async fn main() {
 
     let config = DeviceConfig {
         n_threads,
-        #[cfg(target_os = "linux")]
         api: Some(api),
         //use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]

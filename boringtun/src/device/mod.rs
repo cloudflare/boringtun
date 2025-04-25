@@ -206,7 +206,9 @@ impl DeviceHandle {
         let mut tun_config = tun::Configuration::default();
         tun_config.tun_name(tun_name);
         #[cfg(target_os = "macos")]
-        tun_config.platform_config(|p| p.enable_routing(false));
+        tun_config.platform_config(|p| {
+            p.enable_routing(false);
+        });
         let tun = tun::create_as_async(&tun_config)?;
         DeviceHandle::new(tun, config).await
     }
@@ -377,6 +379,8 @@ impl Device {
             ));
         }
 
+        // TODO: fix this
+        /*
         #[cfg(target_os = "macos")]
         {
             // Only for macOS write the actual socket name into WG_TUN_NAME_FILE
@@ -387,6 +391,7 @@ impl Device {
                 }
             }
         }
+        */
 
         Ok(device)
     }
