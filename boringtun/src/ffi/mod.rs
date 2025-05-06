@@ -6,7 +6,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 //! C bindings for the BoringTun library
-use super::noise::{Tunn, TunnResult};
+use super::noise::{Tunn, TunnResult, rate_limiter::RateLimiter, Packet};
 use crate::x25519::{PublicKey, StaticSecret};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
@@ -51,6 +51,12 @@ pub struct wireguard_result {
     pub op: result_type,
     /// Additional information, required to perform the operation
     pub size: usize,
+}
+
+#[repr(C)]
+pub struct wireguard_verify_result{
+    pub result: wireguard_result,
+    pub idx: i32,
 }
 
 #[repr(C)]
@@ -394,4 +400,123 @@ pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<Tunn>) -> stats {
         estimated_rtt: estimated_rtt.map(|r| r as i32).unwrap_or(-1),
         reserved: [0u8; 56],
     }
+}
+
+/// Rate Limiter
+/// Returns null ptr on error.
+#[no_mangle]
+pub unsafe extern "C" fn new_rate_limiter(
+    server_static_public: *const c_char,
+    limit: u64,
+) -> *mut Mutex<RateLimiter> {
+    let c_str = CStr::from_ptr(server_static_public);
+    let server_static_public = match c_str.to_str() {
+        Err(_) => return ptr::null_mut(),
+        Ok(string) => string,
+    };
+
+    let public_key = match server_static_public.parse::<KeyBytes>() {
+        Err(_) => return ptr::null_mut(),
+        Ok(key) => PublicKey::from(key.0),
+    };
+
+    let limiter = Box::new(Mutex::new(RateLimiter::new(
+        &public_key,
+        limit,
+    )));
+
+    PANIC_HOOK.call_once(|| {
+        // FFI won't properly unwind on panic, but it will if we cause a segmentation fault
+        panic::set_hook(Box::new(move |_| {
+            raise(SIGSEGV);
+        }));
+    });
+
+    Box::into_raw(limiter)
+}
+
+/// Drops the Rate Limiter object
+#[no_mangle]
+pub unsafe extern "C" fn rate_limiter_free(rate_limiter: *mut Mutex<RateLimiter>) {
+    drop(Box::from_raw(rate_limiter));
+}
+
+/// Rate limiter verify packet
+/// `dst_size` will be zero if no cookie challenge.
+/// TODO
+#[no_mangle]
+pub unsafe extern "C" fn wireguard_verify_packet(
+    rate_limiter: *const Mutex<RateLimiter>,
+    src: *const u8,
+    src_size: u32,
+    dst: *mut u8,
+    dst_size: u32,
+) -> wireguard_verify_result {
+    // Slices are not owned, and therefore will not be freed by Rust
+    let src = slice::from_raw_parts(src, src_size as usize);
+    let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
+    // Lock the rate limiter from other use
+    let rate_limiter = rate_limiter.as_ref().unwrap().lock();
+    // TODO input IP addr
+    let rl_result = rate_limiter.verify_packet(None, src, dst);
+    match rl_result{
+        Ok(rl_result) => {
+            match rl_result
+            {
+                Packet::HandshakeInit(_) => {
+                    wireguard_verify_result {
+                        result: wireguard_result {
+                            op: result_type::WIREGUARD_DONE,
+                            size: 0,
+                        },
+                        idx: -1,
+                    }
+                },
+                Packet::HandshakeResponse(r) => {
+                    wireguard_verify_result {
+                        result: wireguard_result {
+                            op: result_type::WIREGUARD_DONE,
+                            size: 0,
+                        },
+                        idx: r.receiver_idx as i32,
+                    }
+                },
+                Packet::PacketCookieReply(r) => {
+                    wireguard_verify_result {
+                        result: wireguard_result {
+                            op: result_type::WIREGUARD_DONE,
+                            size: 0,
+                        },
+                        idx: r.receiver_idx as i32,
+                    }
+                },
+                Packet::PacketData(r) => {
+                    wireguard_verify_result {
+                        result: wireguard_result {
+                            op: result_type::WIREGUARD_DONE,
+                            size: 0,
+                        },
+                        idx: r.receiver_idx as i32,
+                    }
+                },
+            }
+        },
+        Err(rl_result) => {
+            wireguard_verify_result {
+                result: wireguard_result::from(rl_result),
+                idx: -1,
+            }
+        },
+    }
+}
+
+/// Reset the wireguard packet count
+#[no_mangle]
+pub unsafe extern "C" fn wireguard_reset_count(
+    rate_limiter: *const Mutex<RateLimiter>,
+) {
+    // Lock the rate limiter from other use
+    let rate_limiter = rate_limiter.as_ref().unwrap().lock();
+
+    rate_limiter.reset_count();
 }
