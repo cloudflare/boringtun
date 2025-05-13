@@ -678,8 +678,13 @@ impl Device {
             }
         });
 
+        let mut buf_count = 0;
         loop {
-            let mut buf = buf_rx.try_recv().unwrap_or_else(|_| datagram_buffer());
+            let mut buf = buf_rx.try_recv().unwrap_or_else(|_| {
+                buf_count += 1;
+                log::info!("buf_count={buf_count}");
+                datagram_buffer()
+            });
 
             // Read packets from the socket.
             let (packet_len, addr) = udp.recv_from(&mut buf[..]).await.map_err(|e| {
@@ -788,7 +793,6 @@ struct IndexLfsr {
 /// up on the stack and blowing up the size of the futures using it.
 #[inline(never)]
 pub fn datagram_buffer() -> Box<[u8; 4096]> {
-    log::info!("allocating new buf hehe");
     Box::new([0u8; 4096])
 }
 
