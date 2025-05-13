@@ -721,7 +721,7 @@ impl Device {
             loop {
                 let mut buf = buf_rx.try_recv().unwrap_or_else(|_| {
                     buf_count += 1;
-                    log::info!("Outgoing buffer count: {buf_count}");
+                    log::info!("Incoming buffer count: {buf_count}");
                     datagram_buffer()
                 });
                 // Read packets from the socket.
@@ -788,7 +788,7 @@ impl Device {
             loop {
                 let mut src_buf = buf_rx.try_recv().unwrap_or_else(|_| {
                     buf_count += 1;
-                    log::info!("Incoming buffer count: {buf_count}");
+                    log::info!("Outgoing buffer count: {buf_count}");
                     datagram_buffer()
                 });
 
