@@ -8,7 +8,8 @@ repository = "https://github.com/cloudflare/boringtun"
 documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
 edition = "2021"
 
-[dependencies]
+
+[target.'cfg(unix)'.dependencies]
 daemonize = "0.4.1"
 clap = { version = "3.1.6", features = ["env"] }
 tracing = "0.1.40"
@@ -17,7 +18,7 @@ tracing-appender = "0.2.1"
 log = "0.4"
 tokio = { version = "1.43.0", features = ["full"] }
 
-[dependencies.boringtun]
+[target.'cfg(unix)'.dependencies.boringtun]
 version = "0.6.0"
 path = "../boringtun"
 features = ["device"]
