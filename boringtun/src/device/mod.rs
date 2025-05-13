@@ -579,18 +579,29 @@ impl Device {
             (tun, private_key, public_key, rate_limiter)
         };
 
-        let (dec_tx, mut dec_rx): (mpsc::Sender<(PacketBuf, SocketAddr)>, _) = mpsc::channel(5000);
+        let (dec_tx, mut dec_rx) = mpsc::channel::<(PacketBuf, SocketAddr)>(5000);
+        let (send_udp_tx, mut send_udp_rx) = mpsc::channel::<(PacketBuf, SocketAddr)>(5000);
+        let (send_tun_tx, mut send_tun_rx) = mpsc::channel::<PacketBuf>(5000);
 
-        // let (send_tx, mut send_rx): (mpsc::Sender<(Box<[u8]>, SocketAddr)>, _) = mpsc::channel(5000);
-        // let udp2 = udp.clone();
-        // tokio::task::spawn(async move {
-        //     while let Some((packet, addr)) = send_rx.recv().await {
-        //         let _: Result<_, _> = udp2.send_to(&packet, addr).await;
-        //     }
-        // });
+        let udp_send = udp.clone();
+        let buf_tx_udp = buf_tx.clone();
+        let send_task_udp = tokio::task::spawn(async move {
+            while let Some((packet_buf, addr)) = send_udp_rx.recv().await {
+                let _: Result<_, _> = udp_send.send_to(packet_buf.packet(), &addr).await;
+                let _ = buf_tx_udp.send(packet_buf.buf);
+            }
+        });
+        let buf_tx_tun = buf_tx.clone();
+        let send_task_tun = tokio::task::spawn(async move {
+            while let Some(packet_buf) = send_tun_rx.recv().await {
+                let _: Result<_, _> = tun.send(packet_buf.packet()).await;
+                let _ = buf_tx_tun.send(packet_buf.buf);
+            }
+        });
 
-        let udp3 = udp.clone();
-        tokio::task::spawn(async move {
+        let buf_tx_encapsulate = buf_tx.clone();
+        let udp_send_flush = udp.clone(); // TODO: do we need this?
+        let encapsulate_task = tokio::task::spawn(async move {
             while let Some((packet_owned, addr)) = dec_rx.recv().await {
                 let parsed_packet = match rate_limiter.verify_packet(
                     Some(addr.ip()),
@@ -599,12 +610,18 @@ impl Device {
                 ) {
                     Ok(packet) => packet,
                     Err(TunnResult::WriteToNetwork(cookie)) => {
-                        let _: Result<_, _> = udp3.send_to(cookie, &addr).await;
-                        let _ = buf_tx.send(packet_owned.buf);
+                        let mut packet_owned = packet_owned;
+                        // TODO: make less panicky
+                        packet_owned.buf[..cookie.len()].copy_from_slice(cookie);
+                        packet_owned.packet_len = cookie.len();
+                        send_udp_tx
+                            .send((packet_owned, addr))
+                            .await
+                            .expect("send_udp_tx failed");
                         continue;
                     }
                     Err(_) => {
-                        let _ = buf_tx.send(packet_owned.buf);
+                        let _ = buf_tx_encapsulate.send(packet_owned.buf);
                         continue;
                     }
                 };
@@ -624,7 +641,7 @@ impl Device {
                     Packet::PacketData(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
                 };
                 let Some(peer) = peer else {
-                    let _ = buf_tx.send(packet_owned.buf);
+                    let _ = buf_tx_encapsulate.send(packet_owned.buf);
                     continue;
                 };
                 let mut peer = peer.lock().await;
@@ -633,30 +650,51 @@ impl Device {
                     .tunnel
                     .handle_verified_packet(parsed_packet, &mut dst_buf[..])
                 {
-                    TunnResult::Done => {}
+                    TunnResult::Done => {
+                        // Send the buffer back to be reclaimed
+                        let _ = buf_tx_encapsulate.send(packet_owned.buf);
+                    }
                     TunnResult::Err(_) => {
-                        let _ = buf_tx.send(packet_owned.buf);
+                        // TODO: handle or log error?
+                        let _ = buf_tx_encapsulate.send(packet_owned.buf);
                         continue;
                     }
                     TunnResult::WriteToNetwork(packet) => {
                         flush = true;
-                        // TODO: mpsc send
-                        let _: Result<_, _> = udp3.send_to(packet, &addr).await;
+                        let mut packet_owned = packet_owned;
+                        // TODO: make less panicky
+                        packet_owned.buf[..packet.len()].copy_from_slice(packet);
+                        packet_owned.packet_len = packet.len();
+                        send_udp_tx
+                            .send((packet_owned, addr))
+                            .await
+                            .expect("send_udp_tx failed");
                     }
                     TunnResult::WriteToTunnelV4(packet, addr) => {
                         if peer.is_allowed_ip(addr) {
-                            tun.send(packet).await.unwrap();
+                            let mut packet_owned = packet_owned;
+                            // TODO: make less panicky
+                            packet_owned.buf[..packet.len()].copy_from_slice(packet);
+                            packet_owned.packet_len = packet.len();
+                            send_tun_tx
+                                .send(packet_owned)
+                                .await
+                                .expect("send_tun_tx failed");
                         }
                     }
                     TunnResult::WriteToTunnelV6(packet, addr) => {
                         if peer.is_allowed_ip(addr) {
-                            tun.send(packet).await.unwrap();
+                            let mut packet_owned = packet_owned;
+                            // TODO: make less panicky
+                            packet_owned.buf[..packet.len()].copy_from_slice(packet);
+                            packet_owned.packet_len = packet.len();
+                            send_tun_tx
+                                .send(packet_owned)
+                                .await
+                                .expect("send_tun_tx failed");
                         }
                     }
                 };
-
-                // Send the buffer back to be reclaimed
-                let _ = buf_tx.send(packet_owned.buf);
 
                 if flush {
                     // Flush pending queue
@@ -664,7 +702,7 @@ impl Device {
                         match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
                             TunnResult::WriteToNetwork(packet) => {
                                 // TODO: why do we ignore this error?
-                                let _ = udp3.send_to(packet, &addr).await;
+                                let _ = udp_send_flush.send_to(packet, &addr).await;
                             }
                             TunnResult::Done => break,
                             // TODO: why do we ignore this error?
@@ -678,31 +716,43 @@ impl Device {
             }
         });
 
-        let mut buf_count = 0;
-        loop {
-            let mut buf = buf_rx.try_recv().unwrap_or_else(|_| {
-                buf_count += 1;
-                log::info!("buf_count={buf_count}");
-                datagram_buffer()
-            });
+        let receive_task = tokio::task::spawn(async move {
+            let mut buf_count = 0;
+            loop {
+                let mut buf = buf_rx.try_recv().unwrap_or_else(|_| {
+                    buf_count += 1;
+                    log::info!("Outgoing buffer count: {buf_count}");
+                    datagram_buffer()
+                });
+                // Read packets from the socket.
+                let (packet_len, addr) = udp.recv_from(&mut buf[..]).await.map_err(|e| {
+                    log::error!("UDP recv_from error {e:?}");
+                    Error::IoError(e)
+                })?;
 
-            // Read packets from the socket.
-            let (packet_len, addr) = udp.recv_from(&mut buf[..]).await.map_err(|e| {
-                log::error!("UDP recv_from error {e:?}");
-                Error::IoError(e)
-            })?;
+                let packet_buf = PacketBuf { packet_len, buf };
 
-            let packet_buf = PacketBuf { packet_len, buf };
-
-            if let Err(mpsc::error::TrySendError::Full((packet_buf, addr))) =
-                dec_tx.try_send((packet_buf, addr))
-            {
-                log::warn!("Back-pressure on dec_tx"); // TODO: remove this log
-                if dec_tx.send((packet_buf, addr)).await.is_err() {
-                    return Ok(()); // Decryption task has been dropped
+                // TODO: handle closed
+                if let Err(mpsc::error::TrySendError::Full((packet_buf, addr))) =
+                    dec_tx.try_send((packet_buf, addr))
+                {
+                    log::warn!("Back-pressure on dec_tx incoming"); // TODO: remove this log
+                    if dec_tx.send((packet_buf, addr)).await.is_err() {
+                        return Ok::<(), Error>(()); // Decryption task has been dropped
+                    }
                 }
             }
+        });
+
+        // TODO: abort tasks on drop
+        tokio::select! {
+            _ = encapsulate_task => {},
+            _ = send_task_udp => {},
+            _ = send_task_tun => {},
+            _ = receive_task => {},
         }
+
+        Ok(())
     }
 
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
@@ -721,54 +771,118 @@ impl Device {
 
             // TODO: check every time. TODO: ordering
             let mtu = usize::from(device.mtu.load(Ordering::SeqCst));
+            let mtu = std::cmp::min(mtu, 4096);
             let tun = device.tun.clone();
-            (mtu, tun)
+            (dbg!(mtu), tun)
         };
 
-        let mut src_buf = [0u8; MAX_UDP_SIZE];
-        let mut dst_buf = [0u8; MAX_UDP_SIZE];
+        // let mut src_buf = [0u8; MAX_UDP_SIZE];
 
-        loop {
-            let n = match tun.recv(&mut src_buf[..mtu]).await {
-                Ok(src) => src,
-                Err(e) => {
-                    log::error!("Unexpected error on tun interface: {:?}", e);
-                    continue;
-                }
-            };
-            let src = &src_buf[..n];
+        let (buf_tx, mut buf_rx) = mpsc::unbounded_channel::<Box<[u8; 4096]>>();
+        let (dec_tx, mut dec_rx) = mpsc::channel::<PacketBuf>(5000);
+        let (packet_v4_tx, mut packet_v4_rx) = mpsc::channel::<(PacketBuf, SocketAddrV4)>(5000);
+        let (packet_v6_tx, mut packet_v6_rx) = mpsc::channel::<(PacketBuf, SocketAddrV6)>(5000);
 
-            let dst_addr = match Tunn::dst_address(src) {
-                Some(addr) => addr,
-                None => continue,
-            };
+        let receive_task = tokio::task::spawn(async move {
+            let mut buf_count = 0;
+            loop {
+                let mut src_buf = buf_rx.try_recv().unwrap_or_else(|_| {
+                    buf_count += 1;
+                    log::info!("Incoming buffer count: {buf_count}");
+                    datagram_buffer()
+                });
 
-            let Some(device) = device.upgrade() else {
-                break;
-            };
-            let peers = &device.read().await.peers_by_ip;
-            let mut peer = match peers.find(dst_addr) {
-                Some(peer) => peer.lock().await,
-                None => continue,
-            };
+                let n = match tun.recv(&mut src_buf[..mtu]).await {
+                    Ok(src) => src,
+                    Err(e) => {
+                        log::error!("Unexpected error on tun interface: {:?}", e);
+                        continue;
+                    }
+                };
+                let packet_buf = PacketBuf {
+                    packet_len: n,
+                    buf: src_buf,
+                };
 
-            match peer.tunnel.encapsulate(src, &mut dst_buf) {
-                TunnResult::Done => {}
-                TunnResult::Err(e) => {
-                    log::error!("Encapsulate error={e:?}: {e:?}");
-                }
-                TunnResult::WriteToNetwork(packet) => {
-                    let endpoint_addr = peer.endpoint().addr;
-                    if let Some(addr @ SocketAddr::V4(_)) = endpoint_addr {
-                        let _: Result<_, _> = udp4.send_to(packet, addr).await;
-                    } else if let Some(addr @ SocketAddr::V6(_)) = endpoint_addr {
-                        let _: Result<_, _> = udp6.send_to(packet, addr).await;
-                    } else {
-                        log::error!("No endpoint");
+                // TODO: handle closed
+                if let Err(mpsc::error::TrySendError::Full(packet_buf)) =
+                    dec_tx.try_send(packet_buf)
+                {
+                    log::warn!("Back-pressure on dec_tx outgoing"); // TODO: remove this log
+                    if dec_tx.send(packet_buf).await.is_err() {
+                        break; // Decryption task has been dropped
                     }
                 }
-                _ => panic!("Unexpected result from encapsulate"),
-            };
+            }
+        });
+
+        let encapsulate_task = tokio::task::spawn(async move {
+            let mut dst_buf = vec![0u8; MAX_UDP_SIZE].into_boxed_slice();
+            while let Some(packet_buf) = dec_rx.recv().await {
+                let dst_addr = match Tunn::dst_address(packet_buf.packet()) {
+                    Some(addr) => addr,
+                    None => continue, // TODO: reuse buffer
+                };
+
+                let Some(device) = device.upgrade() else {
+                    break;
+                };
+                let peers = &device.read().await.peers_by_ip;
+                let mut peer = match peers.find(dst_addr) {
+                    Some(peer) => peer.lock().await,
+                    None => continue, // TODO: reuse buffer
+                };
+
+                match peer.tunnel.encapsulate(packet_buf.packet(), &mut dst_buf) {
+                    TunnResult::Done => {}
+                    TunnResult::Err(e) => {
+                        log::error!("Encapsulate error={e:?}: {e:?}");
+                    }
+                    TunnResult::WriteToNetwork(packet) => {
+                        let mut packet_buf = packet_buf;
+                        // TODO: make less panicky
+                        packet_buf.buf[..packet.len()].copy_from_slice(packet);
+                        packet_buf.packet_len = packet.len();
+
+                        let endpoint_addr = peer.endpoint().addr;
+                        if let Some(SocketAddr::V4(addr)) = endpoint_addr {
+                            if packet_v4_tx.send((packet_buf, addr)).await.is_err() {
+                                break;
+                            }
+                        } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
+                            if packet_v6_tx.send((packet_buf, addr)).await.is_err() {
+                                break;
+                            }
+                        } else {
+                            log::error!("No endpoint");
+                        }
+                    }
+                    _ => panic!("Unexpected result from encapsulate"),
+                };
+            }
+        });
+
+        let buf_tx_v4 = buf_tx.clone();
+        let send_task_v4 = tokio::task::spawn(async move {
+            while let Some((packet_buf, addr)) = packet_v4_rx.recv().await {
+                let _: Result<_, _> = udp4.send_to(packet_buf.packet(), addr).await;
+                let _ = buf_tx_v4.send(packet_buf.buf);
+            }
+        });
+        let buf_tx_v6 = buf_tx.clone();
+        let send_task_v6 = tokio::task::spawn(async move {
+            while let Some((packet_buf, addr)) = packet_v6_rx.recv().await {
+                let _: Result<_, _> = udp6.send_to(packet_buf.packet(), addr).await;
+                let _ = buf_tx_v6.send(packet_buf.buf);
+            }
+        });
+
+        // TODO: abort tasks on drop
+        tokio::select! {
+            _ = receive_task => {},
+            _ = encapsulate_task => {},
+            _ = send_task_v4 => {},
+            _ = send_task_v6 => {},
         }
     }
 }
