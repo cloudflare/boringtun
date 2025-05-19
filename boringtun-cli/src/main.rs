@@ -77,10 +77,6 @@ mod unix {
                 //Arg::new("disable-connected-udp")
                 //    .long("disable-connected-udp")
                 //    .help("Disable connected UDP sockets to each peer"),
-                #[cfg(target_os = "linux")]
-                Arg::new("disable-multi-queue")
-                    .long("disable-multi-queue")
-                    .help("Disable using multiple queues for the tunnel interface"),
             ])
             .get_matches();
 
@@ -143,8 +139,6 @@ mod unix {
             n_threads,
             api: Some(api),
             //use_connected_socket: !matches.is_present("disable-connected-udp"),
-            #[cfg(target_os = "linux")]
-            use_multi_queue: !matches.is_present("disable-multi-queue"),
             on_bind: None,
         };
 

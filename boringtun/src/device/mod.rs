@@ -84,8 +84,6 @@ type OnBindCallback = Box<dyn FnMut(&UdpSocket) + Send + Sync>;
 
 pub struct DeviceConfig {
     pub n_threads: usize,
-    #[cfg(target_os = "linux")]
-    pub use_multi_queue: bool,
 
     pub api: Option<api::ApiServer>,
 
@@ -97,8 +95,6 @@ impl Default for DeviceConfig {
     fn default() -> Self {
         DeviceConfig {
             n_threads: 4,
-            #[cfg(target_os = "linux")]
-            use_multi_queue: true,
             api: None,
             on_bind: None,
         }
@@ -239,9 +235,16 @@ impl DeviceHandle {
 
 impl Drop for DeviceHandle {
     fn drop(&mut self) {
+        log::debug!("Dropping boringtun device");
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            log::warn!("Failed to get tokio runtime handle");
             return;
         };
+        log::info!(
+            "DeviceHandle strong count: {}",
+            Arc::strong_count(&self.device)
+        );
+        log::info!("DeviceHandle weak count: {}", Arc::weak_count(&self.device));
         let device = self.device.clone();
         handle.spawn(async move {
             Self::stop_inner(device).await;

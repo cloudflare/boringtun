@@ -265,8 +265,6 @@ mod tests {
                     n_threads: 2,
                     //use_connected_socket: true,
                     #[cfg(target_os = "linux")]
-                    use_multi_queue: true,
-                    #[cfg(target_os = "linux")]
                     api: None,
                     on_bind: None,
                 },
@@ -563,8 +561,6 @@ mod tests {
                 n_threads: 2,
                 //use_connected_socket: false,
                 #[cfg(target_os = "linux")]
-                use_multi_queue: true,
-                #[cfg(target_os = "linux")]
                 api: None,
                 on_bind: None,
             },
@@ -722,8 +718,6 @@ mod tests {
             DeviceConfig {
                 n_threads: 2,
                 //use_connected_socket: false,
-                #[cfg(target_os = "linux")]
-                use_multi_queue: true,
                 #[cfg(target_os = "linux")]
                 api: None,
                 on_bind: None,
