@@ -18,7 +18,7 @@ use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
@@ -198,6 +198,8 @@ impl Tunn {
         persistent_keepalive: Option<u16>,
         index: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
+        now: Instant,
+        unix_now: u64,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -208,6 +210,8 @@ impl Tunn {
                 peer_static_public,
                 index << 8,
                 preshared_key,
+                now,
+                unix_now,
             ),
             sessions: Default::default(),
             current: Default::default(),
@@ -215,10 +219,14 @@ impl Tunn {
             rx_bytes: Default::default(),
 
             packet_queue: VecDeque::new(),
-            timers: Timers::new(persistent_keepalive, rate_limiter.is_none()),
+            timers: Timers::new(persistent_keepalive, rate_limiter.is_none(), now),
 
             rate_limiter: rate_limiter.unwrap_or_else(|| {
-                Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
+                Arc::new(RateLimiter::new(
+                    &static_public,
+                    PEER_HANDSHAKE_RATE_LIMIT,
+                    now,
+                ))
             }),
         }
     }
@@ -232,7 +240,11 @@ impl Tunn {
     ) {
         self.timers.should_reset_rr = rate_limiter.is_none();
         self.rate_limiter = rate_limiter.unwrap_or_else(|| {
-            Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
+            Arc::new(RateLimiter::new(
+                &static_public,
+                PEER_HANDSHAKE_RATE_LIMIT,
+                self.timers.now,
+            ))
         });
         self.handshake
             .set_static_private(static_private, static_public);
@@ -247,7 +259,14 @@ impl Tunn {
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
-    pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+    pub fn encapsulate<'a>(
+        &mut self,
+        src: &[u8],
+        dst: &'a mut [u8],
+        now: Instant,
+    ) -> TunnResult<'a> {
+        self.timers.now = now;
+
         let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
@@ -278,7 +297,10 @@ impl Tunn {
         src_addr: Option<IpAddr>,
         datagram: &[u8],
         dst: &'a mut [u8],
+        now: Instant,
     ) -> TunnResult<'a> {
+        self.timers.now = now;
+
         if datagram.is_empty() {
             // Indicates a repeated call
             return self.send_queued_packet(dst);
@@ -351,7 +373,9 @@ impl Tunn {
             remote_idx = p.sender_idx
         );
 
-        let session = self.handshake.receive_handshake_response(p)?;
+        let session = self
+            .handshake
+            .receive_handshake_response(p, self.timers.now)?;
 
         let keepalive_packet = session.format_packet_data(&[], dst);
         // Store new session in ring buffer
@@ -445,7 +469,10 @@ impl Tunn {
 
         let starting_new_handshake = !self.handshake.is_in_progress();
 
-        match self.handshake.format_handshake_initiation(dst) {
+        match self
+            .handshake
+            .format_handshake_initiation(dst, self.timers.now)
+        {
             Ok(packet) => {
                 tracing::debug!("Sending handshake_initiation");
 
@@ -509,7 +536,7 @@ impl Tunn {
     /// Get a packet from the queue, and try to encapsulate it
     fn send_queued_packet<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
         if let Some(packet) = self.dequeue_packet() {
-            match self.encapsulate(&packet, dst) {
+            match self.encapsulate(&packet, dst, self.timers.now) {
                 TunnResult::Err(_) => {
                     // On error, return packet to the queue
                     self.requeue_packet(packet);
@@ -593,7 +620,7 @@ mod tests {
     use super::*;
     use rand_core::{OsRng, RngCore};
 
-    fn create_two_tuns() -> (Tunn, Tunn) {
+    fn create_two_tuns(now: Instant) -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
         let my_idx = OsRng.next_u32();
@@ -602,9 +629,27 @@ mod tests {
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
         let their_idx = OsRng.next_u32();
 
-        let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None);
+        let my_tun = Tunn::new(
+            my_secret_key,
+            their_public_key,
+            None,
+            None,
+            my_idx,
+            None,
+            now,
+            0,
+        );
 
-        let their_tun = Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None);
+        let their_tun = Tunn::new(
+            their_secret_key,
+            my_public_key,
+            None,
+            None,
+            their_idx,
+            None,
+            now,
+            0,
+        );
 
         (my_tun, their_tun)
     }
@@ -622,9 +667,9 @@ mod tests {
         handshake_init.into()
     }
 
-    fn create_handshake_response(tun: &mut Tunn, handshake_init: &[u8]) -> Vec<u8> {
+    fn create_handshake_response(tun: &mut Tunn, handshake_init: &[u8], now: Instant) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let handshake_resp = tun.decapsulate(None, handshake_init, &mut dst);
+        let handshake_resp = tun.decapsulate(None, handshake_init, &mut dst, now);
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
         let handshake_resp = if let TunnResult::WriteToNetwork(sent) = handshake_resp {
@@ -636,9 +681,9 @@ mod tests {
         handshake_resp.into()
     }
 
-    fn parse_handshake_resp(tun: &mut Tunn, handshake_resp: &[u8]) -> Vec<u8> {
+    fn parse_handshake_resp(tun: &mut Tunn, handshake_resp: &[u8], now: Instant) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, handshake_resp, &mut dst);
+        let keepalive = tun.decapsulate(None, handshake_resp, &mut dst, now);
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
         let keepalive = if let TunnResult::WriteToNetwork(sent) = keepalive {
@@ -650,18 +695,18 @@ mod tests {
         keepalive.into()
     }
 
-    fn parse_keepalive(tun: &mut Tunn, keepalive: &[u8]) {
+    fn parse_keepalive(tun: &mut Tunn, keepalive: &[u8], now: Instant) {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, keepalive, &mut dst);
+        let keepalive = tun.decapsulate(None, keepalive, &mut dst, now);
         assert!(matches!(keepalive, TunnResult::Done));
     }
 
-    fn create_two_tuns_and_handshake() -> (Tunn, Tunn) {
-        let (mut my_tun, mut their_tun) = create_two_tuns();
+    fn create_two_tuns_and_handshake(now: Instant) -> (Tunn, Tunn) {
+        let (mut my_tun, mut their_tun) = create_two_tuns(now);
         let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, &init);
-        let keepalive = parse_handshake_resp(&mut my_tun, &resp);
-        parse_keepalive(&mut their_tun, &keepalive);
+        let resp = create_handshake_response(&mut their_tun, &init, now);
+        let keepalive = parse_handshake_resp(&mut my_tun, &resp, now);
+        parse_keepalive(&mut their_tun, &keepalive, now);
 
         (my_tun, their_tun)
     }
@@ -691,12 +736,12 @@ mod tests {
 
     #[test]
     fn create_two_tunnels_linked_to_eachother() {
-        let (_my_tun, _their_tun) = create_two_tuns();
+        let (_my_tun, _their_tun) = create_two_tuns(Instant::now());
     }
 
     #[test]
     fn handshake_init() {
-        let (mut my_tun, _their_tun) = create_two_tuns();
+        let (mut my_tun, _their_tun) = create_two_tuns(Instant::now());
         let init = create_handshake_init(&mut my_tun);
         let packet = Tunn::parse_incoming_packet(&init).unwrap();
         assert!(matches!(packet, Packet::HandshakeInit(_)));
@@ -704,29 +749,41 @@ mod tests {
 
     #[test]
     fn handshake_init_and_response() {
-        let (mut my_tun, mut their_tun) = create_two_tuns();
+        let now = Instant::now();
+
+        let (mut my_tun, mut their_tun) = create_two_tuns(now);
         let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, &init);
+        let resp = create_handshake_response(&mut their_tun, &init, now);
         let packet = Tunn::parse_incoming_packet(&resp).unwrap();
         assert!(matches!(packet, Packet::HandshakeResponse(_)));
     }
 
     #[test]
     fn full_handshake() {
-        let (mut my_tun, mut their_tun) = create_two_tuns();
+        let now = Instant::now();
+
+        let (mut my_tun, mut their_tun) = create_two_tuns(now);
         let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, &init);
-        let keepalive = parse_handshake_resp(&mut my_tun, &resp);
+        let resp = create_handshake_response(&mut their_tun, &init, now);
+        let keepalive = parse_handshake_resp(&mut my_tun, &resp, now);
         let packet = Tunn::parse_incoming_packet(&keepalive).unwrap();
         assert!(matches!(packet, Packet::PacketData(_)));
     }
 
     #[test]
     fn full_handshake_plus_timers() {
-        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
+        let now = Instant::now();
+
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now);
         // Time has not yet advanced so their is nothing to do
-        assert!(matches!(my_tun.update_timers(&mut []), TunnResult::Done));
-        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
+        assert!(matches!(
+            my_tun.update_timers(now, &mut []),
+            TunnResult::Done
+        ));
+        assert!(matches!(
+            their_tun.update_timers(now, &mut []),
+            TunnResult::Done
+        ));
     }
 
     #[test]
@@ -756,7 +813,7 @@ mod tests {
     #[test]
     #[cfg(feature = "mock-instant")]
     fn handshake_no_resp_rekey_timeout() {
-        let (mut my_tun, _their_tun) = create_two_tuns();
+        let (mut my_tun, _their_tun) = create_two_tuns(Instant::now());
 
         let init = create_handshake_init(&mut my_tun);
         let packet = Tunn::parse_incoming_packet(&init).unwrap();
@@ -768,13 +825,15 @@ mod tests {
 
     #[test]
     fn one_ip_packet() {
-        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
+        let now = Instant::now();
+
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now);
         let mut my_dst = [0u8; 1024];
         let mut their_dst = [0u8; 1024];
 
         let sent_packet_buf = create_ipv4_udp_packet();
 
-        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst, now);
         assert!(matches!(data, TunnResult::WriteToNetwork(_)));
         let data = if let TunnResult::WriteToNetwork(sent) = data {
             sent
@@ -782,7 +841,7 @@ mod tests {
             unreachable!();
         };
 
-        let data = their_tun.decapsulate(None, data, &mut their_dst);
+        let data = their_tun.decapsulate(None, data, &mut their_dst, now);
         assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
         let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv, _addr) = data {
             recv
