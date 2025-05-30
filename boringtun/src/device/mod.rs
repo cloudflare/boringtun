@@ -588,23 +588,23 @@ impl Device {
 
         let udp_send = udp.clone();
         let buf_tx_udp = buf_tx.clone();
-        let send_task_udp = tokio::task::spawn(async move {
+        let mut send_task_udp = AbortOnDrop(tokio::task::spawn(async move {
             while let Some((packet_buf, addr)) = send_udp_rx.recv().await {
                 let _: Result<_, _> = udp_send.send_to(packet_buf.packet(), &addr).await;
                 let _ = buf_tx_udp.send(packet_buf.buf);
             }
-        });
+        }));
         let buf_tx_tun = buf_tx.clone();
-        let send_task_tun = tokio::task::spawn(async move {
+        let mut send_task_tun = AbortOnDrop(tokio::task::spawn(async move {
             while let Some(packet_buf) = send_tun_rx.recv().await {
                 let _: Result<_, _> = tun.send(packet_buf.packet()).await;
                 let _ = buf_tx_tun.send(packet_buf.buf);
             }
-        });
+        }));
 
         let buf_tx_encapsulate = buf_tx.clone();
         let udp_send_flush = udp.clone(); // TODO: do we need this?
-        let encapsulate_task = tokio::task::spawn(async move {
+        let mut encapsulate_task = AbortOnDrop(tokio::task::spawn(async move {
             while let Some((packet_owned, addr)) = dec_rx.recv().await {
                 let parsed_packet = match rate_limiter.verify_packet(
                     Some(addr.ip()),
@@ -717,9 +717,9 @@ impl Device {
                     }
                 }
             }
-        });
+        }));
 
-        let receive_task = tokio::task::spawn(async move {
+        let mut receive_task = AbortOnDrop(tokio::task::spawn(async move {
             let mut buf_count = 0;
             loop {
                 let mut buf = buf_rx.try_recv().unwrap_or_else(|_| {
@@ -745,14 +745,13 @@ impl Device {
                     }
                 }
             }
-        });
+        }));
 
-        // TODO: abort tasks on drop
         tokio::select! {
-            _ = encapsulate_task => {},
-            _ = send_task_udp => {},
-            _ = send_task_tun => {},
-            _ = receive_task => {},
+            _ = &mut encapsulate_task.0 => {},
+            _ = &mut send_task_udp.0 => {},
+            _ = &mut send_task_tun.0 => {},
+            _ = &mut receive_task.0 => {},
         }
 
         Ok(())
@@ -786,7 +785,7 @@ impl Device {
         let (packet_v4_tx, mut packet_v4_rx) = mpsc::channel::<(PacketBuf, SocketAddrV4)>(5000);
         let (packet_v6_tx, mut packet_v6_rx) = mpsc::channel::<(PacketBuf, SocketAddrV6)>(5000);
 
-        let receive_task = tokio::task::spawn(async move {
+        let mut receive_task = AbortOnDrop(tokio::spawn(async move {
             let mut buf_count = 0;
             loop {
                 let mut src_buf = buf_rx.try_recv().unwrap_or_else(|_| {
@@ -817,9 +816,9 @@ impl Device {
                     }
                 }
             }
-        });
+        }));
 
-        let encapsulate_task = tokio::task::spawn(async move {
+        let mut encapsulate_task = AbortOnDrop(tokio::spawn(async move {
             let mut dst_buf = vec![0u8; MAX_UDP_SIZE].into_boxed_slice();
             while let Some(packet_buf) = dec_rx.recv().await {
                 let dst_addr = match Tunn::dst_address(packet_buf.packet()) {
@@ -863,29 +862,28 @@ impl Device {
                     _ => panic!("Unexpected result from encapsulate"),
                 };
             }
-        });
+        }));
 
         let buf_tx_v4 = buf_tx.clone();
-        let send_task_v4 = tokio::task::spawn(async move {
+        let mut send_task_v4 = AbortOnDrop(tokio::task::spawn(async move {
             while let Some((packet_buf, addr)) = packet_v4_rx.recv().await {
                 let _: Result<_, _> = udp4.send_to(packet_buf.packet(), addr).await;
                 let _ = buf_tx_v4.send(packet_buf.buf);
             }
-        });
+        }));
         let buf_tx_v6 = buf_tx.clone();
-        let send_task_v6 = tokio::task::spawn(async move {
+        let mut send_task_v6 = AbortOnDrop(tokio::task::spawn(async move {
             while let Some((packet_buf, addr)) = packet_v6_rx.recv().await {
                 let _: Result<_, _> = udp6.send_to(packet_buf.packet(), addr).await;
                 let _ = buf_tx_v6.send(packet_buf.buf);
             }
-        });
+        }));
 
-        // TODO: abort tasks on drop
         tokio::select! {
-            _ = receive_task => {},
-            _ = encapsulate_task => {},
-            _ = send_task_v4 => {},
-            _ = send_task_v6 => {},
+            _ = &mut receive_task.0 => {},
+            _ = &mut encapsulate_task.0 => {},
+            _ = &mut send_task_v4.0 => {},
+            _ = &mut send_task_v6.0 => {},
         }
     }
 }
@@ -1041,6 +1039,14 @@ impl Task {
             name,
             handle: Some(handle),
         }
+    }
+}
+
+struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
