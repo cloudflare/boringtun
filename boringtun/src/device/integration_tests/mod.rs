@@ -5,7 +5,8 @@
 // Those tests require docker and sudo privileges to run
 #[cfg(all(test, not(target_os = "macos"), not(target_os = "windows")))]
 mod tests {
-    use crate::device::{DeviceConfig, DeviceHandle};
+    use crate::device::{DefaultDeviceTransports, DeviceConfig, DeviceHandle};
+    use crate::udp::UdpSocketFactory;
     use crate::x25519::{PublicKey, StaticSecret};
     use base64::encode as base64encode;
     use hex::encode;
@@ -60,7 +61,7 @@ mod tests {
 
     /// Represents a single WireGuard interface on local machine
     struct WGHandle {
-        _device: DeviceHandle,
+        _device: DeviceHandle<DefaultDeviceTransports>,
         name: String,
         addr_v4: IpAddr,
         addr_v6: IpAddr,
@@ -266,7 +267,6 @@ mod tests {
                     //use_connected_socket: true,
                     #[cfg(target_os = "linux")]
                     api: None,
-                    on_bind: None,
                 },
             )
             .await
@@ -280,7 +280,9 @@ mod tests {
         ) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let _device = DeviceHandle::from_tun_name(&name, config).await.unwrap();
+            let _device = DeviceHandle::from_tun_name(UdpSocketFactory, &name, config)
+                .await
+                .unwrap();
             WGHandle {
                 _device,
                 name,
@@ -562,7 +564,6 @@ mod tests {
                 //use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 api: None,
-                on_bind: None,
             },
         )
         .await;
@@ -720,7 +721,6 @@ mod tests {
                 //use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 api: None,
-                on_bind: None,
             },
         )
         .await;

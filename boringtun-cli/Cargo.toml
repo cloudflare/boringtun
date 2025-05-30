@@ -21,4 +21,4 @@ tokio = { version = "1.43.0", features = ["full"] }
 [target.'cfg(unix)'.dependencies.boringtun]
 version = "0.6.0"
 path = "../boringtun"
-features = ["device"]
+features = ["device", "tun"]

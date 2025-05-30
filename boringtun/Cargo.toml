@@ -14,7 +14,7 @@ edition = "2021"
 
 [features]
 default = []
-device = ["socket2", "thiserror"]
+device = ["thiserror"]
 jni-bindings = ["ffi-bindings", "jni"]
 ffi-bindings = ["tracing-subscriber"]
 # mocks std::time::Instant with mock_instant
@@ -42,19 +42,26 @@ blake2 = "0.10"
 hmac = "0.12"
 jni = { version = "0.19.0", optional = true }
 mock_instant = { version = "0.3", optional = true }
-socket2 = { version = "0.4.7", features = ["all"], optional = true }
+socket2 = { version = "0.4.7", features = ["all"] }
 thiserror = { version = "1", optional = true }
 tokio = { version = "1.43.0", features = ["full"] }
-eyre = "*" # TODO
-log = "*" # TODO
-typed-builder = "0.20.0"
-tun = { version = "0.7.13", features = ["async"] }
+eyre = "0.6.12"
+log = "0.4"
+typed-builder = "0.21.0"
+tun = { version = "0.7.13", features = ["async"], optional = true }
+async-trait = "0.1.88"
+zerocopy = { version = "0.8.26", features = ["std", "derive"] }
+pnet_packet = "0.35.0"
+bytes = "1.10.1"
+either = "1.15.0"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.25", default-features = false, features = [
+nix = { version = "0.30", default-features = false, features = [
     "time",
     "user",
-	"socket",
+    "socket",
+    "uio",
+    "net",
 ] }
 
 [dev-dependencies]

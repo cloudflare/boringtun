@@ -5,6 +5,7 @@ pub mod command;
 
 use super::peer::AllowedIP;
 use super::{Connection, Device, Reconfigure};
+use crate::device::DeviceTransports;
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{bail, eyre, Context};
@@ -209,7 +210,7 @@ fn create_sock_dir() {
     }
 }
 
-impl Device {
+impl<T: DeviceTransports> Device<T> {
     pub(super) async fn handle_api(device: Weak<RwLock<Self>>, mut api: ApiServer) {
         loop {
             let Some((request, respond)) = api.recv().await else {
@@ -290,7 +291,7 @@ impl Device {
 }
 
 /// Handle a [Get] request.
-async fn on_api_get(_: Get, d: &Device) -> GetResponse {
+async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
     let mut peers = vec![];
     for (public_key, peer) in d.peers.iter() {
         let peer = peer.lock().await;
@@ -320,7 +321,7 @@ async fn on_api_get(_: Get, d: &Device) -> GetResponse {
         listen_port: Some(
             d.connection
                 .as_ref()
-                .map(|con| con.listen_port)
+                .and_then(|con| con.listen_port)
                 .unwrap_or(0),
         ),
         fwmark: d.fwmark,
@@ -330,7 +331,10 @@ async fn on_api_get(_: Get, d: &Device) -> GetResponse {
 }
 
 /// Handle a [Set] request.
-async fn on_api_set(set: Set, device: &mut Device) -> (SetResponse, Reconfigure) {
+async fn on_api_set(
+    set: Set,
+    device: &mut Device<impl DeviceTransports>,
+) -> (SetResponse, Reconfigure) {
     let Set {
         private_key,
         listen_port,
