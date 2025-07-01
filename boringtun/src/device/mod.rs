@@ -821,7 +821,7 @@ impl Device {
 
                     match peer
                         .tunnel
-                        .encapsulate_at(src, &mut t.dst_buf[..], Instant::now())
+                        .encapsulate_at(&*src, &mut t.dst_buf[..], Instant::now())
                     {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => {

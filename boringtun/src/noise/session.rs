@@ -6,6 +6,7 @@ use super::{
     PacketData,
 };
 use crate::noise::errors::WireGuardError;
+use bytes::Buf;
 use parking_lot::Mutex;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::{
@@ -216,11 +217,12 @@ impl Session {
     /// returns the size of the formatted packet
     pub(super) fn format_packet_data<'a>(
         &self,
-        src: &[u8],
+        mut src: impl Buf,
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
         let buf_len = dst.len();
-        let num_required = src.len() + super::DATA_OVERHEAD_SZ;
+        let src_len = src.remaining();
+        let num_required = src_len + super::DATA_OVERHEAD_SZ;
 
         if buf_len < num_required {
             tracing::warn!(%buf_len, %num_required, "Destination buffer too small for outgoing packet data");
@@ -242,16 +244,16 @@ impl Session {
         let n = {
             let mut nonce = [0u8; 12];
             nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
-            data[..src.len()].copy_from_slice(src);
+            src.copy_to_slice(&mut data[..src_len]);
             self.sender
                 .seal_in_place_separate_tag(
                     Nonce::assume_unique_for_key(nonce),
                     Aad::from(&[]),
-                    &mut data[..src.len()],
+                    &mut data[..src_len],
                 )
                 .map(|tag| {
-                    data[src.len()..src.len() + AEAD_SIZE].copy_from_slice(tag.as_ref());
-                    src.len() + AEAD_SIZE
+                    data[src_len..src_len + AEAD_SIZE].copy_from_slice(tag.as_ref());
+                    src_len + AEAD_SIZE
                 })
                 .unwrap()
         };
