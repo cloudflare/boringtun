@@ -4,7 +4,7 @@
 pub mod command;
 
 use super::peer::AllowedIP;
-use super::{Connection, Device, Error, Reconfigure};
+use super::{Connection, Device, Reconfigure};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{bail, eyre, Context};
@@ -257,38 +257,36 @@ impl Device {
         }
     }
 
-    fn register_monitor(&self, _path: String) -> Result<(), Error> {
-        // TODO: fix this
-
-        /*
-        self.queue.new_periodic_event(
-            Box::new(move |d, _| {
-                // This is not a very nice hack to detect if the control socket was removed
-                // and exiting nicely as a result. We check every 3 seconds in a loop if the
-                // file was deleted by stating it.
-                // The problem is that on linux inotify can be used quite beautifully to detect
-                // deletion, and kqueue EVFILT_VNODE can be used for the same purpose, but that
-                // will require introducing new events, for no measurable benefit.
-                // TODO: Could this be an issue if we restart the service too quickly?
-                let path = std::path::Path::new(&path);
-                if !path.exists() {
-                    d.trigger_exit();
-                    return Action::Exit;
-                }
-
-                // Periodically read the mtu of the interface in case it changes
-                if let Ok(mtu) = d.iface.mtu() {
-                    d.mtu.store(mtu, Ordering::Relaxed);
-                }
-
-                Action::Continue
-            }),
-            std::time::Duration::from_millis(1000),
-        )?;
-        */
-
-        Ok(())
-    }
+    // fn register_monitor(&self, _path: String) -> Result<(), Error> {
+    //     // TODO: fix this
+    //
+    //     self.queue.new_periodic_event(
+    //         Box::new(move |d, _| {
+    //             // This is not a very nice hack to detect if the control socket was removed
+    //             // and exiting nicely as a result. We check every 3 seconds in a loop if the
+    //             // file was deleted by stating it.
+    //             // The problem is that on linux inotify can be used quite beautifully to detect
+    //             // deletion, and kqueue EVFILT_VNODE can be used for the same purpose, but that
+    //             // will require introducing new events, for no measurable benefit.
+    //             // TODO: Could this be an issue if we restart the service too quickly?
+    //             let path = std::path::Path::new(&path);
+    //             if !path.exists() {
+    //                 d.trigger_exit();
+    //                 return Action::Exit;
+    //             }
+    //
+    //             // Periodically read the mtu of the interface in case it changes
+    //             if let Ok(mtu) = d.iface.mtu() {
+    //                 d.mtu.store(mtu, Ordering::Relaxed);
+    //             }
+    //
+    //             Action::Continue
+    //         }),
+    //         std::time::Duration::from_millis(1000),
+    //     )?;
+    //
+    //     Ok(())
+    // }
 }
 
 /// Handle a [Get] request.
