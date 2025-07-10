@@ -80,7 +80,7 @@ mod tests {
                     .ok();
 
                 std::fs::remove_file(name).ok();
-                std::fs::remove_file(format!("{}.ngx", name)).ok();
+                std::fs::remove_file(format!("{name}.ngx")).ok();
             }
         }
     }
@@ -117,8 +117,8 @@ mod tests {
             // We are the peer
             let _ = writeln!(conf, "[Peer]");
             let _ = writeln!(conf, "PublicKey = {}", base64encode(local_key.as_bytes()));
-            let _ = writeln!(conf, "AllowedIPs = {}", local_addr);
-            let _ = write!(conf, "Endpoint = 127.0.0.1:{}", local_port);
+            let _ = writeln!(conf, "AllowedIPs = {local_addr}");
+            let _ = write!(conf, "Endpoint = 127.0.0.1:{local_port}");
 
             conf
         }
@@ -147,7 +147,7 @@ mod tests {
             let peer_config_file = temp_path();
             std::fs::write(&peer_config_file, peer_config).unwrap();
             let nginx_config = self.gen_nginx_conf();
-            let nginx_config_file = format!("{}.ngx", peer_config_file);
+            let nginx_config_file = format!("{peer_config_file}.ngx");
             std::fs::write(&nginx_config_file, nginx_config).unwrap();
 
             Command::new("docker")
@@ -163,9 +163,9 @@ mod tests {
                     "-p", // Open port for the endpoint
                     &format!("{0}:{0}/udp", self.endpoint.port()),
                     "-v", // Map the generated WireGuard config file
-                    &format!("{}:/wireguard/wg.conf", peer_config_file),
+                    &format!("{peer_config_file}:/wireguard/wg.conf"),
                     "-v", // Map the nginx config file
-                    &format!("{}:/etc/nginx/conf.d/default.conf", nginx_config_file),
+                    &format!("{nginx_config_file}:/etc/nginx/conf.d/default.conf"),
                     "--rm", // Cleanup
                     "--name",
                     &peer_config_file[5..],
@@ -182,7 +182,7 @@ mod tests {
             for _i in 0..5 {
                 let res = std::net::TcpStream::connect(http_addr);
                 if let Err(err) = res {
-                    println!("failed to connect: {:?}", err);
+                    println!("failed to connect: {err:?}");
                     std::thread::sleep(std::time::Duration::from_millis(100));
                     continue;
                 }
@@ -416,7 +416,7 @@ mod tests {
         fn wg_set(&self, setting: &str) -> String {
             let path = format!("/var/run/wireguard/{}.sock", self.name);
             let mut socket = UnixStream::connect(path).unwrap();
-            write!(socket, "set=1\n{}\n\n", setting).unwrap();
+            write!(socket, "set=1\n{setting}\n\n").unwrap();
 
             let mut ret = String::new();
             socket.read_to_string(&mut ret).unwrap();
@@ -425,7 +425,7 @@ mod tests {
 
         /// Assign a listen_port to the interface
         fn wg_set_port(&self, port: u16) -> String {
-            self.wg_set(&format!("listen_port={}", port))
+            self.wg_set(&format!("listen_port={port}"))
         }
 
         /// Assign a private_key to the interface
@@ -442,7 +442,7 @@ mod tests {
         ) -> String {
             let mut req = format!("public_key={}\nendpoint={}", encode(key.as_bytes()), ep);
             for AllowedIp { ip, cidr } in allowed_ips {
-                let _ = write!(req, "\nallowed_ip={}/{}", ip, cidr);
+                let _ = write!(req, "\nallowed_ip={ip}/{cidr}");
             }
 
             self.wg_set(&req)
