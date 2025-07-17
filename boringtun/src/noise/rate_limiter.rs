@@ -4,8 +4,8 @@ use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, W
 
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
-use std::net::IpAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use core::net::IpAddr;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::Instant;

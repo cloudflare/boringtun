@@ -5,7 +5,7 @@ use super::PacketData;
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct Session {
     pub(crate) receiving_index: u32,
@@ -16,8 +16,8 @@ pub struct Session {
     receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
 }
 
-impl std::fmt::Debug for Session {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Debug for Session {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(
             f,
             "Session: {}<- ->{}",

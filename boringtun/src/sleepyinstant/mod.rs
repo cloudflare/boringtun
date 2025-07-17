@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 //! Attempts to provide the same functionality as std::time::Instant, except it
 //! uses a timer which accounts for time when the system is asleep
-use std::time::Duration;
+use core::time::Duration;
 
 #[cfg(target_os = "windows")]
 mod windows;
@@ -65,6 +65,7 @@ impl Instant {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
 
     #[test]

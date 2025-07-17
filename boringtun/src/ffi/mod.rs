@@ -17,14 +17,14 @@ use tracing;
 use tracing_subscriber::fmt;
 
 use crate::serialization::KeyBytes;
-use std::ffi::{CStr, CString};
-use std::io::{Error, ErrorKind, Write};
-use std::os::raw::c_char;
-use std::panic;
-use std::ptr;
-use std::ptr::null_mut;
-use std::slice;
-use std::sync::Once;
+use core::ffi::{CStr, CString};
+use core::io::{Error, ErrorKind, Write};
+use core::os::raw::c_char;
+use core::panic;
+use core::ptr;
+use core::ptr::null_mut;
+use core::slice;
+use core::sync::Once;
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -170,7 +170,7 @@ struct FFIFunctionPointerWriter {
 
 /// Implements Write trait for use with tracing_subscriber
 impl Write for FFIFunctionPointerWriter {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, core::io::Error> {
         let out_str = String::from_utf8_lossy(buf).to_string();
         if let Ok(c_string) = CString::new(out_str) {
             unsafe { (self.log_func)(c_string.as_ptr()) }
@@ -183,7 +183,7 @@ impl Write for FFIFunctionPointerWriter {
         }
     }
 
-    fn flush(&mut self) -> Result<(), std::io::Error> {
+    fn flush(&mut self) -> Result<(), core::io::Error> {
         // no-op
         Ok(())
     }
@@ -207,7 +207,7 @@ impl Write for FFIFunctionPointerWriter {
 pub unsafe extern "C" fn set_logging_function(
     log_func: unsafe extern "C" fn(*const c_char),
 ) -> bool {
-    let result = std::panic::catch_unwind(|| -> bool {
+    let result = core::panic::catch_unwind(|| -> bool {
         let writer = FFIFunctionPointerWriter { log_func };
         let format = fmt::format()
             // don't include levels in formatted output
@@ -225,7 +225,7 @@ pub unsafe extern "C" fn set_logging_function(
 
         fmt()
             .event_format(format)
-            .with_writer(std::sync::Mutex::new(writer))
+            .with_writer(core::sync::Mutex::new(writer))
             .with_max_level(tracing::Level::TRACE)
             .with_ansi(false)
             .try_init()

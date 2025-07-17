@@ -13,8 +13,8 @@ use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
 use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
-use std::convert::TryInto;
-use std::time::{Duration, SystemTime};
+use core::convert::TryInto;
+use core::time::{Duration, SystemTime};
 
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
@@ -206,7 +206,7 @@ impl Tai64N {
             return Err(WireGuardError::InvalidTai64nTimestamp);
         }
 
-        let (sec_bytes, nano_bytes) = buf.split_at(std::mem::size_of::<u64>());
+        let (sec_bytes, nano_bytes) = buf.split_at(size_of::<u64>());
         let secs = u64::from_be_bytes(sec_bytes.try_into().unwrap());
         let nano = u32::from_be_bytes(nano_bytes.try_into().unwrap());
 
@@ -244,8 +244,8 @@ struct NoiseParams {
     preshared_key: Option<[u8; KEY_LEN]>,
 }
 
-impl std::fmt::Debug for NoiseParams {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for NoiseParams {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("NoiseParams")
             .field("static_public", &self.static_public)
             .field("static_private", &"<redacted>")
@@ -265,8 +265,8 @@ struct HandshakeInitSentState {
     time_sent: Instant,
 }
 
-impl std::fmt::Debug for HandshakeInitSentState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for HandshakeInitSentState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("HandshakeInitSentState")
             .field("local_index", &self.local_index)
             .field("hash", &self.hash)
@@ -549,7 +549,7 @@ impl Handshake {
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
         hash = b2s_hash(&hash, packet.encrypted_timestamp);
 
-        self.previous = std::mem::replace(
+        self.previous = core::mem::replace(
             &mut self.state,
             HandshakeState::InitReceived {
                 chaining_key,
@@ -772,7 +772,7 @@ impl Handshake {
         hash = b2s_hash(&hash, encrypted_timestamp);
 
         let time_now = Instant::now();
-        self.previous = std::mem::replace(
+        self.previous = core::mem::replace(
             &mut self.state,
             HandshakeState::InitSent(HandshakeInitSentState {
                 local_index,
@@ -794,7 +794,7 @@ impl Handshake {
             return Err(WireGuardError::DestinationBufferTooSmall);
         }
 
-        let state = std::mem::replace(&mut self.state, HandshakeState::None);
+        let state = core::mem::replace(&mut self.state, HandshakeState::None);
         let (mut chaining_key, mut hash, peer_ephemeral_public, peer_index) = match state {
             HandshakeState::InitReceived {
                 chaining_key,
@@ -882,6 +882,9 @@ impl Handshake {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
+    use alloc::vec;
     use super::*;
 
     #[test]

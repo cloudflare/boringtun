@@ -14,8 +14,10 @@ documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
 edition = "2018"
 
 [features]
-default = []
-device = ["socket2", "thiserror"]
+default = [ "std" ]
+alloc = [ ]
+std = [ "alloc" ]
+device = ["socket2", "thiserror", "std"]
 jni-bindings = ["ffi-bindings", "jni"]
 ffi-bindings = ["tracing-subscriber"]
 # mocks std::time::Instant with mock_instant

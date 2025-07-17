@@ -3,10 +3,10 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
-use std::mem;
-use std::ops::{Index, IndexMut};
+use core::mem;
+use core::ops::{Index, IndexMut};
 
-use std::time::Duration;
+use core::time::Duration;
 
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;

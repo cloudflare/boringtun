@@ -5,6 +5,12 @@
 //!
 //! <code>git clone https://github.com/cloudflare/boringtun.git</code>
 
+// Set `no_std` where `std` feature is disabled
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 #[cfg(feature = "device")]
 pub mod device;
 

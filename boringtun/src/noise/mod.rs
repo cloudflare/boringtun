@@ -14,11 +14,11 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::x25519;
 
-use std::collections::VecDeque;
-use std::convert::{TryFrom, TryInto};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
-use std::time::Duration;
+use alloc::collections::VecDeque;
+use core::convert::{TryFrom, TryInto};
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use alloc::sync::Arc;
+use core::time::Duration;
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
@@ -153,7 +153,7 @@ impl Tunn {
                 nonce: &src[8..32],
                 encrypted_cookie: &src[32..64],
             }),
-            (DATA, DATA_OVERHEAD_SZ..=std::usize::MAX) => Packet::PacketData(PacketData {
+            (DATA, DATA_OVERHEAD_SZ..=usize::MAX) => Packet::PacketData(PacketData {
                 receiver_idx: u32::from_le_bytes(src[4..8].try_into().unwrap()),
                 counter: u64::from_le_bytes(src[8..16].try_into().unwrap()),
                 encrypted_encapsulated_packet: &src[16..],
@@ -587,6 +587,10 @@ impl Tunn {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
+    use std::vec::Vec;
+    use std::vec;
     #[cfg(feature = "mock-instant")]
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
 
