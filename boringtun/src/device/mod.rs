@@ -216,7 +216,7 @@ impl DeviceHandle<DefaultDeviceTransports> {
         let tun = tun::create_as_async(&tun_config)?;
         let tun_tx = Arc::new(tun);
         let tun_rx = Arc::clone(&tun_tx);
-        DeviceHandle::new(udp_factory, tun_tx, tun_rx, config).await
+        Ok(DeviceHandle::new(udp_factory, tun_tx, tun_rx, config).await)
     }
 }
 
@@ -226,10 +226,10 @@ impl<T: DeviceTransports> DeviceHandle<T> {
         tun_tx: T::IpSend,
         tun_rx: T::IpRecv,
         config: DeviceConfig,
-    ) -> Result<DeviceHandle<T>, Error> {
-        Ok(DeviceHandle {
-            device: Device::new(udp_factory, tun_tx, tun_rx, config).await?,
-        })
+    ) -> DeviceHandle<T> {
+        DeviceHandle {
+            device: Device::new(udp_factory, tun_tx, tun_rx, config).await,
+        }
     }
 
     pub async fn stop(self) {
@@ -390,7 +390,7 @@ impl<T: DeviceTransports> Device<T> {
         tun_tx: T::IpSend,
         tun_rx: T::IpRecv,
         config: DeviceConfig,
-    ) -> Result<Arc<RwLock<Device<T>>>, Error> {
+    ) -> Arc<RwLock<Device<T>>> {
         let device = Device {
             api: None,
             udp_factory,
@@ -416,7 +416,7 @@ impl<T: DeviceTransports> Device<T> {
             ));
         }
 
-        Ok(device)
+        device
     }
 
     async fn set_port(&mut self, port: u16) -> Reconfigure {
