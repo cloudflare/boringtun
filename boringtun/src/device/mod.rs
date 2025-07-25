@@ -137,8 +137,6 @@ pub struct Device<T: DeviceTransports> {
     peers_by_idx: HashMap<u32, Arc<Mutex<Peer>>>,
     next_index: IndexLfsr,
 
-    cleanup_paths: Vec<String>,
-
     rate_limiter: Option<Arc<RateLimiter>>,
 
     port: u16,
@@ -254,11 +252,6 @@ impl<T: DeviceTransports> DeviceHandle<T> {
 
         if let Some(connection) = device.connection.take() {
             connection.stop().await;
-        }
-
-        for path in &device.cleanup_paths {
-            // attempt to remove any file we created in the work dir
-            let _ = tokio::fs::remove_file(path).await;
         }
     }
 }
@@ -389,7 +382,6 @@ impl<T: DeviceTransports> Device<T> {
             peers: Default::default(),
             peers_by_idx: Default::default(),
             peers_by_ip: AllowedIps::new(),
-            cleanup_paths: Default::default(),
             rate_limiter: None,
             port: 0,
             connection: None,
@@ -403,20 +395,6 @@ impl<T: DeviceTransports> Device<T> {
                 Device::handle_api(Arc::downgrade(&device), channel),
             ));
         }
-
-        // TODO: fix this
-        /*
-        #[cfg(target_os = "macos")]
-        {
-            // Only for macOS write the actual socket name into WG_TUN_NAME_FILE
-            if let Ok(name_file) = std::env::var("WG_TUN_NAME_FILE") {
-                if tun_name_or_fd == "utun" {
-                    std::fs::write(&name_file, device.iface.name().unwrap().as_bytes()).unwrap();
-                    device.cleanup_paths.push(name_file);
-                }
-            }
-        }
-        */
 
         Ok(device)
     }

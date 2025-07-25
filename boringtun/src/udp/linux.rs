@@ -28,8 +28,6 @@ impl UdpTransport for tokio::net::UdpSocket {
         let n = packets.len();
         debug_assert!(n <= MAX_PACKET_COUNT);
 
-        //log::info!("send_to_many {n}");
-
         let fd = self.as_raw_fd();
 
         buf.targets.clear();
