@@ -135,9 +135,7 @@ mod unix {
 
         let api = boringtun::device::api::ApiServer::default_unix_socket(tun_name).unwrap();
 
-        let config = DeviceConfig {
-            api: Some(api),
-        };
+        let config = DeviceConfig { api: Some(api) };
 
         let _device_handle =
             match DeviceHandle::from_tun_name(UdpSocketFactory, tun_name, config).await {

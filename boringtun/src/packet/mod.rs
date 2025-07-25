@@ -2,7 +2,7 @@ use std::{marker::PhantomData, ops::Deref};
 
 use bytes::Bytes;
 use either::Either;
-use eyre::{bail, eyre, Context};
+use eyre::{Context, bail, eyre};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 mod ipv4;

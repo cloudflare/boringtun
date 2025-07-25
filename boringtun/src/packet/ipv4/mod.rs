@@ -1,5 +1,5 @@
 use std::{fmt::Debug, net::Ipv4Addr};
-use zerocopy::{big_endian, FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
 mod protocol;
 pub use protocol::*;

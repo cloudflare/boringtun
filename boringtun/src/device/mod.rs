@@ -10,6 +10,7 @@ pub mod drop_privileges;
 mod integration_tests;
 pub mod peer;
 
+use ip_network_table::IpNetworkTable;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self};
@@ -21,7 +22,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::join;
 use tokio::sync::RwLock;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 
 use crate::noise::errors::WireGuardError;
@@ -91,9 +92,7 @@ pub struct DeviceConfig {
 
 impl Default for DeviceConfig {
     fn default() -> Self {
-        DeviceConfig {
-            api: None,
-        }
+        DeviceConfig { api: None }
     }
 }
 
@@ -293,7 +292,7 @@ impl<T: DeviceTransports> Device<T> {
         self.next_index.next()
     }
 
-    fn remove_peer(&mut self, pub_key: &x25519::PublicKey) {
+    fn remove_peer(&mut self, pub_key: &x25519::PublicKey) -> Option<Arc<Mutex<Peer>>> {
         if let Some(peer) = self.peers.remove(pub_key) {
             // Found a peer to remove, now purge all references to it:
             {
@@ -304,32 +303,51 @@ impl<T: DeviceTransports> Device<T> {
                 .remove(&|p: &Arc<Mutex<Peer>>| Arc::ptr_eq(&peer, p));
 
             log::info!("Peer removed");
+
+            Some(peer)
+        } else {
+            None
         }
     }
 
+    /// Update or add peer
     #[allow(clippy::too_many_arguments)]
     fn update_peer(
         &mut self,
         pub_key: x25519::PublicKey,
         remove: bool,
-        replace_ips: bool,
+        replace_allowed_ips: bool,
         endpoint: Option<SocketAddr>,
-        allowed_ips: &[AllowedIP],
+        new_allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
     ) {
         if remove {
             // Completely remove a peer
-            return self.remove_peer(&pub_key);
+            self.remove_peer(&pub_key);
+            return;
         }
 
-        // Update an existing peer
-        if self.peers.contains_key(&pub_key) {
-            // We already have a peer, we need to merge the existing config into the newly created one
-            panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
-        }
+        let (index, old_allowed_ips) = if let Some(old_peer) = self.remove_peer(&pub_key) {
+            // TODO: Update existing peer?
+            let peer = old_peer.blocking_lock();
+            let index = peer.index();
+            let old_allowed_ips = peer
+                .allowed_ips()
+                .map(|(addr, cidr)| AllowedIP { addr, cidr })
+                .collect();
+            drop(peer);
 
-        let next_index = self.next_index();
+            // TODO: Match pubkey instead of index
+            self.peers_by_ip
+                .remove(&|p| p.blocking_lock().index() == index);
+
+            (index, old_allowed_ips)
+        } else {
+            (self.next_index(), vec![])
+        };
+
+        // Update an existing peer or add peer
         let device_key_pair = self
             .key_pair
             .as_ref()
@@ -340,21 +358,27 @@ impl<T: DeviceTransports> Device<T> {
             pub_key,
             preshared_key,
             keepalive,
-            next_index,
+            index,
             None,
         );
 
-        let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);
+        let allowed_ips = if !replace_allowed_ips {
+            // append old allowed IPs
+            old_allowed_ips
+                .into_iter()
+                .chain(new_allowed_ips.iter().copied())
+                .collect()
+        } else {
+            new_allowed_ips.to_vec()
+        };
 
+        let peer = Peer::new(tunn, index, endpoint, &allowed_ips, preshared_key);
         let peer = Arc::new(Mutex::new(peer));
+
+        self.peers_by_idx.insert(index, Arc::clone(&peer));
         self.peers.insert(pub_key, Arc::clone(&peer));
-        self.peers_by_idx.insert(next_index, Arc::clone(&peer));
 
-        if replace_ips {
-            log::warn!("not implemented: replace_allowed_ips");
-        }
-
-        for AllowedIP { addr, cidr } in allowed_ips {
+        for AllowedIP { addr, cidr } in &allowed_ips {
             self.peers_by_ip
                 .insert(*addr, *cidr as _, Arc::clone(&peer));
         }

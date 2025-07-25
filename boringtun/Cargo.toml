@@ -10,7 +10,7 @@ authors = [
 license = "BSD-3-Clause"
 repository = "https://github.com/cloudflare/boringtun"
 documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
-edition = "2021"
+edition = "2024"
 
 [features]
 default = []

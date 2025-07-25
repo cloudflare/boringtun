@@ -5,9 +5,9 @@ use rand_core::RngCore;
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::{atomic::AtomicU16, Arc},
+    sync::{Arc, atomic::AtomicU16},
 };
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use zerocopy::{FromBytes, IntoBytes, TryFromBytes};
 
 use crate::{

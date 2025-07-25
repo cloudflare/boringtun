@@ -1,6 +1,6 @@
+use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrIn, SockaddrStorage};
 #[cfg(target_os = "linux")]
 use nix::sys::socket::{setsockopt, sockopt};
-use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrIn, SockaddrStorage};
 use std::{
     io::{self, IoSlice, IoSliceMut},
     net::SocketAddr,

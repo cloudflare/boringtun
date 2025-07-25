@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use nix::sys::time::TimeSpec;
-use nix::time::{clock_gettime, ClockId};
+use nix::time::{ClockId, clock_gettime};
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
 const CLOCK_ID: ClockId = ClockId::CLOCK_MONOTONIC;

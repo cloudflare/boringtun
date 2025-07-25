@@ -8,13 +8,13 @@ use super::{Connection, Device, Reconfigure};
 use crate::device::DeviceTransports;
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
-use eyre::{bail, eyre, Context};
+use eyre::{Context, bail, eyre};
 use libc::EINVAL;
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
 use std::sync::Weak;
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, mpsc, oneshot};
 
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
@@ -149,14 +149,16 @@ impl ApiServer {
 
         let (tx, rx) = ApiServer::new();
 
-        std::thread::spawn(move || loop {
-            let Ok((stream, _)) = api_listener.accept() else {
-                break;
-            };
+        std::thread::spawn(move || {
+            loop {
+                let Ok((stream, _)) = api_listener.accept() else {
+                    break;
+                };
 
-            log::info!("New UAPI connection on unix socket");
+                log::info!("New UAPI connection on unix socket");
 
-            tx.clone().wrap_read_write(stream);
+                tx.clone().wrap_read_write(stream);
+            }
         });
 
         Ok(rx)

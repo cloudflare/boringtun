@@ -8,10 +8,10 @@
 use std::os::raw::c_char;
 use std::ptr;
 
+use jni::JNIEnv;
 use jni::objects::{JByteBuffer, JClass, JString};
 use jni::strings::JNIStr;
 use jni::sys::{jbyteArray, jint, jlong, jshort, jstring};
-use jni::JNIEnv;
 use parking_lot::Mutex;
 
 use crate::ffi::new_tunnel;

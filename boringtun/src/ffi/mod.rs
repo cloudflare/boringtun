@@ -10,7 +10,7 @@ use super::noise::{Tunn, TunnResult};
 use crate::x25519::{PublicKey, StaticSecret};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
-use libc::{raise, SIGSEGV};
+use libc::{SIGSEGV, raise};
 use parking_lot::Mutex;
 use rand_core::OsRng;
 use tracing;
@@ -153,11 +153,7 @@ pub unsafe extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> 
         for b in key {
             zero |= b
         }
-        if len == 32 && zero != 0 {
-            1
-        } else {
-            0
-        }
+        if len == 32 && zero != 0 { 1 } else { 0 }
     } else {
         0
     }
