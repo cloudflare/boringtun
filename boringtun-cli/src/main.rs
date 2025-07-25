@@ -83,7 +83,6 @@ mod unix {
 
         let background = !matches.is_present("foreground");
         let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
-        let n_threads: usize = matches.value_of_t("threads").unwrap_or_else(|e| e.exit());
         let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
 
         // Create a socketpair to communicate between forked processes
@@ -137,9 +136,7 @@ mod unix {
         let api = boringtun::device::api::ApiServer::default_unix_socket(tun_name).unwrap();
 
         let config = DeviceConfig {
-            n_threads,
             api: Some(api),
-            //use_connected_socket: !matches.is_present("disable-connected-udp"),
         };
 
         let _device_handle =

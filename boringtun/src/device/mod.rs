@@ -86,15 +86,12 @@ pub struct DeviceHandle<T: DeviceTransports> {
 }
 
 pub struct DeviceConfig {
-    pub n_threads: usize,
-
     pub api: Option<api::ApiServer>,
 }
 
 impl Default for DeviceConfig {
     fn default() -> Self {
         DeviceConfig {
-            n_threads: 4,
             api: None,
         }
     }

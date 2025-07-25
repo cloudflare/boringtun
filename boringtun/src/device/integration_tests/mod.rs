@@ -263,8 +263,6 @@ mod tests {
                 addr_v4,
                 addr_v6,
                 DeviceConfig {
-                    n_threads: 2,
-                    //use_connected_socket: true,
                     #[cfg(target_os = "linux")]
                     api: None,
                 },
@@ -560,7 +558,6 @@ mod tests {
             addr_v4,
             addr_v6,
             DeviceConfig {
-                n_threads: 2,
                 //use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 api: None,
@@ -717,8 +714,6 @@ mod tests {
             addr_v4,
             addr_v6,
             DeviceConfig {
-                n_threads: 2,
-                //use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 api: None,
             },
