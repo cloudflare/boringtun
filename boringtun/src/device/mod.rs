@@ -10,7 +10,6 @@ pub mod drop_privileges;
 mod integration_tests;
 pub mod peer;
 
-use ip_network_table::IpNetworkTable;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self};
