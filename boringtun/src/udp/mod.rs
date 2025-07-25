@@ -8,12 +8,11 @@ use std::{
 use crate::packet::PacketBuf;
 
 /// Implementations of UdpTransport for linux
-// TODO: does this work for android?
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod linux;
 
 /// Implementations of UdpTransport for all targets
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 mod generic;
 
 pub mod channel;

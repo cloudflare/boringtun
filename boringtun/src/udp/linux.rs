@@ -1,4 +1,6 @@
-use nix::sys::socket::{setsockopt, sockopt, MsgFlags, MultiHeaders, SockaddrIn, SockaddrStorage};
+#[cfg(target_os = "linux")]
+use nix::sys::socket::{setsockopt, sockopt};
+use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrIn, SockaddrStorage};
 use std::{
     io::{self, IoSlice, IoSliceMut},
     net::SocketAddr,
@@ -129,6 +131,7 @@ impl UdpTransport for tokio::net::UdpSocket {
         self.local_addr().map(Some)
     }
 
+    #[cfg(target_os = "linux")]
     fn set_fwmark(&self, mark: u32) -> io::Result<()> {
         setsockopt(self, sockopt::Mark, &mark)?;
         Ok(())
