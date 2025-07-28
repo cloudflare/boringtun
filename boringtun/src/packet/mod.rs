@@ -10,6 +10,7 @@ mod ipv4;
 mod ipv6;
 mod pool;
 mod udp;
+mod util;
 
 pub use ipv4::*;
 pub use ipv6::*;

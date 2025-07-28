@@ -5,6 +5,8 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endi
 mod protocol;
 pub use protocol::*;
 
+use super::util::size_must_be;
+
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv4<Payload: ?Sized = [u8]> {
@@ -12,7 +14,7 @@ pub struct Ipv4<Payload: ?Sized = [u8]> {
     pub payload: Payload,
 }
 
-/// A packet bitfield struct containing the `version` and `ihl` fields in IPv4.
+/// A bitfield struct containing the IPv4 fields `version` and `ihl`.
 #[bitfield(u8)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4VersionIhl {
@@ -22,7 +24,7 @@ pub struct Ipv4VersionIhl {
     pub version: u8,
 }
 
-/// A packet bitfield struct containing the `dscp` and `ecn` fields in IPv4.
+/// A bitfield struct containing the IPv4 fields `dscp` and `ecn`.
 #[bitfield(u8)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4DscpEcn {
@@ -32,7 +34,7 @@ pub struct Ipv4DscpEcn {
     pub dscp: u8,
 }
 
-/// A packet bitfield struct containing the `flags` and `fragment_offset` fields in IPv4.
+/// A bitfield struct containing the IPv4 fields `flags` and `fragment_offset`.
 #[bitfield(u16, repr = big_endian::U16, from = big_endian::U16::new, into = big_endian::U16::get)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4FlagsFragmentOffset {
@@ -100,10 +102,10 @@ impl Ipv4Header {
 
 impl Ipv4Header {
     #[allow(dead_code)]
-    const LEN: usize = size_of::<Ipv4Header>();
+    const LEN: usize = size_must_be::<Ipv4Header>(20);
 
     /// The IP version. Must be `4` for a valid IPv4 header.
-    pub fn version(&self) -> u8 {
+    pub const fn version(&self) -> u8 {
         self.version_and_ihl.version()
     }
 
@@ -112,37 +114,37 @@ impl Ipv4Header {
     /// This is the length of the IPv4 header, specified in 4-byte words.
     /// The minimum value is `5`. If the header contains any IPv4 options, this value will be
     /// larger.
-    pub fn ihl(&self) -> u8 {
+    pub const fn ihl(&self) -> u8 {
         self.version_and_ihl.ihl()
     }
 
-    pub fn source(&self) -> Ipv4Addr {
+    pub const fn source(&self) -> Ipv4Addr {
         let bits = self.source_address.get();
         Ipv4Addr::from_bits(bits)
     }
 
-    pub fn destination(&self) -> Ipv4Addr {
+    pub const fn destination(&self) -> Ipv4Addr {
         let bits = self.destination_address.get();
         Ipv4Addr::from_bits(bits)
     }
 
-    pub fn next_protocol(&self) -> IpNextProtocol {
+    pub const fn next_protocol(&self) -> IpNextProtocol {
         self.protocol
     }
 
-    pub fn dscp(&self) -> u8 {
+    pub const fn dscp(&self) -> u8 {
         self.dscp_and_ecn.dscp()
     }
 
-    pub fn ecn(&self) -> u8 {
+    pub const fn ecn(&self) -> u8 {
         self.dscp_and_ecn.ecn()
     }
 
-    pub fn flags(&self) -> u8 {
+    pub const fn flags(&self) -> u8 {
         self.flags_and_fragment_offset.flags()
     }
 
-    pub fn fragment_offset(&self) -> u16 {
+    pub const fn fragment_offset(&self) -> u16 {
         self.flags_and_fragment_offset.fragment_offset()
     }
 }
