@@ -1,6 +1,8 @@
 use std::future::Future;
 use std::io;
 
+pub mod buffer;
+
 /// A type that let's you send an IP packet.
 ///
 /// This is used as an abstraction of the TUN device used by wireguard,

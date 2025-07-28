@@ -7,6 +7,8 @@ use std::{
 
 use crate::packet::PacketBuf;
 
+pub mod buffer;
+
 /// Implementations of UdpTransport for linux
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod linux;
@@ -103,6 +105,36 @@ pub trait UdpTransport: Send + Sync {
     }
 }
 
+impl<T: UdpTransport> UdpTransport for Arc<T> {
+    type SendManyBuf = T::SendManyBuf;
+
+    fn send_to(
+        &self,
+        packet: &[u8],
+        destination: SocketAddr,
+    ) -> impl Future<Output = io::Result<()>> + Send {
+        Arc::as_ref(self).send_to(packet, destination)
+    }
+
+    fn recv_from(
+        &self,
+        buf: &mut [u8],
+    ) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + Send {
+        Arc::as_ref(self).recv_from(buf)
+    }
+
+    fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
+        Arc::as_ref(self).local_addr()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn set_fwmark(&self, mark: u32) -> io::Result<()> {
+        Arc::as_ref(self).set_fwmark(mark)
+    }
+
+    // TODO: remaining methods
+}
+
 async fn generic_send_many_to<U: UdpTransport + ?Sized>(
     transport: &U,
     packets: &[(PacketBuf, SocketAddr)],
@@ -167,7 +199,7 @@ impl UdpTransportFactory for UdpSocketFactory {
         let udp_v4 = bind((params.addr_v4, port).into())?;
         if port == 0 {
             // The socket is using a random port, copy it so we can re-use it for IPv6.
-            port = udp_v4.local_addr()?.port();
+            port = tokio::net::UdpSocket::local_addr(&udp_v4)?.port();
         }
 
         let udp_v6 = bind((params.addr_v6, port).into())?;
