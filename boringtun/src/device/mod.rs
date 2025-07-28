@@ -709,11 +709,9 @@ impl<T: DeviceTransports> Device<T> {
 
         let mut buffered_tun_recv = BufferedIpRecv::new(MAX_PACKET_BUFS, packet_pool.clone(), tun);
 
-        let rx_packet_pool = packet_pool.clone();
-
         let encapsulate_task = Task::spawn("encapsulate", async move {
             let mut dst_buf = packet_pool.get();
-            let mut src_buf = rx_packet_pool.get();
+            let mut src_buf = packet_pool.get();
 
             loop {
                 src_buf.len = match buffered_tun_recv.recv(src_buf.packet_mut()).await {

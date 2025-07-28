@@ -133,7 +133,13 @@ impl<U: UdpTransport> UdpTransport for BufferedUdpTransport<U> {
     }
 
     async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-        let Some((rx_packet, src)) = self.recv_rx.lock().await.recv().await else {
+        let Some((rx_packet, src)) = self
+            .recv_rx
+            .try_lock()
+            .expect("simultaneous recv")
+            .recv()
+            .await
+        else {
             return Err(io::Error::other("No packet available"));
         };
         buf[..rx_packet.len].copy_from_slice(rx_packet.packet());
