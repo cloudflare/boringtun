@@ -21,8 +21,8 @@ pub struct BufferedUdpTransport<U: UdpTransport> {
 }
 
 impl<U: UdpTransport + Clone + 'static> BufferedUdpTransport<U> {
-    pub fn new(inner: U, pool: Arc<PacketBufPool>) -> Self {
-        let (send_tx, mut send_rx) = mpsc::channel::<(PacketBuf, SocketAddr)>(5000);
+    pub fn new(capacity: usize, inner: U, pool: Arc<PacketBufPool>) -> Self {
+        let (send_tx, mut send_rx) = mpsc::channel::<(PacketBuf, SocketAddr)>(capacity);
 
         let udp_tx = inner.clone();
         let udp_rx = inner.clone();

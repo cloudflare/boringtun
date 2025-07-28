@@ -583,8 +583,9 @@ impl<T: DeviceTransports> Device<T> {
             (tun, private_key, public_key, rate_limiter)
         };
 
-        let buffered_udp = BufferedUdpTransport::new(udp.clone(), packet_pool.clone());
-        let buffered_tun_send = BufferedIpSend::new(packet_pool.clone(), tun);
+        let buffered_udp =
+            BufferedUdpTransport::new(MAX_PACKET_BUFS, udp.clone(), packet_pool.clone());
+        let buffered_tun_send = BufferedIpSend::new(MAX_PACKET_BUFS, packet_pool.clone(), tun);
 
         let decapsulate_task = Task::spawn("decapsulate", async move {
             // NOTE: Reusing this appears to be faster than grabbing a buffer and using it for replies
@@ -704,9 +705,9 @@ impl<T: DeviceTransports> Device<T> {
             device.tun_rx.clone()
         };
 
-        let mut buffered_tun_recv = BufferedIpRecv::new(packet_pool.clone(), tun);
-        let buffered_udp4 = BufferedUdpTransport::new(udp4, packet_pool.clone());
-        let buffered_udp6 = BufferedUdpTransport::new(udp6, packet_pool.clone());
+        let mut buffered_tun_recv = BufferedIpRecv::new(MAX_PACKET_BUFS, packet_pool.clone(), tun);
+        let buffered_udp4 = BufferedUdpTransport::new(MAX_PACKET_BUFS, udp4, packet_pool.clone());
+        let buffered_udp6 = BufferedUdpTransport::new(MAX_PACKET_BUFS, udp6, packet_pool.clone());
 
         let rx_packet_pool = packet_pool.clone();
 

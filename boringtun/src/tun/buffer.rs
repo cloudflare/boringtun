@@ -16,8 +16,8 @@ pub struct BufferedIpSend<I> {
 }
 
 impl<I: IpSend> BufferedIpSend<I> {
-    pub fn new(pool: Arc<PacketBufPool>, inner: I) -> Self {
-        let (tx, mut rx) = mpsc::channel::<PacketBuf>(5000);
+    pub fn new(capacity: usize, pool: Arc<PacketBufPool>, inner: I) -> Self {
+        let (tx, mut rx) = mpsc::channel::<PacketBuf>(capacity);
 
         tokio::spawn(async move {
             while let Some(packet) = rx.recv().await {
@@ -55,8 +55,8 @@ pub struct BufferedIpRecv<I> {
 }
 
 impl<I: IpRecv> BufferedIpRecv<I> {
-    pub fn new(pool: Arc<PacketBufPool>, mut inner: I) -> Self {
-        let (tx, rx) = mpsc::channel::<PacketBuf>(5000);
+    pub fn new(capacity: usize, pool: Arc<PacketBufPool>, mut inner: I) -> Self {
+        let (tx, rx) = mpsc::channel::<PacketBuf>(capacity);
 
         tokio::spawn(async move {
             loop {
