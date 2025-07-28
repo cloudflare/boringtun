@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, ops::Deref};
 
+use bitfield_struct::bitfield;
 use bytes::Bytes;
 use either::Either;
 use eyre::{Context, bail, eyre};
@@ -63,13 +64,14 @@ impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv6<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv4<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Udp<P> {}
 
-/// A type containing the `version`-field that is shared between IPv4 and IPv6.
-#[repr(C, packed)]
-#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
-pub struct Ip {
-    /// The 4 least significant bytes of this field is the version field for both IPv4 and IPv6.
-    version_raw: u8,
-    pub rest: [u8],
+/// A packet bitfield-struct containing the `version`-field that is shared between IPv4 and IPv6.
+#[bitfield(u8)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
+pub struct IpvxVersion {
+    #[bits(4)]
+    pub _unknown: u8,
+    #[bits(4)]
+    pub version: u8,
 }
 
 impl Packet<[u8]> {
@@ -91,10 +93,9 @@ impl Packet<[u8]> {
         let buf_len = self.buf.len();
 
         // Decode the IP version field to figure out if this is IPv4 of IPv6.
-        let ip_vx = Ip::try_ref_from_bytes(&self.buf[..])
-            .map_err(|e| eyre!("Couldn't read IP version: {e:?}"))?;
-
-        let ip_version = (ip_vx.version_raw & 0xf0) >> 4;
+        let ip_version = IpvxVersion::try_ref_from_bytes(&self.buf[..])
+            .map_err(|e| eyre!("Couldn't read IP version: {e:?}"))?
+            .version();
 
         match ip_version {
             4 => {
