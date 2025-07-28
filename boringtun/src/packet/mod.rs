@@ -123,8 +123,17 @@ impl Packet<Ipv4> {
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
         let ip = self.deref();
 
-        // TODO: either handle IP options, or IP check that packet contains none.
-        // i.e. assert that ipv4.header.ihl == 5.
+        match ip.header.ihl() {
+            5 => {}
+            6.. => {
+                return Err(eyre!("IP header: {:?}", ip.header))
+                    .wrap_err(eyre!("IPv4 packets with options are not supported"));
+            }
+            ihl @ ..5 => {
+                return Err(eyre!("IP header: {:?}", ip.header))
+                    .wrap_err(eyre!("Bad IHL value: {ihl}"));
+            }
+        }
 
         validate_udp(ip.header.next_protocol(), &ip.payload)
             .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;

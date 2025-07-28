@@ -75,6 +75,20 @@ impl Ipv4Header {
 }
 
 impl Ipv4Header {
+    /// The IP version. Must be `4` for a valid IPv4 header.
+    pub fn version(&self) -> u8 {
+        (self.version_and_ihl & 0xf0) >> 4
+    }
+
+    /// Internet Header Length.
+    ///
+    /// This is the length of the IPv4 header, specified in 4-byte words.
+    /// The minimum value is `5`. If the header contains any IPv4 options, this value will be
+    /// larger.
+    pub fn ihl(&self) -> u8 {
+        self.version_and_ihl & 0x0f
+    }
+
     pub fn source(&self) -> Ipv4Addr {
         let bits = self.source_address.get();
         Ipv4Addr::from_bits(bits)
