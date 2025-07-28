@@ -11,23 +11,21 @@ mod integration_tests;
 pub mod peer;
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::io::{self};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::ops::BitOrAssign;
-use std::pin::Pin;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::{Packet, Tunn, TunnResult};
 use crate::packet::PacketBufPool;
+use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::{IpRecv, IpSend};
 use crate::udp::buffer::BufferedUdpTransport;
@@ -143,13 +141,11 @@ pub struct Device<T: DeviceTransports> {
     api: Option<Task>,
 }
 
-struct Task {
-    name: &'static str,
-    handle: Option<JoinHandle<()>>,
-}
 pub(crate) struct Connection<T: DeviceTransports> {
-    udp4: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-    udp6: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+    udp4:
+        Arc<BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>>,
+    udp6:
+        Arc<BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>>,
 
     listen_port: Option<u16>,
 
@@ -174,32 +170,56 @@ impl<T: DeviceTransports> Connection<T> {
 
         let packet_pool = PacketBufPool::new(MAX_PACKET_BUFS);
 
+        let buffered_udp_v4 = Arc::new(BufferedUdpTransport::new(
+            MAX_PACKET_BUFS,
+            udp4,
+            packet_pool.clone(),
+        ));
+        let buffered_udp_v6 = Arc::new(BufferedUdpTransport::new(
+            MAX_PACKET_BUFS,
+            udp6,
+            packet_pool.clone(),
+        ));
+
         let outgoing = Task::spawn(
             "handle_outgoing",
             Device::handle_outgoing(
                 Arc::downgrade(&device),
-                udp4.clone(),
-                udp6.clone(),
+                buffered_udp_v4.clone(),
+                buffered_udp_v6.clone(),
                 packet_pool.clone(),
             ),
         );
         let timers = Task::spawn(
             "handle_timers",
-            Device::handle_timers(Arc::downgrade(&device), udp4.clone(), udp6.clone()),
+            Device::handle_timers(
+                Arc::downgrade(&device),
+                buffered_udp_v4.clone(),
+                buffered_udp_v6.clone(),
+            ),
         );
+
         let incoming_ipv4 = Task::spawn(
             "handle_incoming ipv4",
-            Device::handle_incoming(Arc::downgrade(&device), udp4.clone(), packet_pool.clone()),
+            Device::handle_incoming(
+                Arc::downgrade(&device),
+                buffered_udp_v4.clone(),
+                packet_pool.clone(),
+            ),
         );
         let incoming_ipv6 = Task::spawn(
             "handle_incoming ipv6",
-            Device::handle_incoming(Arc::downgrade(&device), udp6.clone(), packet_pool.clone()),
+            Device::handle_incoming(
+                Arc::downgrade(&device),
+                buffered_udp_v6.clone(),
+                packet_pool.clone(),
+            ),
         );
 
         Ok(Connection {
-            listen_port: udp4.local_addr()?.map(|sa| sa.port()),
-            udp4,
-            udp6,
+            listen_port: buffered_udp_v4.local_addr()?.map(|sa| sa.port()),
+            udp4: buffered_udp_v4,
+            udp6: buffered_udp_v6,
             incoming_ipv4,
             incoming_ipv6,
             timers,
@@ -511,8 +531,12 @@ impl<T: DeviceTransports> Device<T> {
 
     async fn handle_timers(
         device: Weak<RwLock<Self>>,
-        udp4: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-        udp6: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+        udp4: Arc<
+            BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
+        >,
+        udp6: Arc<
+            BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
+        >,
     ) {
         // TODO: fix rate limiting
         /*
@@ -568,7 +592,9 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
-        udp: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+        udp: Arc<
+            BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
+        >,
         packet_pool: Arc<PacketBufPool>,
     ) -> Result<(), Error> {
         let (tun, private_key, public_key, rate_limiter) = {
@@ -583,15 +609,13 @@ impl<T: DeviceTransports> Device<T> {
             (tun, private_key, public_key, rate_limiter)
         };
 
-        let buffered_udp =
-            BufferedUdpTransport::new(MAX_PACKET_BUFS, udp.clone(), packet_pool.clone());
         let buffered_tun_send = BufferedIpSend::new(MAX_PACKET_BUFS, packet_pool.clone(), tun);
 
         let decapsulate_task = Task::spawn("decapsulate", async move {
             // NOTE: Reusing this appears to be faster than grabbing a buffer and using it for replies
             let mut src_buf = packet_pool.get();
 
-            while let Ok((n, addr)) = buffered_udp.recv_from(src_buf.packet_mut()).await {
+            while let Ok((n, addr)) = udp.recv_from(src_buf.packet_mut()).await {
                 src_buf.len = n;
                 let mut dst_buf = packet_pool.get();
 
@@ -602,8 +626,8 @@ impl<T: DeviceTransports> Device<T> {
                 ) {
                     Ok(packet) => packet,
                     Err(TunnResult::WriteToNetwork(cookie)) => {
-                        if let Err(_err) = buffered_udp.send_to(cookie, addr).await {
-                            log::trace!("buffered_udp.send_to failed");
+                        if let Err(_err) = udp.send_to(cookie, addr).await {
+                            log::trace!("udp.send_to failed");
                             break;
                         }
                         continue;
@@ -638,8 +662,8 @@ impl<T: DeviceTransports> Device<T> {
                     TunnResult::Err(_) => continue,
                     TunnResult::WriteToNetwork(packet) => {
                         flush = true;
-                        if let Err(_err) = buffered_udp.send_to(packet, addr).await {
-                            log::trace!("buffered_udp.send_to failed");
+                        if let Err(_err) = udp.send_to(packet, addr).await {
+                            log::trace!("udp.send_to failed");
                             break;
                         }
                     }
@@ -667,8 +691,8 @@ impl<T: DeviceTransports> Device<T> {
                         let mut dst_buf = packet_pool.get();
                         match peer.tunnel.decapsulate(None, &[], dst_buf.packet_mut()) {
                             TunnResult::WriteToNetwork(packet) => {
-                                if let Err(_err) = buffered_udp.send_to(packet, addr).await {
-                                    log::trace!("buffered_udp.send_to failed");
+                                if let Err(_err) = udp.send_to(packet, addr).await {
+                                    log::trace!("udp.send_to failed");
                                     break;
                                 }
                             }
@@ -692,8 +716,12 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
-        udp4: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-        udp6: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+        udp4: Arc<
+            BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
+        >,
+        udp6: Arc<
+            BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
+        >,
         packet_pool: Arc<PacketBufPool>,
     ) {
         let tun = {
@@ -706,8 +734,6 @@ impl<T: DeviceTransports> Device<T> {
         };
 
         let mut buffered_tun_recv = BufferedIpRecv::new(MAX_PACKET_BUFS, packet_pool.clone(), tun);
-        let buffered_udp4 = BufferedUdpTransport::new(MAX_PACKET_BUFS, udp4, packet_pool.clone());
-        let buffered_udp6 = BufferedUdpTransport::new(MAX_PACKET_BUFS, udp6, packet_pool.clone());
 
         let rx_packet_pool = packet_pool.clone();
 
@@ -754,11 +780,11 @@ impl<T: DeviceTransports> Device<T> {
 
                         let endpoint_addr = peer.endpoint().addr;
                         if let Some(SocketAddr::V4(addr)) = endpoint_addr {
-                            if buffered_udp4.send_to(packet, addr.into()).await.is_err() {
+                            if udp4.send_to(packet, addr.into()).await.is_err() {
                                 break;
                             }
                         } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
-                            if buffered_udp6.send_to(packet, addr.into()).await.is_err() {
+                            if udp6.send_to(packet, addr.into()).await.is_err() {
                                 break;
                             }
                         } else {
@@ -842,79 +868,6 @@ impl<T: DeviceTransports> Connection<T> {
             timers.stop(),
             outgoing.stop(),
         );
-    }
-}
-
-impl Task {
-    async fn stop(mut self) {
-        if let Some(handle) = self.handle.take() {
-            handle.abort();
-            match handle.await {
-                Err(e) if e.is_panic() => {
-                    log::error!("task {} panicked: {e:#?}", self.name);
-                }
-                _ => {
-                    log::debug!("stopped task {}", self.name);
-                }
-            }
-        }
-    }
-}
-
-impl Drop for Task {
-    fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            log::debug!("dropped task {}", self.name);
-            handle.abort();
-        }
-    }
-}
-
-trait TaskOutput: Sized + Send + 'static {
-    fn handle(self) {}
-}
-
-impl TaskOutput for () {}
-
-impl<T, E> TaskOutput for Result<T, E>
-where
-    Self: Send + 'static,
-    E: std::fmt::Debug,
-{
-    fn handle(self) {
-        if let Err(e) = self {
-            log::error!("task errored {e:?}");
-        }
-    }
-}
-
-impl Task {
-    pub fn spawn<Fut, O>(name: &'static str, fut: Fut) -> Self
-    where
-        Fut: Future<Output = O> + Send + 'static,
-        O: TaskOutput,
-    {
-        let handle = tokio::spawn(async move {
-            let output = fut.await;
-            log::debug!("task {name:?} exited"); // TODO: trace?
-            TaskOutput::handle(output);
-        });
-
-        Task {
-            name,
-            handle: Some(handle),
-        }
-    }
-}
-
-impl Future for Task {
-    type Output = <JoinHandle<()> as Future>::Output;
-
-    fn poll(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        self.handle.as_mut().map(Pin::new).unwrap().poll(cx)
     }
 }
 

@@ -18,6 +18,8 @@ pub mod noise;
 pub mod packet;
 pub mod tun;
 
+mod task;
+
 #[cfg(not(feature = "mock-instant"))]
 pub(crate) mod sleepyinstant;
 

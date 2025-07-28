@@ -8,14 +8,18 @@ use tokio::{
     sync::{Mutex, mpsc},
 };
 
+use crate::task::Task;
 use crate::{
     packet::{PacketBuf, PacketBufPool},
     udp::UdpTransport,
 };
 
+#[derive(Clone)]
 pub struct BufferedUdpTransport<U: UdpTransport> {
     inner: U,
     pool: Arc<PacketBufPool>,
+    _send_task: Arc<Task>,
+    _recv_task: Arc<Task>,
     send_tx: mpsc::Sender<(PacketBuf, SocketAddr)>,
     recv_rx: Arc<Mutex<mpsc::Receiver<(PacketBuf, SocketAddr)>>>,
 }
@@ -27,7 +31,7 @@ impl<U: UdpTransport + Clone + 'static> BufferedUdpTransport<U> {
         let udp_tx = inner.clone();
         let udp_rx = inner.clone();
 
-        tokio::spawn(async move {
+        let send_task = Task::spawn("buffered UDP send", async move {
             let mut buf = vec![];
             let max_number_of_packets_to_send = udp_tx.max_number_of_packets_to_send();
             let mut send_many_buf = Default::default();
@@ -61,7 +65,7 @@ impl<U: UdpTransport + Clone + 'static> BufferedUdpTransport<U> {
 
         let recv_pool = pool.clone();
 
-        tokio::spawn(async move {
+        let recv_task = Task::spawn("buffered UDP receive", async move {
             let max_number_of_packets = udp_rx.max_number_of_packets_to_recv();
             let mut packet_bufs = Vec::with_capacity(max_number_of_packets);
             let mut source_addrs = vec![None; max_number_of_packets];
@@ -93,13 +97,15 @@ impl<U: UdpTransport + Clone + 'static> BufferedUdpTransport<U> {
                         continue;
                     };
 
-                    if let Err(mpsc::error::TrySendError::Full((packet_buf, addr))) =
-                        recv_tx.try_send((packet_buf, src))
-                    {
-                        if recv_tx.send((packet_buf, addr)).await.is_err() {
-                            // Buffer dropped
-                            return;
+                    match recv_tx.try_send((packet_buf, src)) {
+                        Ok(_) => (),
+                        Err(mpsc::error::TrySendError::Full((packet_buf, addr))) => {
+                            if recv_tx.send((packet_buf, addr)).await.is_err() {
+                                // Buffer dropped
+                                return;
+                            }
                         }
+                        Err(mpsc::error::TrySendError::Closed(_)) => return,
                     }
                 }
             }
@@ -108,6 +114,8 @@ impl<U: UdpTransport + Clone + 'static> BufferedUdpTransport<U> {
         Self {
             inner,
             pool,
+            _send_task: Arc::new(send_task),
+            _recv_task: Arc::new(recv_task),
             send_tx,
             recv_rx: Arc::new(Mutex::new(recv_rx)),
         }

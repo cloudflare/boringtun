@@ -1,9 +1,13 @@
-use std::{io::{self, Write}, sync::Arc, time::Instant};
+use std::{
+    io::{self, Write},
+    sync::Arc,
+    time::Instant,
+};
 
 use pcap_file::pcap::{PcapHeader, PcapPacket, PcapWriter};
 use tokio::sync::Mutex;
 
-use crate::tun::{IpSend, IpRecv};
+use crate::tun::{IpRecv, IpSend};
 
 /// An implementor of [IpSend] and [IpRecv] which also dumps all packets in the pcap file format to a [Write].
 #[derive(Clone)]
@@ -15,7 +19,15 @@ pub struct PcapSniff<I> {
 
 impl<R> PcapSniff<R> {
     pub fn new(inner: R, write: Box<dyn Write + Send>, epoch: Instant) -> Self {
-        let writer = PcapWriter::with_header(write, PcapHeader { endianness: pcap_file::Endianness::native(), datalink: pcap_file::DataLink::IPV4, ..Default::default()}).unwrap();
+        let writer = PcapWriter::with_header(
+            write,
+            PcapHeader {
+                endianness: pcap_file::Endianness::native(),
+                datalink: pcap_file::DataLink::IPV4,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         Self {
             inner,
             epoch,
@@ -25,7 +37,7 @@ impl<R> PcapSniff<R> {
 }
 
 impl<R: IpRecv> IpRecv for PcapSniff<R> {
-     async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = self.inner.recv(buf).await?;
 
         let packet = &buf[..n];
@@ -34,7 +46,6 @@ impl<R: IpRecv> IpRecv for PcapSniff<R> {
         let pcap_packet = PcapPacket::new(timestamp, packet.len() as u32, packet);
         let mut write = self.write.lock().await;
         let _ = write.write_packet(&pcap_packet);
-
 
         Ok(n)
     }

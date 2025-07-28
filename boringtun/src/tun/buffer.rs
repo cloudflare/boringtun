@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     packet::{PacketBuf, PacketBufPool},
+    task::Task,
     tun::{IpRecv, IpSend},
 };
 use tokio::{io, sync::mpsc};
@@ -12,6 +13,7 @@ use tokio::{io, sync::mpsc};
 pub struct BufferedIpSend<I> {
     tx: mpsc::Sender<PacketBuf>,
     pool: Arc<PacketBufPool>,
+    _task: Arc<Task>,
     _phantom: std::marker::PhantomData<I>,
 }
 
@@ -19,7 +21,7 @@ impl<I: IpSend> BufferedIpSend<I> {
     pub fn new(capacity: usize, pool: Arc<PacketBufPool>, inner: I) -> Self {
         let (tx, mut rx) = mpsc::channel::<PacketBuf>(capacity);
 
-        tokio::spawn(async move {
+        let task = Task::spawn("buffered IP send", async move {
             while let Some(packet) = rx.recv().await {
                 if let Err(e) = inner.send(packet.packet()).await {
                     log::error!("Error sending IP packet: {}", e);
@@ -30,6 +32,7 @@ impl<I: IpSend> BufferedIpSend<I> {
         Self {
             tx,
             pool,
+            _task: Arc::new(task),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -51,6 +54,7 @@ impl<I: IpSend> IpSend for BufferedIpSend<I> {
 #[derive(Clone)]
 pub struct BufferedIpRecv<I> {
     rx: Arc<tokio::sync::Mutex<mpsc::Receiver<PacketBuf>>>,
+    _task: Arc<Task>,
     _phantom: std::marker::PhantomData<I>,
 }
 
@@ -58,7 +62,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
     pub fn new(capacity: usize, pool: Arc<PacketBufPool>, mut inner: I) -> Self {
         let (tx, rx) = mpsc::channel::<PacketBuf>(capacity);
 
-        tokio::spawn(async move {
+        let task = Task::spawn("buffered IP recv", async move {
             loop {
                 let mut packet_buf = pool.get();
                 match inner.recv(packet_buf.packet_mut()).await {
@@ -79,6 +83,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
 
         Self {
             rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            _task: Arc::new(task),
             _phantom: std::marker::PhantomData,
         }
     }
