@@ -61,7 +61,7 @@ impl<U: UdpTransport + Clone + 'static> BufferedUdpTransport<U> {
             }
         });
 
-        let (recv_tx, recv_rx) = mpsc::channel::<(PacketBuf, SocketAddr)>(5000);
+        let (recv_tx, recv_rx) = mpsc::channel::<(PacketBuf, SocketAddr)>(capacity);
 
         let recv_pool = pool.clone();
 
