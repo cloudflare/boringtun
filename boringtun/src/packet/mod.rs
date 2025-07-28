@@ -95,8 +95,10 @@ impl Packet<[u8]> {
     pub fn try_into_ip(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         let buf_len = self.buf.len();
 
-        if buf_len == 0 {
-            bail!("Empty packet");
+        // IPv6 packets are larger, but their length after we know the packet IP version.
+        // This is the smallest any packet can be.
+        if buf_len < Ipv4Header::LEN {
+            bail!("Packet too small ({buf_len} < {})", Ipv4Header::LEN);
         }
 
         // Decode the IP version field to figure out if this is IPv4 of IPv6.
@@ -109,7 +111,7 @@ impl Packet<[u8]> {
 
                 let ip_len = usize::from(ipv4.header.total_len.get());
                 if ip_len != buf_len {
-                    bail!("IP header length did not match packet length: {ip_len} != {buf_len}");
+                    bail!("IPv4 `total_len` did not match packet length: {ip_len} != {buf_len}");
                 }
 
                 // TODO: validate checksum
@@ -123,7 +125,29 @@ impl Packet<[u8]> {
 
                 Ok(Either::Left(packet))
             }
-            6 => bail!("TODO: IPv6"),
+            6 => {
+                let ipv6 = Ipv6::<[u8]>::try_ref_from_bytes(&self.buf[..])
+                    .map_err(|e| eyre!("Bad IPv6 packet: {e:?}"))?;
+
+                let payload_len = usize::from(ipv6.header.payload_length.get());
+                if payload_len != ipv6.payload.len() {
+                    bail!(
+                        "IPv6 `payload_len` did not match packet length: {payload_len} != {}",
+                        ipv6.payload.len()
+                    );
+                }
+
+                // TODO: validate checksum
+
+                // we have asserted that the packet is a valid IPv6 packet.
+                // update `_kind` to reflect this.
+                let packet = Packet {
+                    buf: self.buf,
+                    _kind: PhantomData::<Ipv6>,
+                };
+
+                Ok(Either::Right(packet))
+            }
             v => bail!("Bad IP version: {v}"),
         }
     }

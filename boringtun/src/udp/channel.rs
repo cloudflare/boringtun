@@ -41,7 +41,6 @@ pub struct UdpChannel {
     inner: Arc<PacketChannelInner>,
 }
 
-#[allow(dead_code)] // TODO
 pub struct PacketChannelInner {
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
@@ -109,7 +108,16 @@ impl IpSend for PacketChannel {
                 }
                 Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
             },
-            Either::Right(_ipv6) => todo!("ipv6"),
+            Either::Right(ipv6) => match ipv6.try_into_udp() {
+                Ok(udp_packet) => {
+                    self.inner
+                        .tun_tx_v6
+                        .send(udp_packet)
+                        .await
+                        .expect("receiver exists");
+                }
+                Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
+            },
         }
 
         Ok(())

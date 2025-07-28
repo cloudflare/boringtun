@@ -36,7 +36,7 @@ pub struct Ipv6VersionTrafficFlow {
 
 impl Ipv6Header {
     #[allow(dead_code)]
-    const LEN: usize = size_must_be::<Ipv6Header>(40);
+    pub const LEN: usize = size_must_be::<Ipv6Header>(40);
 
     pub const fn version(&self) -> u8 {
         self.version_traffic_flow.version()

@@ -101,8 +101,7 @@ impl Ipv4Header {
 }
 
 impl Ipv4Header {
-    #[allow(dead_code)]
-    const LEN: usize = size_must_be::<Ipv4Header>(20);
+    pub const LEN: usize = size_must_be::<Ipv4Header>(20);
 
     /// The IP version. Must be `4` for a valid IPv4 header.
     pub const fn version(&self) -> u8 {
