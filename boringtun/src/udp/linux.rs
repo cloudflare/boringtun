@@ -99,7 +99,10 @@ impl UdpTransport for tokio::net::UdpSocket {
 
                 let (mut msgs, mut packet_lens): (Vec<_>, Vec<_>) = bufs
                     .iter_mut()
-                    .map(|buf| ([IoSliceMut::new(&mut buf.buf[..])], &mut buf.packet_len))
+                    .map(|buf| {
+                        let (buf, packet_len) = buf.packet_and_len_mut();
+                        ([IoSliceMut::new(buf)], packet_len)
+                    })
                     .unzip();
 
                 let results = nix::sys::socket::recvmmsg(

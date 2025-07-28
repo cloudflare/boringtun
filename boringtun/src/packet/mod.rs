@@ -8,10 +8,12 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unali
 
 mod ipv4;
 mod ipv6;
+mod pool;
 mod udp;
 
 pub use ipv4::*;
 pub use ipv6::*;
+pub use pool::*;
 pub use udp::*;
 
 /// An owned packet of some type.
@@ -219,30 +221,5 @@ impl<Kind> Clone for Packet<Kind> {
             buf: self.buf.clone(),
             _kind: PhantomData,
         }
-    }
-}
-
-/// Buffer that contains a data buffer and a length
-pub struct PacketBuf<const N: usize = 4096> {
-    pub packet_len: usize,
-    pub buf: Box<[u8; N]>,
-}
-
-impl<const N: usize> PacketBuf<N> {
-    /// Creates and returns a buffer on the heap with enough space to contain any possible
-    /// UDP datagram.
-    ///
-    /// This is put on the heap and in a separate function to avoid the 64k buffer from ending
-    /// up on the stack and blowing up the size of the futures using it.
-    #[inline(never)]
-    pub fn new() -> Self {
-        PacketBuf {
-            packet_len: 0,
-            buf: Box::new([0u8; N]),
-        }
-    }
-
-    pub fn packet(&self) -> &[u8] {
-        &self.buf[..self.packet_len]
     }
 }

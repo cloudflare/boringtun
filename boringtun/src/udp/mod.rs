@@ -94,8 +94,8 @@ pub trait UdpTransport: Send + Sync {
                 return Ok(0);
             };
 
-            let (n, source_addr) = self.recv_from(&mut buf.buf[..]).await?;
-            buf.packet_len = n;
+            let (n, source_addr) = self.recv_from(buf.packet_mut()).await?;
+            buf.set_packet_len(n);
             *source_addr_out = Some(source_addr);
 
             Ok(1)
