@@ -94,10 +94,12 @@ impl Packet<[u8]> {
     pub fn try_into_ip(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         let buf_len = self.buf.len();
 
+        if buf_len == 0 {
+            bail!("Empty packet");
+        }
+
         // Decode the IP version field to figure out if this is IPv4 of IPv6.
-        let ip_version = IpvxVersion::try_ref_from_bytes(&self.buf[..])
-            .map_err(|e| eyre!("Couldn't read IP version: {e:?}"))?
-            .version();
+        let ip_version = IpvxVersion::from_bits(self.buf[0]).version();
 
         match ip_version {
             4 => {
