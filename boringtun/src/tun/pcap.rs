@@ -16,7 +16,6 @@ pub struct PcapStream {
     writer: Arc<Mutex<pcap_file::pcap::PcapWriter<Box<dyn Write + Send>>>>,
 }
 
-
 /// An implementor of [IpSend] and [IpRecv] which also dumps all packets in the pcap file format to a [Write] (See [PcapStream]).
 #[derive(Clone)]
 pub struct PcapSniffer<I> {

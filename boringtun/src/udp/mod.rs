@@ -116,11 +116,27 @@ impl<T: UdpTransport> UdpTransport for Arc<T> {
         Arc::as_ref(self).send_to(packet, destination)
     }
 
+    async fn send_many_to(
+        &self,
+        bufs: &mut Self::SendManyBuf,
+        packets: &[(PacketBuf, SocketAddr)],
+    ) -> io::Result<()> {
+        Arc::as_ref(self).send_many_to(bufs, packets).await
+    }
+
     fn recv_from(
         &self,
         buf: &mut [u8],
     ) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + Send {
         Arc::as_ref(self).recv_from(buf)
+    }
+
+    async fn recv_many_from(
+        &self,
+        bufs: &mut [PacketBuf],
+        source_addrs: &mut [Option<SocketAddr>],
+    ) -> io::Result<usize> {
+        Arc::as_ref(self).recv_many_from(bufs, source_addrs).await
     }
 
     fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
@@ -132,7 +148,13 @@ impl<T: UdpTransport> UdpTransport for Arc<T> {
         Arc::as_ref(self).set_fwmark(mark)
     }
 
-    // TODO: remaining methods
+    fn max_number_of_packets_to_send(&self) -> usize {
+        Arc::as_ref(self).max_number_of_packets_to_send()
+    }
+
+    fn max_number_of_packets_to_recv(&self) -> usize {
+        Arc::as_ref(self).max_number_of_packets_to_recv()
+    }
 }
 
 async fn generic_send_many_to<U: UdpTransport + ?Sized>(
