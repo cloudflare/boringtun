@@ -11,7 +11,9 @@ pub struct Ipv6<Payload: ?Sized = [u8]> {
 }
 
 #[repr(C, packed)]
-#[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+#[derive(
+    Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq,
+)]
 pub struct Ipv6Header {
     // TODO: replace with bitfield type
     version_traffic_flow: big_endian::U32,

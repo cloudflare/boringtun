@@ -12,7 +12,7 @@ pub struct Ipv4<Payload: ?Sized = [u8]> {
 }
 
 #[repr(C, packed)]
-#[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+#[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4Header {
     // TODO: replace u8 with bitfield type
     version_and_ihl: u8,

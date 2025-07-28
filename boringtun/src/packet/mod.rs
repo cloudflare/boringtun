@@ -23,7 +23,11 @@ pub use udp::*;
 /// [Packet] uses [Bytes] as the backing buffer, and can thus be cheaply cloned.
 ///
 /// ```
-/// let ip_header = Ipv4::new(
+/// use boringtun::packet::*;
+/// use std::net::Ipv4Addr;
+/// use zerocopy::IntoBytes;
+///
+/// let ip_header = Ipv4Header::new(
 ///     Ipv4Addr::new(10, 0, 0, 1),
 ///     Ipv4Addr::new(1, 2, 3, 4),
 ///     IpNextProtocol::Icmp,
@@ -36,6 +40,7 @@ pub use udp::*;
 /// let ipv4_packet: Packet<Ipv4> = raw_packet.try_into_ip().unwrap().unwrap_left();
 /// assert_eq!(&ip_header, &ipv4_packet.header);
 /// ```
+#[derive(Debug)]
 pub struct Packet<Kind: ?Sized = [u8]> {
     buf: Bytes,
 
