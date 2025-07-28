@@ -92,7 +92,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
 impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
     async fn recv(&mut self, packet: &mut [u8]) -> io::Result<usize> {
         let Some(rx_packet) = self.rx.lock().await.recv().await else {
-            return Err(io::Error::new(io::ErrorKind::Other, "No packet available"));
+            return Err(io::Error::other("No packet available"));
         };
         packet[..rx_packet.len].copy_from_slice(rx_packet.packet());
         Ok(rx_packet.packet_len())

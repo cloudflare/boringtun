@@ -196,7 +196,7 @@ impl UdpTransport for UdpChannel {
                     .udp_tx
                     .send(
                         create_ipv6_payload(
-                            self.inner.source_ip_v6,
+                            &self.inner.source_ip_v6,
                             self.source_port,
                             dest.ip(),
                             dest.port(),
@@ -311,7 +311,7 @@ async fn create_ipv4_payload(
 }
 
 async fn create_ipv6_payload(
-    source_ip: Ipv6Addr,
+    source_ip: &Ipv6Addr,
     source_port: u16,
     destination_ip: &Ipv6Addr,
     destination_port: u16,
@@ -344,8 +344,8 @@ async fn create_ipv6_payload(
         udp.as_bytes(),
         3,
         &[],
-        &source_ip,
-        &destination_ip,
+        source_ip,
+        destination_ip,
         IpNextHeaderProtocols::Udp,
     );
     udp.header.checksum = csum.into();

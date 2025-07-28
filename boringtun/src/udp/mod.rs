@@ -164,6 +164,7 @@ pub trait UdpTransportFactory: Send + Sync + 'static {
     /// Bind sockets for sending and receiving UDP.
     ///
     /// Returns two [UdpTransport]s, one for IPv4 and one for IPv6.
+    #[allow(clippy::type_complexity)]
     fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,

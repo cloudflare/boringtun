@@ -27,8 +27,9 @@ pub trait IpRecv: Send + Sync + Clone + 'static {
     fn recv(&mut self, buf: &mut [u8]) -> impl Future<Output = io::Result<usize>> + Send;
 }
 
+/// Implementations of [IpSend] and [IpRecv] for the [::tun] crate.
 #[cfg(feature = "tun")]
-mod tun {
+mod tun_async_device {
     use super::*;
     use std::sync::Arc;
 

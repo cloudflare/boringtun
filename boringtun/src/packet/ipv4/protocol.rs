@@ -6,6 +6,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 #[derive(Clone, Copy, PartialEq, Eq, Immutable, Unaligned, FromBytes, IntoBytes, KnownLayout)]
 pub struct IpNextProtocol(u8);
 
+// https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
 impl IpNextProtocol {
     #![allow(non_upper_case_globals)]
 
@@ -381,10 +382,10 @@ impl IpNextProtocol {
     /// Performance Transparency Protocol
     pub const Ptp: IpNextProtocol = IpNextProtocol(123);
 
-    ///
+    /// Intermediate System to Intermediate System (IS-IS) Protocol over IPv4
     pub const IsisOverIpv4: IpNextProtocol = IpNextProtocol(124);
 
-    ///
+    /// Flexible Intra-AS Routing Environment
     pub const Fire: IpNextProtocol = IpNextProtocol(125);
 
     /// Combat Radio Transport Protocol
@@ -393,10 +394,9 @@ impl IpNextProtocol {
     /// Combat Radio User Datagram
     pub const Crudp: IpNextProtocol = IpNextProtocol(127);
 
-    ///
+    /// Service-Specific Connection-Oriented Protocol in a Multilink and Connectionless Environment
     pub const Sscopmce: IpNextProtocol = IpNextProtocol(128);
 
-    ///
     pub const Iplt: IpNextProtocol = IpNextProtocol(129);
 
     /// Secure Packet Shield

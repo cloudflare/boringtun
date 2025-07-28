@@ -84,14 +84,9 @@ pub struct DeviceHandle<T: DeviceTransports> {
     device: Arc<RwLock<Device<T>>>,
 }
 
+#[derive(Default)]
 pub struct DeviceConfig {
     pub api: Option<api::ApiServer>,
-}
-
-impl Default for DeviceConfig {
-    fn default() -> Self {
-        DeviceConfig { api: None }
-    }
 }
 
 /// By default, use a UDP socket for sending datagrams and a tunnel device for IP packets.

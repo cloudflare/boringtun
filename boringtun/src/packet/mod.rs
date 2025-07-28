@@ -185,7 +185,7 @@ fn validate_udp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<(
 
     let ip_payload_len = payload.len();
     let udp =
-        Udp::<[u8]>::try_ref_from_bytes(&payload).map_err(|e| eyre!("Bad UDP packet: {e:?}"))?;
+        Udp::<[u8]>::try_ref_from_bytes(payload).map_err(|e| eyre!("Bad UDP packet: {e:?}"))?;
 
     let udp_len = usize::from(udp.header.length.get());
     if udp_len != ip_payload_len {

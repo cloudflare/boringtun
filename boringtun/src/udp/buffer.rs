@@ -40,14 +40,14 @@ impl<U: UdpTransport + Clone + 'static> BufferedUdpTransport<U> {
                 buf.clear();
 
                 if send_rx.is_empty() {
-                    let _ = udp_tx.send_to(packet_buf.packet(), addr.into()).await;
+                    let _ = udp_tx.send_to(packet_buf.packet(), addr).await;
                 } else {
                     // collect as many packets as possible into a buffer, and use send_many_to
                     [(packet_buf, addr)]
                         .into_iter()
                         .chain(iter::from_fn(|| send_rx.try_recv().ok()))
                         .take(max_number_of_packets_to_send)
-                        .for_each(|(packet_buf, target)| buf.push((packet_buf, target.into())));
+                        .for_each(|(packet_buf, target)| buf.push((packet_buf, target)));
 
                     // send all packets at once
                     let _ = udp_tx
@@ -134,7 +134,7 @@ impl<U: UdpTransport> UdpTransport for BufferedUdpTransport<U> {
 
     async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         let Some((rx_packet, src)) = self.recv_rx.lock().await.recv().await else {
-            return Err(io::Error::new(io::ErrorKind::Other, "No packet available"));
+            return Err(io::Error::other("No packet available"));
         };
         buf[..rx_packet.len].copy_from_slice(rx_packet.packet());
         Ok((rx_packet.packet_len(), src))
