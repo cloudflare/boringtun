@@ -137,8 +137,8 @@ pub struct Device<T: DeviceTransports> {
 }
 
 pub(crate) struct Connection<T: DeviceTransports> {
-    udp4: BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
-    udp6: BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
+    udp4: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+    udp6: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
 
     listen_port: Option<u16>,
 
@@ -163,8 +163,10 @@ impl<T: DeviceTransports> Connection<T> {
 
         let packet_pool = PacketBufPool::new(MAX_PACKET_BUFS);
 
-        let buffered_udp_v4 = BufferedUdpTransport::new(MAX_PACKET_BUFS, udp4, packet_pool.clone());
-        let buffered_udp_v6 = BufferedUdpTransport::new(MAX_PACKET_BUFS, udp6, packet_pool.clone());
+        let buffered_udp_v4 =
+            BufferedUdpTransport::new(MAX_PACKET_BUFS, udp4.clone(), packet_pool.clone());
+        let buffered_udp_v6 =
+            BufferedUdpTransport::new(MAX_PACKET_BUFS, udp6.clone(), packet_pool.clone());
 
         let outgoing = Task::spawn(
             "handle_outgoing",
@@ -203,8 +205,8 @@ impl<T: DeviceTransports> Connection<T> {
 
         Ok(Connection {
             listen_port: buffered_udp_v4.local_addr()?.map(|sa| sa.port()),
-            udp4: buffered_udp_v4,
-            udp6: buffered_udp_v6,
+            udp4,
+            udp6,
             incoming_ipv4,
             incoming_ipv6,
             timers,
@@ -516,8 +518,8 @@ impl<T: DeviceTransports> Device<T> {
 
     async fn handle_timers(
         device: Weak<RwLock<Self>>,
-        udp4: BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
-        udp6: BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
+        udp4: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+        udp6: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
     ) {
         // TODO: fix rate limiting
         /*
@@ -573,7 +575,7 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
-        udp: BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
+        udp: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
         packet_pool: Arc<PacketBufPool>,
     ) -> Result<(), Error> {
         let (tun, private_key, public_key, rate_limiter) = {
@@ -694,8 +696,8 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
-        udp4: BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
-        udp6: BufferedUdpTransport<Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>>,
+        udp4: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+        udp6: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
         packet_pool: Arc<PacketBufPool>,
     ) {
         let tun = {
