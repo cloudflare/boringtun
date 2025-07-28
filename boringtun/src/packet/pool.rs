@@ -26,15 +26,15 @@ impl<const N: usize> PacketBufPool<N> {
     }
 
     /// Retrieve an unused packet from the pool
-    pub fn get(self: &Arc<Self>) -> PacketBuf<N> {
+    pub fn get(&self) -> PacketBuf<N> {
         self.packet_rx
             .lock()
             .unwrap()
             .try_recv()
-            .map(|data| PacketBuf::reuse(Arc::clone(self), data))
+            .map(|data| PacketBuf::reuse(self.packet_tx.clone(), data))
             .unwrap_or_else(|_err| {
                 log::debug!("Allocating new packet buffer");
-                PacketBuf::alloc(Arc::clone(self))
+                PacketBuf::alloc(self.packet_tx.clone())
             })
     }
 }
@@ -42,25 +42,25 @@ impl<const N: usize> PacketBufPool<N> {
 /// A borrowed buffer pointing into one packet of the pool.
 /// When dropped, it atomically returns its packet.
 pub struct PacketBuf<const N: usize = 4096> {
-    pool: Arc<PacketBufPool<N>>,
+    packet_tx: mpsc::Sender<Box<[u8; N]>>,
     data: Option<Box<[u8; N]>>,
     pub len: usize,
 }
 
 impl<const N: usize> PacketBuf<N> {
     /// Allocate a new buffer that will be returned to `pool`
-    fn alloc(pool: Arc<PacketBufPool<N>>) -> Self {
+    fn alloc(packet_tx: mpsc::Sender<Box<[u8; N]>>) -> Self {
         PacketBuf {
-            pool,
-            data: Some(Box::new([0u8; N])),
+            packet_tx,
+            data: Some(Box::new([0u8; N])), // TODO: avoid stack allocation
             len: 0,
         }
     }
 
     /// Reuse existing buffer
-    fn reuse(pool: Arc<PacketBufPool<N>>, data: Box<[u8; N]>) -> Self {
+    fn reuse(packet_tx: mpsc::Sender<Box<[u8; N]>>, data: Box<[u8; N]>) -> Self {
         PacketBuf {
-            pool,
+            packet_tx,
             data: Some(data),
             len: 0,
         }
@@ -105,8 +105,6 @@ impl<const N: usize> Drop for PacketBuf<N> {
     fn drop(&mut self) {
         // Return packet to the pool
         let data = self.data.take().unwrap();
-        let _ = self.pool.packet_tx.try_send(data).inspect_err(|err| {
-            log::error!("Failed to return packet to pool: {err}");
-        });
+        let _ = self.packet_tx.try_send(data);
     }
 }
