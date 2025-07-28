@@ -24,7 +24,7 @@ use super::UdpTransportFactoryParams;
 /// Can be used to set up a multi-hop wireguard tunnel.
 #[derive(Clone)]
 pub struct PacketChannel {
-    inner: Arc<PackerChannelInner>,
+    inner: Arc<PacketChannelInner>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -38,11 +38,11 @@ pub struct UdpChannel {
     ip_version: IpVersion,
     source_port: u16,
     connection_id: u32,
-    inner: Arc<PackerChannelInner>,
+    inner: Arc<PacketChannelInner>,
 }
 
 #[allow(dead_code)] // TODO
-pub struct PackerChannelInner {
+pub struct PacketChannelInner {
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
 
@@ -68,7 +68,7 @@ impl PacketChannel {
         let udp_rx_v6 = Mutex::new(udp_rx_v6);
 
         Self {
-            inner: Arc::new(PackerChannelInner {
+            inner: Arc::new(PacketChannelInner {
                 source_ip_v4,
                 source_ip_v6,
 
@@ -125,6 +125,7 @@ impl IpRecv for PacketChannel {
             .expect("multiple concurrent calls to recv");
         let packet = tun_rx.recv().await.expect("sender exists");
         let len = packet.len().min(buf.len());
+
         buf[..len].copy_from_slice(&packet[..]);
 
         Ok(len)
@@ -222,6 +223,7 @@ impl UdpTransport for UdpChannel {
                     .expect("multiple concurrent calls to recv_from");
 
                 let ipv4 = udp_rx.recv().await.expect("sender exists");
+
                 let udp = &ipv4.payload;
 
                 let source_addr = ipv4.header.source();
@@ -304,6 +306,7 @@ async fn create_ipv4_payload(
     udp.header.checksum = csum.into();
 
     packet.unsplit(payload);
+
     Packet::from_bytes(packet.freeze())
 }
 
