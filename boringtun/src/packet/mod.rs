@@ -48,9 +48,9 @@ pub struct Packet<Kind: ?Sized = [u8]> {
 
 /// A marker trait that indicates that a [Packet] contains a valid payload of a specific type.
 ///
-/// For example, [CheckedPayload] implemented for [`Ipv4<[u8]>`], and a [`Packet<Ipv4<[u8]>>>`] can
-/// only be constructed through methods on [`Packet<[u8]>`] that checks that the IPv4 header is
-/// valid.
+/// For example, [CheckedPayload] is implemented for [`Ipv4<[u8]>`], and a [`Packet<Ipv4<[u8]>>>`]
+/// can only be constructed through [`Packet::<[u8]>::try_into_ip`], which checks that the IPv4
+/// header is valid.
 pub trait CheckedPayload: FromBytes + KnownLayout + Immutable {}
 
 impl CheckedPayload for [u8] {}
@@ -123,13 +123,13 @@ impl Packet<Ipv4> {
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
         let ip = self.deref();
 
-        // TODO: either handle IP options, or IP packet contains none.
+        // TODO: either handle IP options, or IP check that packet contains none.
         // i.e. assert that ipv4.header.ihl == 5.
 
         validate_udp(ip.header.next_protocol(), &ip.payload)
             .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
 
-        // we have asserted that the packet is a valid IPv6 UDP packet.
+        // we have asserted that the packet is a valid IPv4 UDP packet.
         // update `_kind` to reflect this.
         let packet = Packet {
             buf: self.buf,
@@ -144,9 +144,6 @@ impl Packet<Ipv6> {
     /// Check if the IP payload is valid UDP.
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv6<Udp>>> {
         let ip = self.deref();
-
-        // TODO: either handle IP options, or IP packet contains none.
-        // i.e. assert that ipv4.header.ihl == 5.
 
         validate_udp(ip.header.next_protocol(), &ip.payload)
             .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
@@ -164,7 +161,7 @@ impl Packet<Ipv6> {
 
 fn validate_udp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<()> {
     let IpNextProtocol::Udp = next_protocol else {
-        return Err(eyre!("Expected UDP, but packet was {next_protocol:?}"));
+        bail!("Expected UDP, but packet was {next_protocol:?}");
     };
 
     let ip_payload_len = payload.len();
@@ -173,7 +170,6 @@ fn validate_udp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<(
 
     let udp_len = usize::from(udp.header.length.get());
     if udp_len != ip_payload_len {
-        // TODO: This is actually
         return Err(eyre!("UDP header: {:?}", udp.header)).wrap_err_with(|| {
             eyre!(
                 "UDP header length did not match IP payload length: {} != {}",
