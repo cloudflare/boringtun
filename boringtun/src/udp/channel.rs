@@ -315,7 +315,7 @@ async fn create_ipv4_payload(
 
     packet.unsplit(payload);
 
-    Packet::from_bytes(packet.freeze())
+    Packet::from_bytes(packet)
 }
 
 async fn create_ipv6_payload(
@@ -359,7 +359,7 @@ async fn create_ipv6_payload(
     udp.header.checksum = csum.into();
 
     packet.unsplit(payload);
-    Packet::from_bytes(packet.freeze())
+    Packet::from_bytes(packet)
 }
 
 fn rand_u16() -> u16 {

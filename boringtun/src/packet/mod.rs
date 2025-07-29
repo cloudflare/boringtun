@@ -1,9 +1,10 @@
-use std::{marker::PhantomData, ops::Deref};
+use std::{marker::PhantomData, ops::{Deref, DerefMut}};
 
 use bitfield_struct::bitfield;
-use bytes::Bytes;
+use bytes::{BytesMut};
 use either::Either;
 use eyre::{Context, bail, eyre};
+use tokio::sync::mpsc;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 mod ipv4;
@@ -24,7 +25,7 @@ pub use udp::*;
 /// It can be safely decoded into a `Packet<Ipv4>` using [`Packet::try_into_ip`],
 /// and further decoded into a `Packet<Ipv4<Udp>>` using [`Packet::try_into_udp`].
 ///
-/// [Packet] uses [Bytes] as the backing buffer, and can thus be cheaply cloned.
+/// [Packet] uses [BytesMut] as the backing buffer.
 ///
 /// ```
 /// use boringtun::packet::*;
@@ -46,7 +47,7 @@ pub use udp::*;
 /// ```
 #[derive(Debug)]
 pub struct Packet<Kind: ?Sized = [u8]> {
-    buf: Bytes,
+    inner: PacketInner,
 
     /// Marker type defining what type `Bytes` is.
     ///
@@ -55,14 +56,22 @@ pub struct Packet<Kind: ?Sized = [u8]> {
     _kind: PhantomData<Kind>,
 }
 
+#[derive(Debug)]
+pub struct PacketInner {
+    buf: BytesMut,
+    drop_tx: Option<mpsc::Sender<BytesMut>>,
+}
+
+
 /// A marker trait that indicates that a [Packet] contains a valid payload of a specific type.
 ///
 /// For example, [CheckedPayload] is implemented for [`Ipv4<[u8]>`], and a [`Packet<Ipv4<[u8]>>>`]
 /// can only be constructed through [`Packet::<[u8]>::try_into_ip`], which checks that the IPv4
 /// header is valid.
-pub trait CheckedPayload: FromBytes + KnownLayout + Immutable {}
+pub trait CheckedPayload: FromBytes + IntoBytes + KnownLayout + Immutable + Unaligned {}
 
 impl CheckedPayload for [u8] {}
+impl CheckedPayload for Ip {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv6<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv4<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Udp<P> {}
@@ -77,23 +86,62 @@ pub struct IpvxVersion {
     pub version: u8,
 }
 
+/// An IP packet that may be either IPv4 or IPv6.
+#[repr(C, packed)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+pub struct Ip {
+    pub header: IpvxVersion,
+    pub payload: [u8],
+}
+
+impl<T: CheckedPayload + ?Sized> Packet<T> {
+    fn cast<Y: CheckedPayload + ?Sized>(self) -> Packet<Y> {
+        Packet {
+            inner: self.inner,
+            _kind: PhantomData::<Y>,
+        }
+    }
+
+    pub fn into_bytes(self) -> Packet<[u8]> {
+        self.cast()
+    }
+
+    fn buf(&self) -> &[u8] {
+        &self.inner.buf
+    }
+}
+
 impl Packet<[u8]> {
-    pub fn from_bytes(bytes: Bytes) -> Self {
+    pub fn new_from_pool(pool_tx: mpsc::Sender<BytesMut>, bytes: BytesMut) -> Self {
         Self {
-            buf: bytes,
+            inner: PacketInner { buf: bytes, drop_tx: Some(pool_tx) },
+            _kind: PhantomData::<[u8]>,
+        }
+    }
+    
+    pub fn from_bytes(bytes: BytesMut) -> Self {
+        Self {
+            inner: PacketInner { buf: bytes, drop_tx: None },
             _kind: PhantomData::<[u8]>,
         }
     }
 
     pub fn copy_from_slice(bytes: &[u8]) -> Self {
         Self {
-            buf: Bytes::copy_from_slice(bytes),
+            inner: PacketInner{
+            buf: BytesMut::from(bytes),
+            drop_tx: None,
+            },
             _kind: PhantomData::<[u8]>,
         }
     }
 
-    pub fn try_into_ip(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
-        let buf_len = self.buf.len();
+    pub fn truncate(&mut self, new_len: usize) {
+        self.inner.buf.truncate(new_len);
+    }
+
+    pub fn try_into_ipvx(self) -> eyre::Result<Packet<Ip>> {
+        let buf_len = self.buf().len();
 
         // IPv6 packets are larger, but their length after we know the packet IP version.
         // This is the smallest any packet can be.
@@ -101,12 +149,23 @@ impl Packet<[u8]> {
             bail!("Packet too small ({buf_len} < {})", Ipv4Header::LEN);
         }
 
-        // Decode the IP version field to figure out if this is IPv4 of IPv6.
-        let ip_version = IpvxVersion::from_bits(self.buf[0]).version();
+        // we have asserted that the packet is long enough to _maybe_ be an IP packet.
+        Ok(self.cast::<Ip>())
+    }
 
-        match ip_version {
+    pub fn try_into_ip(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
+        self.try_into_ipvx()?.try_into_ip()
+    }
+}
+
+
+impl Packet<Ip> {
+    pub fn try_into_ip(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
+        match self.header.version() {
             4 => {
-                let ipv4 = Ipv4::<[u8]>::try_ref_from_bytes(&self.buf[..])
+                let buf_len = self.buf().len();
+
+                let ipv4 = Ipv4::<[u8]>::try_ref_from_bytes(self.buf())
                     .map_err(|e| eyre!("Bad IPv4 packet: {e:?}"))?;
 
                 let ip_len = usize::from(ipv4.header.total_len.get());
@@ -118,15 +177,10 @@ impl Packet<[u8]> {
 
                 // we have asserted that the packet is a valid IPv4 packet.
                 // update `_kind` to reflect this.
-                let packet = Packet {
-                    buf: self.buf,
-                    _kind: PhantomData::<Ipv4>,
-                };
-
-                Ok(Either::Left(packet))
+                Ok(Either::Left(self.cast::<Ipv4>()))
             }
             6 => {
-                let ipv6 = Ipv6::<[u8]>::try_ref_from_bytes(&self.buf[..])
+                let ipv6 = Ipv6::<[u8]>::try_ref_from_bytes(self.buf())
                     .map_err(|e| eyre!("Bad IPv6 packet: {e:?}"))?;
 
                 let payload_len = usize::from(ipv6.header.payload_length.get());
@@ -141,12 +195,7 @@ impl Packet<[u8]> {
 
                 // we have asserted that the packet is a valid IPv6 packet.
                 // update `_kind` to reflect this.
-                let packet = Packet {
-                    buf: self.buf,
-                    _kind: PhantomData::<Ipv6>,
-                };
-
-                Ok(Either::Right(packet))
+                Ok(Either::Right(self.cast::<Ipv6>()))
             }
             v => bail!("Bad IP version: {v}"),
         }
@@ -175,12 +224,7 @@ impl Packet<Ipv4> {
 
         // we have asserted that the packet is a valid IPv4 UDP packet.
         // update `_kind` to reflect this.
-        let packet = Packet {
-            buf: self.buf,
-            _kind: PhantomData::<Ipv4<Udp>>,
-        };
-
-        Ok(packet)
+        Ok(self.cast::<Ipv4<Udp>>())
     }
 }
 
@@ -194,12 +238,7 @@ impl Packet<Ipv6> {
 
         // we have asserted that the packet is a valid IPv6 UDP packet.
         // update `_kind` to reflect this.
-        let packet = Packet {
-            buf: self.buf,
-            _kind: PhantomData::<Ipv6<Udp>>,
-        };
-
-        Ok(packet)
+        Ok(self.cast::<Ipv6<Udp>>())
     }
 }
 
@@ -223,8 +262,7 @@ fn validate_udp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<(
         });
     }
 
-    // NOTE: Do not bother to validate checksums, because WireGuard will fail to decapsulate
-    // invalid packets anyway
+    // TODO: validate checksum?
 
     Ok(())
 }
@@ -236,17 +274,38 @@ where
     type Target = Kind;
 
     fn deref(&self) -> &Self::Target {
-        Self::Target::try_ref_from_bytes(&self.buf)
+        Self::Target::try_ref_from_bytes(&self.inner.buf)
             .expect("We have previously checked that the payload is valid")
     }
 }
 
+impl<Kind> DerefMut for Packet<Kind>
+where
+    Kind: CheckedPayload + ?Sized,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        Self::Target::try_mut_from_bytes(&mut self.inner.buf)
+            .expect("We have previously checked that the payload is valid")
+    }
+}
+
+/*
 // Don't use `derive`, because that would require `Kind` to be `Clone`.
 impl<Kind> Clone for Packet<Kind> {
     fn clone(&self) -> Self {
         Self {
             buf: self.buf.clone(),
             _kind: PhantomData,
+        }
+    }
+}
+ */
+
+impl Drop for PacketInner {
+    fn drop(&mut self) {
+        // Return packet to the pool
+        if let Some(drop_tx) = self.drop_tx.take() {
+            let _ = drop_tx.try_send(std::mem::take(&mut self.buf));
         }
     }
 }

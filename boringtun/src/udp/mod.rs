@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::packet::PacketBuf;
+use crate::packet::Packet;
 
 pub mod buffer;
 
@@ -71,7 +71,7 @@ pub trait UdpTransport: Send + Sync {
     fn send_many_to(
         &self,
         _bufs: &mut Self::SendManyBuf,
-        packets: &[(PacketBuf, SocketAddr)],
+        packets: &[(Packet, SocketAddr)],
     ) -> impl Future<Output = io::Result<()>> + Send {
         generic_send_many_to(self, packets)
     }
@@ -88,7 +88,7 @@ pub trait UdpTransport: Send + Sync {
     // The default implementation always reads 1 packet.
     fn recv_many_from(
         &self,
-        bufs: &mut [PacketBuf],
+        bufs: &mut [Packet],
         source_addrs: &mut [Option<SocketAddr>],
     ) -> impl Future<Output = io::Result<usize>> + Send {
         async {
@@ -96,8 +96,8 @@ pub trait UdpTransport: Send + Sync {
                 return Ok(0);
             };
 
-            let (n, source_addr) = self.recv_from(buf.packet_mut()).await?;
-            buf.set_packet_len(n);
+            let (n, source_addr) = self.recv_from(&mut buf[..]).await?;
+            buf.truncate(n);
             *source_addr_out = Some(source_addr);
 
             Ok(1)
@@ -107,10 +107,10 @@ pub trait UdpTransport: Send + Sync {
 
 async fn generic_send_many_to<U: UdpTransport + ?Sized>(
     transport: &U,
-    packets: &[(PacketBuf, SocketAddr)],
+    packets: &[(Packet, SocketAddr)],
 ) -> io::Result<()> {
     for (packet, target) in packets {
-        transport.send_to(packet.packet(), *target).await?;
+        transport.send_to(&packet[..], *target).await?;
     }
     Ok(())
 }

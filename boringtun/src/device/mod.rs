@@ -597,13 +597,13 @@ impl<T: DeviceTransports> Device<T> {
             let mut src_buf = packet_pool.get();
             let mut dst_buf = packet_pool.get();
 
-            while let Ok((n, addr)) = udp.recv_from(src_buf.packet_mut()).await {
-                src_buf.len = n;
+            while let Ok((n, addr)) = udp.recv_from(&mut src_buf[..]).await {
+                debug_assert!(n <= src_buf.len());
 
                 let parsed_packet = match rate_limiter.verify_packet(
                     Some(addr.ip()),
-                    src_buf.packet(),
-                    dst_buf.packet_mut(),
+                    &src_buf[..n],
+                    &mut dst_buf[..],
                 ) {
                     Ok(packet) => packet,
                     Err(TunnResult::WriteToNetwork(cookie)) => {
@@ -637,7 +637,7 @@ impl<T: DeviceTransports> Device<T> {
                 let mut flush = false;
                 match peer
                     .tunnel
-                    .handle_verified_packet(parsed_packet, dst_buf.packet_mut())
+                    .handle_verified_packet(parsed_packet, &mut dst_buf[..])
                 {
                     TunnResult::Done => (),
                     TunnResult::Err(_) => continue,
@@ -669,7 +669,7 @@ impl<T: DeviceTransports> Device<T> {
                 if flush {
                     // Flush pending queue
                     loop {
-                        match peer.tunnel.decapsulate(None, &[], dst_buf.packet_mut()) {
+                        match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
                             TunnResult::WriteToNetwork(packet) => {
                                 if let Err(_err) = udp.send_to(packet, addr).await {
                                     log::trace!("udp.send_to failed");
@@ -716,16 +716,18 @@ impl<T: DeviceTransports> Device<T> {
             let mut src_buf = packet_pool.get();
 
             loop {
-                src_buf.len = match buffered_tun_recv.recv(src_buf.packet_mut()).await {
-                    Ok(src) => src,
+                let n = match buffered_tun_recv.recv(&mut src_buf[..]).await {
+                    Ok(n) => n,
                     Err(e) => {
                         log::error!("Unexpected error on tun interface: {:?}", e);
                         break;
                     }
                 };
 
+                let packet = &src_buf[..n];
+
                 // Determine peer to use from the destination address
-                let dst_addr = match Tunn::dst_address(src_buf.packet()) {
+                let dst_addr = match Tunn::dst_address(packet) {
                     Some(addr) => addr,
                     None => continue,
                 };
@@ -742,15 +744,13 @@ impl<T: DeviceTransports> Device<T> {
 
                 match peer
                     .tunnel
-                    .encapsulate(src_buf.packet(), dst_buf.packet_mut())
+                    .encapsulate(packet, &mut dst_buf[..])
                 {
                     TunnResult::Done => {}
                     TunnResult::Err(e) => {
                         log::error!("Encapsulate error={e:?}: {e:?}");
                     }
                     TunnResult::WriteToNetwork(packet) => {
-                        src_buf.copy_from(packet);
-
                         let endpoint_addr = peer.endpoint().addr;
                         if let Some(SocketAddr::V4(addr)) = endpoint_addr {
                             if udp4.send_to(packet, addr.into()).await.is_err() {

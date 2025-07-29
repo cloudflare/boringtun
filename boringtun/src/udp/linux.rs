@@ -8,7 +8,7 @@ use std::{
 };
 use tokio::io::Interest;
 
-use crate::packet::PacketBuf;
+use crate::packet::Packet;
 
 use super::UdpTransport;
 
@@ -25,7 +25,7 @@ impl UdpTransport for tokio::net::UdpSocket {
     async fn send_many_to(
         &self,
         buf: &mut SendmmsgBuf,
-        packets: &[(PacketBuf, SocketAddr)],
+        packets: &[(Packet, SocketAddr)],
     ) -> io::Result<()> {
         let n = packets.len();
         debug_assert!(n <= MAX_PACKET_COUNT);
@@ -43,7 +43,7 @@ impl UdpTransport for tokio::net::UdpSocket {
         let mut packets_buf = [[IoSlice::new(&[])]; MAX_PACKET_COUNT];
         packets
             .iter()
-            .map(|(packet_buf, _target)| [IoSlice::new(packet_buf.packet())])
+            .map(|(packet, _target)| [IoSlice::new(&packet[..])])
             .enumerate()
             // packets.len() is no greater than MAX_PACKET_COUNT
             .for_each(|(i, packet)| packets_buf[i] = packet);
@@ -86,7 +86,7 @@ impl UdpTransport for tokio::net::UdpSocket {
 
     async fn recv_many_from(
         &self,
-        bufs: &mut [PacketBuf],
+        bufs: &mut [Packet],
         source_addrs: &mut [Option<SocketAddr>],
     ) -> io::Result<usize> {
         debug_assert_eq!(bufs.len(), source_addrs.len());
@@ -94,16 +94,15 @@ impl UdpTransport for tokio::net::UdpSocket {
         let fd = self.as_raw_fd();
 
         let num_bufs = self
-            .async_io(Interest::READABLE, || {
+            .async_io(Interest::READABLE, move || {
                 let mut headers = MultiHeaders::<SockaddrIn>::preallocate(bufs.len(), None);
 
-                let (mut msgs, mut packet_lens): (Vec<_>, Vec<_>) = bufs
+                let mut msgs: Vec<_> = bufs
                     .iter_mut()
                     .map(|buf| {
-                        let (buf, packet_len) = buf.packet_and_len_mut();
-                        ([IoSliceMut::new(buf)], packet_len)
+                        [IoSliceMut::new(&mut buf[..])]
                     })
-                    .unzip();
+                    .collect();
 
                 let results = nix::sys::socket::recvmmsg(
                     fd,
@@ -113,15 +112,20 @@ impl UdpTransport for tokio::net::UdpSocket {
                     None,
                 )?;
 
-                let mut num_bufs = 0;
-
-                results.zip(source_addrs.iter_mut()).enumerate().for_each(
-                    |(i, (result, out_addr))| {
-                        *packet_lens[i] = result.bytes;
+                let lengths: Vec<usize> = results
+                    .zip(source_addrs.iter_mut())
+                    .map(|(result, out_addr)| {
                         *out_addr = result.address.map(|addr| addr.into());
-                        num_bufs += 1;
-                    },
-                );
+                        result.bytes
+
+                    })
+                    .collect();
+
+                let num_bufs = lengths.len();
+
+                for (buf, length) in bufs.iter_mut().zip(lengths) {
+                    buf.truncate(length);
+                }
 
                 Ok(num_bufs)
             })

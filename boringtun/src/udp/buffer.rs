@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::task::Task;
 use crate::{
-    packet::{PacketBuf, PacketBufPool},
+    packet::{Packet, PacketBufPool},
     udp::UdpTransport,
 };
 
@@ -19,8 +19,8 @@ pub struct BufferedUdpTransport<U: UdpTransport> {
     pool: Arc<PacketBufPool>,
     _send_task: Arc<Task>,
     _recv_task: Arc<Task>,
-    send_tx: mpsc::Sender<(PacketBuf, SocketAddr)>,
-    recv_rx: Arc<Mutex<mpsc::Receiver<(PacketBuf, SocketAddr)>>>,
+    send_tx: mpsc::Sender<(Packet, SocketAddr)>,
+    recv_rx: Arc<Mutex<mpsc::Receiver<(Packet, SocketAddr)>>>,
 }
 
 impl<U: UdpTransport> Clone for BufferedUdpTransport<U> {
@@ -38,7 +38,7 @@ impl<U: UdpTransport> Clone for BufferedUdpTransport<U> {
 
 impl<U: UdpTransport + 'static> BufferedUdpTransport<U> {
     pub fn new(capacity: usize, inner: Arc<U>, pool: Arc<PacketBufPool>) -> Self {
-        let (send_tx, mut send_rx) = mpsc::channel::<(PacketBuf, SocketAddr)>(capacity);
+        let (send_tx, mut send_rx) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
 
         let udp_tx = inner.clone();
         let udp_rx = inner.clone();
@@ -48,14 +48,14 @@ impl<U: UdpTransport + 'static> BufferedUdpTransport<U> {
             let max_number_of_packets_to_send = udp_tx.max_number_of_packets_to_send();
             let mut send_many_buf = Default::default();
 
-            while let Some((packet_buf, addr)) = send_rx.recv().await {
+            while let Some((packet, addr)) = send_rx.recv().await {
                 buf.clear();
 
                 if send_rx.is_empty() {
-                    let _ = udp_tx.send_to(packet_buf.packet(), addr).await;
+                    let _ = udp_tx.send_to(&packet, addr).await;
                 } else {
                     // collect as many packets as possible into a buffer, and use send_many_to
-                    [(packet_buf, addr)]
+                    [(packet, addr)]
                         .into_iter()
                         .chain(iter::from_fn(|| send_rx.try_recv().ok()))
                         .take(max_number_of_packets_to_send)
@@ -73,7 +73,7 @@ impl<U: UdpTransport + 'static> BufferedUdpTransport<U> {
             }
         });
 
-        let (recv_tx, recv_rx) = mpsc::channel::<(PacketBuf, SocketAddr)>(capacity);
+        let (recv_tx, recv_rx) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
 
         let recv_pool = pool.clone();
 
@@ -137,10 +137,11 @@ impl<U: UdpTransport + 'static> BufferedUdpTransport<U> {
 impl<U: UdpTransport> UdpTransport for BufferedUdpTransport<U> {
     type SendManyBuf = U::SendManyBuf;
 
-    async fn send_to(&self, packet: &[u8], destination: SocketAddr) -> io::Result<()> {
-        let mut packet_buf = self.pool.get();
-        packet_buf.copy_from(packet);
-        self.send_tx.send((packet_buf, destination)).await.unwrap();
+    async fn send_to(&self, data: &[u8], destination: SocketAddr) -> io::Result<()> {
+        let mut packet = self.pool.get();
+        packet.truncate(data.len());
+        packet.copy_from_slice(data);
+        self.send_tx.send((packet, destination)).await.unwrap();
         Ok(())
     }
 
@@ -154,8 +155,9 @@ impl<U: UdpTransport> UdpTransport for BufferedUdpTransport<U> {
         else {
             return Err(io::Error::other("No packet available"));
         };
-        buf[..rx_packet.len].copy_from_slice(rx_packet.packet());
-        Ok((rx_packet.packet_len(), src))
+        let len = rx_packet.len();
+        buf[..len].copy_from_slice(&rx_packet);
+        Ok((len, src))
     }
 
     // TODO: implement recv_from many with mpsc::Receiver::recv_many?

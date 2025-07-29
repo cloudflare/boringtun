@@ -1,12 +1,15 @@
 use std::sync::{Arc, Mutex};
+use bytes::BytesMut;
 use tokio::sync::mpsc;
+
+use crate::packet::Packet;
 
 /// A pool of packet buffers
 #[derive(Debug, Clone)]
 pub struct PacketBufPool<const N: usize = 4096> {
     // FIXME: Allocate contiguous memory
-    packet_tx: mpsc::Sender<Box<[u8; N]>>,
-    packet_rx: Arc<Mutex<mpsc::Receiver<Box<[u8; N]>>>>,
+    packet_tx: mpsc::Sender<BytesMut>,
+    packet_rx: Arc<Mutex<mpsc::Receiver<BytesMut>>>,
 }
 
 impl<const N: usize> PacketBufPool<N> {
@@ -15,7 +18,7 @@ impl<const N: usize> PacketBufPool<N> {
         let (packet_tx, packet_rx) = mpsc::channel(capacity);
 
         for _ in 0..capacity {
-            let _ = packet_tx.try_send(Box::new([0u8; N]));
+            let _ = packet_tx.try_send(BytesMut::zeroed(N));
         }
 
         let pool = PacketBufPool {
@@ -26,19 +29,25 @@ impl<const N: usize> PacketBufPool<N> {
     }
 
     /// Retrieve an unused packet from the pool
-    pub fn get(&self) -> PacketBuf<N> {
+    pub fn get(&self) -> Packet<[u8]> {
         self.packet_rx
             .lock()
             .unwrap()
             .try_recv()
-            .map(|data| PacketBuf::reuse(self.packet_tx.clone(), data))
+            .map(|mut bytes| {
+                // grow BytesMut to `N`
+                // this is cheap since we should be the only ones holding a Bytes(Mut) that references the backing buffer
+                bytes.resize(N, 0u8);
+                Packet::new_from_pool(self.packet_tx.clone(), bytes)
+            })
             .unwrap_or_else(|_err| {
                 log::debug!("Allocating new packet buffer");
-                PacketBuf::alloc(self.packet_tx.clone())
+                Packet::new_from_pool(self.packet_tx.clone(), BytesMut::zeroed(N))
             })
     }
 }
 
+/*
 /// A borrowed buffer pointing into one packet of the pool.
 /// When dropped, it atomically returns its packet.
 pub struct PacketBuf<const N: usize = 4096> {
@@ -108,3 +117,4 @@ impl<const N: usize> Drop for PacketBuf<N> {
         let _ = self.packet_tx.try_send(data);
     }
 }
+*/
