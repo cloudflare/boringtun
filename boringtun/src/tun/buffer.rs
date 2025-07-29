@@ -12,18 +12,17 @@ use tokio::{io, sync::mpsc};
 #[derive(Clone)]
 pub struct BufferedIpSend<I> {
     tx: mpsc::Sender<Packet<Ip>>,
-    pool: Arc<PacketBufPool>,
     _task: Arc<Task>,
     _phantom: std::marker::PhantomData<I>,
 }
 
 impl<I: IpSend> BufferedIpSend<I> {
-    pub fn new(capacity: usize, pool: Arc<PacketBufPool>, inner: I) -> Self {
+    pub fn new(capacity: usize, inner: I) -> Self {
         let (tx, mut rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
         let task = Task::spawn("buffered IP send", async move {
             while let Some(packet) = rx.recv().await {
-                if let Err(e) = inner.send(&packet.into_bytes()[..]).await {
+                if let Err(e) = inner.send(packet).await {
                     log::error!("Error sending IP packet: {}", e);
                 }
             }
@@ -31,7 +30,6 @@ impl<I: IpSend> BufferedIpSend<I> {
 
         Self {
             tx,
-            pool,
             _task: Arc::new(task),
             _phantom: std::marker::PhantomData,
         }
@@ -39,40 +37,45 @@ impl<I: IpSend> BufferedIpSend<I> {
 }
 
 impl<I: IpSend> IpSend for BufferedIpSend<I> {
-    async fn send(&self, data: &[u8]) -> io::Result<()> {
-        let mut packet = self.pool.get();
-        packet.truncate(data.len());
-        packet.copy_from_slice(data);
-        let ip_packet = packet.try_into_ipvx().unwrap(/* TODO */);
-
+    async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
         self.tx
-            .send(ip_packet)
+            .send(packet)
             .await
             .expect("receiver dropped after senders");
         Ok(())
     }
 }
 
-#[derive(Clone)]
 pub struct BufferedIpRecv<I> {
     rx: Arc<tokio::sync::Mutex<mpsc::Receiver<Packet<Ip>>>>,
+    rx_packet_buf: Vec<Packet<Ip>>,
     _task: Arc<Task>,
     _phantom: std::marker::PhantomData<I>,
 }
 
+impl<I> Clone for BufferedIpRecv<I> {
+    fn clone(&self) -> Self {
+        BufferedIpRecv {
+            rx: self.rx.clone(),
+            rx_packet_buf: vec![],
+            _task: self._task.clone(),
+            _phantom: self._phantom,
+        }
+    }
+}
+
 impl<I: IpRecv> BufferedIpRecv<I> {
-    pub fn new(capacity: usize, pool: Arc<PacketBufPool>, mut inner: I) -> Self {
+    pub fn new(capacity: usize, pool: PacketBufPool, mut inner: I) -> Self {
         let (tx, rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
         let task = Task::spawn("buffered IP recv", async move {
             loop {
-                let mut packet = pool.get();
-                match inner.recv(&mut packet[..]).await {
-                    Ok(n) => {
-                        packet.truncate(n);
-                        let ip_packet = packet.try_into_ipvx().unwrap(/* TODO */);
-                        if tx.send(ip_packet).await.is_err() {
-                            break;
+                match inner.recv(&pool).await {
+                    Ok(packets) => {
+                        for packet in packets {
+                            if tx.send(packet).await.is_err() {
+                                return;
+                            }
                         }
                     }
                     Err(e) => {
@@ -86,6 +89,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
 
         Self {
             rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            rx_packet_buf: vec![],
             _task: Arc::new(task),
             _phantom: std::marker::PhantomData,
         }
@@ -93,13 +97,20 @@ impl<I: IpRecv> BufferedIpRecv<I> {
 }
 
 impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
-    async fn recv(&mut self, packet: &mut [u8]) -> io::Result<usize> {
-        let Some(rx_packet) = self.rx.lock().await.recv().await else {
-            return Err(io::Error::other("No packet available"));
-        };
-        let rx_packet = rx_packet.into_bytes();
-        let len = rx_packet.len();
-        packet[..len].copy_from_slice(&rx_packet);
-        Ok(len)
+    async fn recv(
+        &mut self,
+        _pool: &PacketBufPool,
+    ) -> io::Result<impl Iterator<Item = Packet<Ip>>> {
+        let mut rx = self.rx.try_lock().expect("simultaneous recv calls");
+        let max_n = rx.capacity();
+        let n = rx.recv_many(&mut self.rx_packet_buf, max_n).await;
+        if n == 0 {
+            // Channel is closed
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "channel closed",
+            ));
+        }
+        Ok(self.rx_packet_buf.drain(..n))
     }
 }

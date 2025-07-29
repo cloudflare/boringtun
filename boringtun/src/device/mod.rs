@@ -190,7 +190,7 @@ impl<T: DeviceTransports> Connection<T> {
             "handle_incoming ipv4",
             Device::handle_incoming(
                 Arc::downgrade(&device),
-                buffered_udp_v4.clone(),
+                buffered_udp_v4,
                 packet_pool.clone(),
             ),
         );
@@ -199,12 +199,12 @@ impl<T: DeviceTransports> Connection<T> {
             Device::handle_incoming(
                 Arc::downgrade(&device),
                 buffered_udp_v6.clone(),
-                packet_pool.clone(),
+                packet_pool,
             ),
         );
 
         Ok(Connection {
-            listen_port: buffered_udp_v4.local_addr()?.map(|sa| sa.port()),
+            listen_port: udp4.local_addr()?.map(|sa| sa.port()),
             udp4,
             udp6,
             incoming_ipv4,
@@ -576,7 +576,7 @@ impl<T: DeviceTransports> Device<T> {
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
         udp: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-        packet_pool: Arc<PacketBufPool>,
+        packet_pool: PacketBufPool,
     ) -> Result<(), Error> {
         let (tun, private_key, public_key, rate_limiter) = {
             let Some(device) = device.upgrade() else {
@@ -590,15 +590,15 @@ impl<T: DeviceTransports> Device<T> {
             (tun, private_key, public_key, rate_limiter)
         };
 
-        let buffered_tun_send = BufferedIpSend::new(MAX_PACKET_BUFS, packet_pool.clone(), tun);
+        let buffered_tun_send = BufferedIpSend::new(MAX_PACKET_BUFS, tun);
 
         let decapsulate_task = Task::spawn("decapsulate", async move {
             // NOTE: Reusing this appears to be faster than grabbing a buffer and using it for replies
             let mut src_buf = packet_pool.get();
-            let mut dst_buf = packet_pool.get();
 
             while let Ok((n, addr)) = udp.recv_from(&mut src_buf[..]).await {
                 debug_assert!(n <= src_buf.len());
+                let mut dst_buf = packet_pool.get();
 
                 let parsed_packet = match rate_limiter.verify_packet(
                     Some(addr.ip()),
@@ -649,16 +649,28 @@ impl<T: DeviceTransports> Device<T> {
                         }
                     }
                     TunnResult::WriteToTunnelV4(packet, addr) => {
+                        let len = packet.len();
+                        dst_buf.truncate(len); // hacky but works
+                        let Ok(dst_buf) = dst_buf.try_into_ip() else {
+                            log::trace!("Invalid packet");
+                            continue;
+                        };
                         if peer.is_allowed_ip(addr)
-                            && let Err(_err) = buffered_tun_send.send(packet).await
+                            && let Err(_err) = buffered_tun_send.send(dst_buf).await
                         {
                             log::trace!("buffered_tun_send.send failed");
                             break;
                         }
                     }
                     TunnResult::WriteToTunnelV6(packet, addr) => {
+                        let len = packet.len();
+                        dst_buf.truncate(len); // hacky but works
+                        let Ok(dst_buf) = dst_buf.try_into_ip() else {
+                            log::trace!("Invalid packet");
+                            continue;
+                        };
                         if peer.is_allowed_ip(addr)
-                            && let Err(_err) = buffered_tun_send.send(packet).await
+                            && let Err(_err) = buffered_tun_send.send(dst_buf).await
                         {
                             log::trace!("buffered_tun_send.send failed");
                             break;
@@ -667,6 +679,7 @@ impl<T: DeviceTransports> Device<T> {
                 };
 
                 if flush {
+                    let mut dst_buf = packet_pool.get();
                     // Flush pending queue
                     loop {
                         match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
@@ -698,7 +711,7 @@ impl<T: DeviceTransports> Device<T> {
         device: Weak<RwLock<Self>>,
         udp4: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
         udp6: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-        packet_pool: Arc<PacketBufPool>,
+        packet_pool: PacketBufPool,
     ) {
         let tun = {
             let Some(device) = device.upgrade() else {
@@ -713,59 +726,56 @@ impl<T: DeviceTransports> Device<T> {
 
         let encapsulate_task = Task::spawn("encapsulate", async move {
             let mut dst_buf = packet_pool.get();
-            let mut src_buf = packet_pool.get();
 
             loop {
-                let n = match buffered_tun_recv.recv(&mut src_buf[..]).await {
-                    Ok(n) => n,
+                let packets = match buffered_tun_recv.recv(&packet_pool).await {
+                    Ok(packets) => packets,
                     Err(e) => {
                         log::error!("Unexpected error on tun interface: {:?}", e);
                         break;
                     }
                 };
 
-                let packet = &src_buf[..n];
+                for packet in packets {
+                    // Determine peer to use from the destination address
+                    let Some(dst_addr) = packet.destination() else {
+                        continue;
+                    };
+                    let Some(device) = device.upgrade() else {
+                        break;
+                    };
+                    let peers = &device.read().await.peers_by_ip;
+                    let mut peer = match peers.find(dst_addr) {
+                        Some(peer) => peer.lock().await,
+                        // Drop packet if no peer has allowed IPs for destination
+                        None => continue,
+                    };
 
-                // Determine peer to use from the destination address
-                let dst_addr = match Tunn::dst_address(packet) {
-                    Some(addr) => addr,
-                    None => continue,
-                };
-
-                let Some(device) = device.upgrade() else {
-                    break;
-                };
-                let peers = &device.read().await.peers_by_ip;
-                let mut peer = match peers.find(dst_addr) {
-                    Some(peer) => peer.lock().await,
-                    // Drop packet if no peer has allowed IPs for destination
-                    None => continue,
-                };
-
-                match peer
-                    .tunnel
-                    .encapsulate(packet, &mut dst_buf[..])
-                {
-                    TunnResult::Done => {}
-                    TunnResult::Err(e) => {
-                        log::error!("Encapsulate error={e:?}: {e:?}");
-                    }
-                    TunnResult::WriteToNetwork(packet) => {
-                        let endpoint_addr = peer.endpoint().addr;
-                        if let Some(SocketAddr::V4(addr)) = endpoint_addr {
-                            if udp4.send_to(packet, addr.into()).await.is_err() {
-                                break;
-                            }
-                        } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
-                            if udp6.send_to(packet, addr.into()).await.is_err() {
-                                break;
-                            }
-                        } else {
-                            log::error!("No endpoint");
+                    match peer
+                        .tunnel
+                        .encapsulate(&packet.into_bytes(), &mut dst_buf[..])
+                    {
+                        TunnResult::Done => {}
+                        TunnResult::Err(e) => {
+                            log::error!("Encapsulate error={e:?}: {e:?}");
                         }
-                    }
-                    _ => panic!("Unexpected result from encapsulate"),
-                };
+                        TunnResult::WriteToNetwork(packet) => {
+                            let endpoint_addr = peer.endpoint().addr;
+                            if let Some(SocketAddr::V4(addr)) = endpoint_addr {
+                                if udp4.send_to(packet, addr.into()).await.is_err() {
+                                    break;
+                                }
+                            } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
+                                if udp6.send_to(packet, addr.into()).await.is_err() {
+                                    break;
+                                }
+                            } else {
+                                log::error!("No endpoint");
+                            }
+                        }
+                        _ => panic!("Unexpected result from encapsulate"),
+                    };
+                }
             }
         });
 

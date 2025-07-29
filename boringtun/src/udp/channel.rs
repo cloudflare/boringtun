@@ -3,7 +3,7 @@ use either::Either;
 use pnet_packet::ip::IpNextHeaderProtocols;
 use rand_core::RngCore;
 use std::{
-    io,
+    io, iter,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::{Arc, atomic::AtomicU16},
 };
@@ -11,7 +11,7 @@ use tokio::sync::{Mutex, mpsc};
 use zerocopy::{FromBytes, IntoBytes, TryFromBytes};
 
 use crate::{
-    packet::{IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, Udp},
+    packet::{Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, PacketBufPool, Udp},
     tun::{IpRecv, IpSend},
     udp::{UdpTransport, UdpTransportFactory},
 };
@@ -46,8 +46,8 @@ pub struct PacketChannelInner {
     source_ip_v6: Ipv6Addr,
 
     // FIXME: remove Mutexes
-    udp_tx: mpsc::Sender<Packet>,
-    tun_rx: Mutex<mpsc::Receiver<Packet>>,
+    udp_tx: mpsc::Sender<Packet<Ip>>,
+    tun_rx: Mutex<mpsc::Receiver<Packet<Ip>>>,
 
     tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
     udp_rx_v4: Mutex<mpsc::Receiver<Packet<Ipv4<Udp>>>>,
@@ -85,11 +85,8 @@ impl PacketChannel {
 }
 
 impl IpSend for PacketChannel {
-    async fn send(&self, bytes: &[u8]) -> io::Result<()> {
-        // TODO: consider refactoring trait to take a `Packet` directly and get rid of this clone
-        let raw_packet = Packet::copy_from_slice(bytes);
-
-        let ip_packet = match raw_packet.try_into_ip() {
+    async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
+        let ip_packet = match packet.try_into_ipvx() {
             Ok(p) => p,
             Err(e) => {
                 log::trace!("Invalid IP packet: {e:?}");
@@ -125,18 +122,17 @@ impl IpSend for PacketChannel {
 }
 
 impl IpRecv for PacketChannel {
-    async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    async fn recv(
+        &mut self,
+        _pool: &PacketBufPool,
+    ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send> {
         let mut tun_rx = self
             .inner
             .tun_rx
             .try_lock()
             .expect("multiple concurrent calls to recv");
         let packet = tun_rx.recv().await.expect("sender exists");
-        let len = packet.len().min(buf.len());
-
-        buf[..len].copy_from_slice(&packet[..]);
-
-        Ok(len)
+        Ok(iter::once(packet))
     }
 }
 
@@ -275,7 +271,7 @@ async fn create_ipv4_payload(
     destination_ip: Ipv4Addr,
     destination_port: u16,
     udp_payload: &[u8],
-) -> Packet {
+) -> Packet<Ip> {
     let udp_len: u16 = (UDP_HEADER_LEN + udp_payload.len()).try_into().unwrap();
     let total_len = u16::try_from(IPV4_HEADER_LEN).unwrap() + udp_len;
 
@@ -316,6 +312,8 @@ async fn create_ipv4_payload(
     packet.unsplit(payload);
 
     Packet::from_bytes(packet)
+        .try_into_ip()
+        .expect("packet is valid")
 }
 
 async fn create_ipv6_payload(
@@ -325,7 +323,7 @@ async fn create_ipv6_payload(
     destination_port: u16,
     udp_payload: &[u8],
     connection_id: u32,
-) -> Packet {
+) -> Packet<Ip> {
     let udp_len: u16 = (UDP_HEADER_LEN + udp_payload.len()).try_into().unwrap();
     let total_len = u16::try_from(IPV6_HEADER_LEN).unwrap() + udp_len;
 
@@ -360,6 +358,8 @@ async fn create_ipv6_payload(
 
     packet.unsplit(payload);
     Packet::from_bytes(packet)
+        .try_into_ip()
+        .expect("packet is valid")
 }
 
 fn rand_u16() -> u16 {

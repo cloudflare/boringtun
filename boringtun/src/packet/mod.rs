@@ -1,18 +1,22 @@
-use std::{marker::PhantomData, ops::{Deref, DerefMut}};
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
-use bitfield_struct::bitfield;
-use bytes::{BytesMut};
+use bytes::BytesMut;
 use either::Either;
 use eyre::{Context, bail, eyre};
 use tokio::sync::mpsc;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
+mod ip;
 mod ipv4;
 mod ipv6;
 mod pool;
 mod udp;
 mod util;
 
+pub use ip::*;
 pub use ipv4::*;
 pub use ipv6::*;
 pub use pool::*;
@@ -62,7 +66,6 @@ pub struct PacketInner {
     drop_tx: Option<mpsc::Sender<BytesMut>>,
 }
 
-
 /// A marker trait that indicates that a [Packet] contains a valid payload of a specific type.
 ///
 /// For example, [CheckedPayload] is implemented for [`Ipv4<[u8]>`], and a [`Packet<Ipv4<[u8]>>>`]
@@ -75,24 +78,6 @@ impl CheckedPayload for Ip {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv6<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv4<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Udp<P> {}
-
-/// A packet bitfield-struct containing the `version`-field that is shared between IPv4 and IPv6.
-#[bitfield(u8)]
-#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
-pub struct IpvxVersion {
-    #[bits(4)]
-    pub _unknown: u8,
-    #[bits(4)]
-    pub version: u8,
-}
-
-/// An IP packet that may be either IPv4 or IPv6.
-#[repr(C, packed)]
-#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
-pub struct Ip {
-    pub header: IpvxVersion,
-    pub payload: [u8],
-}
 
 impl<T: CheckedPayload + ?Sized> Packet<T> {
     fn cast<Y: CheckedPayload + ?Sized>(self) -> Packet<Y> {
@@ -114,23 +99,29 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
 impl Packet<[u8]> {
     pub fn new_from_pool(pool_tx: mpsc::Sender<BytesMut>, bytes: BytesMut) -> Self {
         Self {
-            inner: PacketInner { buf: bytes, drop_tx: Some(pool_tx) },
+            inner: PacketInner {
+                buf: bytes,
+                drop_tx: Some(pool_tx),
+            },
             _kind: PhantomData::<[u8]>,
         }
     }
-    
+
     pub fn from_bytes(bytes: BytesMut) -> Self {
         Self {
-            inner: PacketInner { buf: bytes, drop_tx: None },
+            inner: PacketInner {
+                buf: bytes,
+                drop_tx: None,
+            },
             _kind: PhantomData::<[u8]>,
         }
     }
 
     pub fn copy_from_slice(bytes: &[u8]) -> Self {
         Self {
-            inner: PacketInner{
-            buf: BytesMut::from(bytes),
-            drop_tx: None,
+            inner: PacketInner {
+                buf: BytesMut::from(bytes),
+                drop_tx: None,
             },
             _kind: PhantomData::<[u8]>,
         }
@@ -140,7 +131,7 @@ impl Packet<[u8]> {
         self.inner.buf.truncate(new_len);
     }
 
-    pub fn try_into_ipvx(self) -> eyre::Result<Packet<Ip>> {
+    pub fn try_into_ip(self) -> eyre::Result<Packet<Ip>> {
         let buf_len = self.buf().len();
 
         // IPv6 packets are larger, but their length after we know the packet IP version.
@@ -153,14 +144,13 @@ impl Packet<[u8]> {
         Ok(self.cast::<Ip>())
     }
 
-    pub fn try_into_ip(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
-        self.try_into_ipvx()?.try_into_ip()
+    pub fn try_into_ipvx(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
+        self.try_into_ip()?.try_into_ipvx()
     }
 }
 
-
 impl Packet<Ip> {
-    pub fn try_into_ip(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
+    pub fn try_into_ipvx(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         match self.header.version() {
             4 => {
                 let buf_len = self.buf().len();

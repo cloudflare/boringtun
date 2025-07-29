@@ -16,7 +16,7 @@ use crate::{
 
 pub struct BufferedUdpTransport<U: UdpTransport> {
     inner: Arc<U>,
-    pool: Arc<PacketBufPool>,
+    pool: PacketBufPool,
     _send_task: Arc<Task>,
     _recv_task: Arc<Task>,
     send_tx: mpsc::Sender<(Packet, SocketAddr)>,
@@ -37,7 +37,7 @@ impl<U: UdpTransport> Clone for BufferedUdpTransport<U> {
 }
 
 impl<U: UdpTransport + 'static> BufferedUdpTransport<U> {
-    pub fn new(capacity: usize, inner: Arc<U>, pool: Arc<PacketBufPool>) -> Self {
+    pub fn new(capacity: usize, inner: Arc<U>, pool: PacketBufPool) -> Self {
         let (send_tx, mut send_rx) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
 
         let udp_tx = inner.clone();

@@ -99,9 +99,7 @@ impl UdpTransport for tokio::net::UdpSocket {
 
                 let mut msgs: Vec<_> = bufs
                     .iter_mut()
-                    .map(|buf| {
-                        [IoSliceMut::new(&mut buf[..])]
-                    })
+                    .map(|buf| [IoSliceMut::new(&mut buf[..])])
                     .collect();
 
                 let results = nix::sys::socket::recvmmsg(
@@ -117,7 +115,6 @@ impl UdpTransport for tokio::net::UdpSocket {
                     .map(|(result, out_addr)| {
                         *out_addr = result.address.map(|addr| addr.into());
                         result.bytes
-
                     })
                     .collect();
 
