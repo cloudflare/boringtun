@@ -143,6 +143,9 @@ pub trait UdpTransportFactory: Send + Sync + 'static {
 
 pub struct UdpSocketFactory;
 
+const UDP_RECV_BUFFER_SIZE: usize = 7 * 1024 * 1024;
+const UDP_SEND_BUFFER_SIZE: usize = 7 * 1024 * 1024;
+
 impl UdpTransportFactory for UdpSocketFactory {
     type Transport = tokio::net::UdpSocket;
 
@@ -161,6 +164,11 @@ impl UdpTransportFactory for UdpSocketFactory {
                 socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
             udp_sock.set_nonblocking(true)?;
             udp_sock.set_reuse_address(true)?;
+
+            udp_sock.set_recv_buffer_size(UDP_RECV_BUFFER_SIZE)?;
+            udp_sock.set_send_buffer_size(UDP_SEND_BUFFER_SIZE)?;
+            // TODO: set forced buffer sizes?
+
             udp_sock.bind(&addr.into())?;
 
             tokio::net::UdpSocket::from_std(udp_sock.into()).map(Arc::new)
