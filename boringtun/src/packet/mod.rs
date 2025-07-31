@@ -6,7 +6,6 @@ use std::{
 use bytes::BytesMut;
 use either::Either;
 use eyre::{Context, bail, eyre};
-use tokio::sync::mpsc;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 mod ip;
@@ -49,7 +48,6 @@ pub use udp::*;
 /// let ipv4_packet: Packet<Ipv4> = raw_packet.try_into_ip().unwrap().unwrap_left();
 /// assert_eq!(&ip_header, &ipv4_packet.header);
 /// ```
-#[derive(Debug)]
 pub struct Packet<Kind: ?Sized = [u8]> {
     inner: PacketInner,
 
@@ -60,10 +58,11 @@ pub struct Packet<Kind: ?Sized = [u8]> {
     _kind: PhantomData<Kind>,
 }
 
-#[derive(Debug)]
 pub struct PacketInner {
     buf: BytesMut,
-    drop_tx: Option<mpsc::Sender<BytesMut>>,
+
+    // If the [BytesMut] was allocated by a [PacketBufPool], this will return the buffer to be re-used later.
+    _return_to_pool: Option<ReturnToPool>,
 }
 
 /// A marker trait that indicates that a [Packet] contains a valid payload of a specific type.
@@ -97,11 +96,11 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
 }
 
 impl Packet<[u8]> {
-    pub fn new_from_pool(pool_tx: mpsc::Sender<BytesMut>, bytes: BytesMut) -> Self {
+    pub fn new_from_pool(return_to_pool: ReturnToPool, bytes: BytesMut) -> Self {
         Self {
             inner: PacketInner {
                 buf: bytes,
-                drop_tx: Some(pool_tx),
+                _return_to_pool: Some(return_to_pool),
             },
             _kind: PhantomData::<[u8]>,
         }
@@ -111,7 +110,7 @@ impl Packet<[u8]> {
         Self {
             inner: PacketInner {
                 buf: bytes,
-                drop_tx: None,
+                _return_to_pool: None,
             },
             _kind: PhantomData::<[u8]>,
         }
@@ -121,7 +120,7 @@ impl Packet<[u8]> {
         Self {
             inner: PacketInner {
                 buf: BytesMut::from(bytes),
-                drop_tx: None,
+                _return_to_pool: None,
             },
             _kind: PhantomData::<[u8]>,
         }
@@ -290,12 +289,3 @@ impl<Kind> Clone for Packet<Kind> {
     }
 }
  */
-
-impl Drop for PacketInner {
-    fn drop(&mut self) {
-        // Return packet to the pool
-        if let Some(drop_tx) = self.drop_tx.take() {
-            let _ = drop_tx.try_send(std::mem::take(&mut self.buf));
-        }
-    }
-}
