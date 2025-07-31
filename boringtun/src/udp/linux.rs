@@ -85,6 +85,7 @@ impl UdpSend for super::UdpSocket {
 
 pub struct RecvManyBuf {
     headers: MultiHeaders<SockaddrIn>,
+    lengths: Vec<usize>,
 }
 
 // SAFETY: MultiHeaders contains pointers, but we only ever mutate data in [Self::recv_many_from].
@@ -95,6 +96,7 @@ impl Default for RecvManyBuf {
     fn default() -> Self {
         Self {
             headers: MultiHeaders::<SockaddrIn>::preallocate(MAX_PACKET_COUNT, None),
+            lengths: vec![],
         }
     }
 }
@@ -141,17 +143,20 @@ impl UdpRecv for super::UdpSocket {
                     None,
                 )?;
 
-                let lengths: Vec<usize> = results
-                    .zip(source_addrs.iter_mut())
-                    .map(|(result, out_addr)| {
-                        *out_addr = result.address.map(|addr| addr.into());
-                        result.bytes
-                    })
-                    .collect();
+                recv_many_bufs
+                    .lengths
+                    .extend(
+                        results
+                            .zip(source_addrs.iter_mut())
+                            .map(|(result, out_addr)| {
+                                *out_addr = result.address.map(|addr| addr.into());
+                                result.bytes
+                            }),
+                    );
 
-                let num_bufs = lengths.len();
+                let num_bufs = recv_many_bufs.lengths.len();
 
-                for (buf, length) in bufs.iter_mut().zip(lengths) {
+                for (buf, length) in bufs.iter_mut().zip(recv_many_bufs.lengths.drain(..)) {
                     buf.truncate(length);
                 }
 
