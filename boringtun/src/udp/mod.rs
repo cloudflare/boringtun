@@ -45,6 +45,8 @@ pub trait UdpTransport: Send + Sync + Clone {
 ///
 /// This allows us to, for example, swap out UDP sockets with a channel.
 pub trait UdpRecv: Send + Sync {
+    type RecvManyBuf: Default + Send;
+
     /// The maximum number of packets that can be passed to [UdpTransport::recv_many_from].
     fn max_number_of_packets_to_recv(&self) -> usize {
         1
@@ -68,6 +70,7 @@ pub trait UdpRecv: Send + Sync {
     // The default implementation always reads 1 packet.
     fn recv_many_from(
         &mut self,
+        _recv_buf: &mut Self::RecvManyBuf,
         bufs: &mut [Packet],
         source_addrs: &mut [Option<SocketAddr>],
     ) -> impl Future<Output = io::Result<usize>> + Send {

@@ -83,7 +83,25 @@ impl UdpSend for super::UdpSocket {
     }
 }
 
+pub struct RecvManyBuf {
+    headers: MultiHeaders<SockaddrIn>,
+}
+
+// SAFETY: MultiHeaders contains pointers, but we only ever mutate data in [Self::recv_many_from].
+// This should be fine.
+unsafe impl Send for RecvManyBuf {}
+
+impl Default for RecvManyBuf {
+    fn default() -> Self {
+        Self {
+            headers: MultiHeaders::<SockaddrIn>::preallocate(MAX_PACKET_COUNT, None),
+        }
+    }
+}
+
 impl UdpRecv for super::UdpSocket {
+    type RecvManyBuf = RecvManyBuf;
+
     fn max_number_of_packets_to_recv(&self) -> usize {
         MAX_PACKET_COUNT
     }
@@ -94,6 +112,7 @@ impl UdpRecv for super::UdpSocket {
 
     async fn recv_many_from(
         &mut self,
+        recv_many_bufs: &mut Self::RecvManyBuf,
         bufs: &mut [Packet],
         source_addrs: &mut [Option<SocketAddr>],
     ) -> io::Result<usize> {
@@ -104,7 +123,7 @@ impl UdpRecv for super::UdpSocket {
         let num_bufs = self
             .inner
             .async_io(Interest::READABLE, move || {
-                let mut headers = MultiHeaders::<SockaddrIn>::preallocate(bufs.len(), None);
+                let headers = &mut recv_many_bufs.headers;
 
                 let mut msgs: Vec<_> = bufs
                     .iter_mut()
@@ -113,7 +132,7 @@ impl UdpRecv for super::UdpSocket {
 
                 let results = nix::sys::socket::recvmmsg(
                     fd,
-                    &mut headers,
+                    headers,
                     &mut msgs,
                     MsgFlags::MSG_DONTWAIT,
                     None,

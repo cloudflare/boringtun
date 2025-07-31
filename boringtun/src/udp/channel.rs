@@ -225,6 +225,8 @@ impl UdpSend for Arc<UdpChannel> {
 }
 
 impl UdpRecv for Arc<UdpChannel> {
+    type RecvManyBuf = ();
+
     async fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         match self.ip_version {
             IpVersion::V4 => {

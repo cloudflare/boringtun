@@ -26,6 +26,8 @@ impl UdpSend for super::UdpSocket {
 }
 
 impl UdpRecv for super::UdpSocket {
+    type RecvManyBuf = ();
+
     async fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         self.inner.recv_from(buf).await
     }
