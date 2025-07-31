@@ -21,8 +21,7 @@ pub trait IpSend: Send + Sync + Clone + 'static {
 ///
 /// This is used as an abstraction of the TUN device used by wireguard,
 /// and enables us to, for example, swap it out with a channel.
-// TODO: Refactor Device to remove Clone requirement
-pub trait IpRecv: Send + Sync + Clone + 'static {
+pub trait IpRecv: Send + Sync + 'static {
     /// Receive a complete IP packet.
     // TODO: consider refactoring trait with methods that return `Packet<Ipv4>` and `Packet<Ipv6>`
     fn recv(

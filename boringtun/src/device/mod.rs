@@ -119,7 +119,14 @@ pub struct Device<T: DeviceTransports> {
     fwmark: Option<u32>,
 
     tun_tx: T::IpSend,
-    tun_rx: T::IpRecv,
+    /// The tun device reader.
+    ///
+    /// This is `Arc<Mutex>`:ed because:
+    /// - The task responsible from reading from the tun_rx must have ownership of it.
+    /// - We must be able to claim the ownership after that task is stopped.
+    /// This is implemented by the task taking the lock upon startup, and holding it until it is
+    /// stopped.
+    tun_rx: Arc<Mutex<T::IpRecv>>,
 
     peers: HashMap<x25519::PublicKey, Arc<Mutex<Peer>>>,
     peers_by_ip: AllowedIps<Arc<Mutex<Peer>>>,
@@ -410,7 +417,7 @@ impl<T: DeviceTransports> Device<T> {
             api: None,
             udp_factory,
             tun_tx,
-            tun_rx,
+            tun_rx: Arc::new(Mutex::new(tun_rx)),
             fwmark: Default::default(),
             key_pair: Default::default(),
             next_index: Default::default(),
@@ -718,8 +725,7 @@ impl<T: DeviceTransports> Device<T> {
                 return;
             };
             let device = device.write().await;
-            // FIXME: remove clone, fix tun_rx ownership
-            device.tun_rx.clone()
+            Arc::clone(&device.tun_rx)
         };
 
         let mut buffered_tun_recv = BufferedIpRecv::new(MAX_PACKET_BUFS, packet_pool.clone(), tun);

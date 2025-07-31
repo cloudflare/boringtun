@@ -7,7 +7,10 @@ use crate::{
     task::Task,
     tun::{IpRecv, IpSend},
 };
-use tokio::{io, sync::mpsc};
+use tokio::{
+    io,
+    sync::{Mutex, mpsc},
+};
 
 #[derive(Clone)]
 pub struct BufferedIpSend<I> {
@@ -47,28 +50,24 @@ impl<I: IpSend> IpSend for BufferedIpSend<I> {
 }
 
 pub struct BufferedIpRecv<I> {
-    rx: Arc<tokio::sync::Mutex<mpsc::Receiver<Packet<Ip>>>>,
+    rx: mpsc::Receiver<Packet<Ip>>,
     rx_packet_buf: Vec<Packet<Ip>>,
     _task: Arc<Task>,
     _phantom: std::marker::PhantomData<I>,
 }
 
-impl<I> Clone for BufferedIpRecv<I> {
-    fn clone(&self) -> Self {
-        BufferedIpRecv {
-            rx: self.rx.clone(),
-            rx_packet_buf: vec![],
-            _task: self._task.clone(),
-            _phantom: self._phantom,
-        }
-    }
-}
-
 impl<I: IpRecv> BufferedIpRecv<I> {
-    pub fn new(capacity: usize, pool: PacketBufPool, mut inner: I) -> Self {
+    /// Create a new [BufferedIpRecv].
+    ///
+    /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
+    /// dropped. We will take the mutex lock when this function is called, and hold onto it for the
+    /// lifetime of [Self]. Will panic if the lock is already taken.
+    pub fn new(capacity: usize, pool: PacketBufPool, inner: Arc<Mutex<I>>) -> Self {
         let (tx, rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
         let task = Task::spawn("buffered IP recv", async move {
+            let mut inner = inner.try_lock().expect("Lock must not be taken");
+
             loop {
                 match inner.recv(&pool).await {
                     Ok(packets) => {
@@ -88,7 +87,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
         });
 
         Self {
-            rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            rx,
             rx_packet_buf: vec![],
             _task: Arc::new(task),
             _phantom: std::marker::PhantomData,
@@ -101,9 +100,8 @@ impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
         &mut self,
         _pool: &PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>>> {
-        let mut rx = self.rx.try_lock().expect("simultaneous recv calls");
-        let max_n = rx.capacity();
-        let n = rx.recv_many(&mut self.rx_packet_buf, max_n).await;
+        let max_n = self.rx.capacity();
+        let n = self.rx.recv_many(&mut self.rx_packet_buf, max_n).await;
         if n == 0 {
             // Channel is closed
             return Err(io::Error::new(
