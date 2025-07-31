@@ -25,7 +25,7 @@ impl UdpTransport for tokio::net::UdpSocket {
     async fn send_many_to(
         &self,
         buf: &mut SendmmsgBuf,
-        packets: &[(Packet, SocketAddr)],
+        packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> io::Result<()> {
         let n = packets.len();
         debug_assert!(n <= MAX_PACKET_COUNT);
@@ -47,14 +47,14 @@ impl UdpTransport for tokio::net::UdpSocket {
             .enumerate()
             // packets.len() is no greater than MAX_PACKET_COUNT
             .for_each(|(i, packet)| packets_buf[i] = packet);
-        let packets = &packets_buf[..n];
+        let pkts = &packets_buf[..n];
 
         self.async_io(Interest::WRITABLE, || {
-            let mut multiheaders = MultiHeaders::preallocate(packets.len(), None);
+            let mut multiheaders = MultiHeaders::preallocate(pkts.len(), None);
             nix::sys::socket::sendmmsg(
                 fd,
                 &mut multiheaders,
-                packets,
+                pkts,
                 &buf.targets[..],
                 [],
                 MsgFlags::MSG_DONTWAIT,
@@ -63,6 +63,8 @@ impl UdpTransport for tokio::net::UdpSocket {
             Ok(())
         })
         .await?;
+
+        packets.clear();
 
         Ok(())
     }
@@ -75,8 +77,8 @@ impl UdpTransport for tokio::net::UdpSocket {
         MAX_PACKET_COUNT
     }
 
-    async fn send_to(&self, packet: &[u8], target: SocketAddr) -> io::Result<()> {
-        self.send_to(packet, target).await?;
+    async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
+        self.send_to(&packet, target).await?;
         Ok(())
     }
 

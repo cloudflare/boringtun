@@ -62,14 +62,14 @@ impl<I: IpRecv> BufferedIpRecv<I> {
     /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
     /// dropped. We will take the mutex lock when this function is called, and hold onto it for the
     /// lifetime of [Self]. Will panic if the lock is already taken.
-    pub fn new(capacity: usize, pool: PacketBufPool, inner: Arc<Mutex<I>>) -> Self {
+    pub fn new(capacity: usize, mut pool: PacketBufPool, inner: Arc<Mutex<I>>) -> Self {
         let (tx, rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
         let task = Task::spawn("buffered IP recv", async move {
             let mut inner = inner.try_lock().expect("Lock must not be taken");
 
             loop {
-                match inner.recv(&pool).await {
+                match inner.recv(&mut pool).await {
                     Ok(packets) => {
                         for packet in packets {
                             if tx.send(packet).await.is_err() {
@@ -96,10 +96,10 @@ impl<I: IpRecv> BufferedIpRecv<I> {
 }
 
 impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
-    async fn recv(
-        &mut self,
-        _pool: &PacketBufPool,
-    ) -> io::Result<impl Iterator<Item = Packet<Ip>>> {
+    async fn recv<'a>(
+        &'a mut self,
+        _pool: &mut PacketBufPool,
+    ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
         let max_n = self.rx.capacity();
         let n = self.rx.recv_many(&mut self.rx_packet_buf, max_n).await;
         if n == 0 {

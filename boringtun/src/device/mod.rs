@@ -10,6 +10,7 @@ pub mod drop_privileges;
 mod integration_tests;
 pub mod peer;
 
+use bytes::BytesMut;
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -23,8 +24,8 @@ use tokio::sync::RwLock;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
-use crate::noise::{Packet, Tunn, TunnResult};
-use crate::packet::PacketBufPool;
+use crate::noise::{Tunn, TunnResult};
+use crate::packet::{Packet, PacketBufPool};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::{IpRecv, IpSend};
@@ -40,7 +41,7 @@ const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we
 const MAX_UDP_SIZE: usize = (1 << 16) - 1;
 
 /// Maximum number of packet buffers that each channel may contain
-const MAX_PACKET_BUFS: usize = 8000;
+const MAX_PACKET_BUFS: usize = 4000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -168,12 +169,16 @@ impl<T: DeviceTransports> Connection<T> {
         let (udp4, udp6) = device_guard.open_listen_socket().await?;
         drop(device_guard);
 
-        let packet_pool = PacketBufPool::new(MAX_PACKET_BUFS);
-
-        let buffered_udp_v4 =
-            BufferedUdpTransport::new(MAX_PACKET_BUFS, udp4.clone(), packet_pool.clone());
-        let buffered_udp_v6 =
-            BufferedUdpTransport::new(MAX_PACKET_BUFS, udp6.clone(), packet_pool.clone());
+        let buffered_udp_v4 = BufferedUdpTransport::new(
+            MAX_PACKET_BUFS,
+            udp4.clone(),
+            PacketBufPool::new(MAX_PACKET_BUFS),
+        );
+        let buffered_udp_v6 = BufferedUdpTransport::new(
+            MAX_PACKET_BUFS,
+            udp6.clone(),
+            PacketBufPool::new(MAX_PACKET_BUFS),
+        );
 
         let outgoing = Task::spawn(
             "handle_outgoing",
@@ -181,7 +186,7 @@ impl<T: DeviceTransports> Connection<T> {
                 Arc::downgrade(&device),
                 buffered_udp_v4.clone(),
                 buffered_udp_v6.clone(),
-                packet_pool.clone(),
+                PacketBufPool::new(MAX_PACKET_BUFS),
             ),
         );
         let timers = Task::spawn(
@@ -198,7 +203,7 @@ impl<T: DeviceTransports> Connection<T> {
             Device::handle_incoming(
                 Arc::downgrade(&device),
                 buffered_udp_v4,
-                packet_pool.clone(),
+                PacketBufPool::new(MAX_PACKET_BUFS),
             ),
         );
         let incoming_ipv6 = Task::spawn(
@@ -206,7 +211,7 @@ impl<T: DeviceTransports> Connection<T> {
             Device::handle_incoming(
                 Arc::downgrade(&device),
                 buffered_udp_v6.clone(),
-                packet_pool,
+                PacketBufPool::new(MAX_PACKET_BUFS),
             ),
         );
 
@@ -542,7 +547,7 @@ impl<T: DeviceTransports> Device<T> {
         )?;
         */
 
-        let mut dst_buf = [0u8; MAX_UDP_SIZE];
+        use crate::packet::Packet;
 
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -556,6 +561,8 @@ impl<T: DeviceTransports> Device<T> {
 
             // Go over each peer and invoke the timer function
             for peer in peer_map.values() {
+                let mut dst_buf = Packet::from_bytes(BytesMut::zeroed(4096));
+
                 let mut p = peer.lock().await;
                 let endpoint_addr = match p.endpoint().addr {
                     Some(addr) => addr,
@@ -568,9 +575,11 @@ impl<T: DeviceTransports> Device<T> {
                     TunnResult::Err(e) => log::error!("Timer error = {e:?}: {e:?}"),
                     TunnResult::WriteToNetwork(packet) => {
                         drop(p);
+                        let len = packet.len();
+                        dst_buf.truncate(len);
                         match endpoint_addr {
-                            SocketAddr::V4(_) => udp4.send_to(packet, endpoint_addr).await.ok(),
-                            SocketAddr::V6(_) => udp6.send_to(packet, endpoint_addr).await.ok(),
+                            SocketAddr::V4(_) => udp4.send_to(dst_buf, endpoint_addr).await.ok(),
+                            SocketAddr::V6(_) => udp6.send_to(dst_buf, endpoint_addr).await.ok(),
                         };
                     }
                     _ => unreachable!("unexpected result from update_timers"),
@@ -583,7 +592,7 @@ impl<T: DeviceTransports> Device<T> {
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
         udp: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-        packet_pool: PacketBufPool,
+        mut packet_pool: PacketBufPool,
     ) -> Result<(), Error> {
         let (tun, private_key, public_key, rate_limiter) = {
             let Some(device) = device.upgrade() else {
@@ -614,7 +623,9 @@ impl<T: DeviceTransports> Device<T> {
                 ) {
                     Ok(packet) => packet,
                     Err(TunnResult::WriteToNetwork(cookie)) => {
-                        if let Err(_err) = udp.send_to(cookie, addr).await {
+                        let len = cookie.len();
+                        dst_buf.truncate(len);
+                        if let Err(_err) = udp.send_to(dst_buf, addr).await {
                             log::trace!("udp.send_to failed");
                             break;
                         }
@@ -629,6 +640,7 @@ impl<T: DeviceTransports> Device<T> {
                 let device_guard = &device.read().await;
                 let peers = &device_guard.peers;
                 let peers_by_idx = &device_guard.peers_by_idx;
+                use crate::noise::Packet;
                 let peer = match &parsed_packet {
                     Packet::HandshakeInit(p) => parse_handshake_anon(&private_key, &public_key, p)
                         .ok()
@@ -650,7 +662,9 @@ impl<T: DeviceTransports> Device<T> {
                     TunnResult::Err(_) => continue,
                     TunnResult::WriteToNetwork(packet) => {
                         flush = true;
-                        if let Err(_err) = udp.send_to(packet, addr).await {
+                        let len = packet.len();
+                        dst_buf.truncate(len);
+                        if let Err(_err) = udp.send_to(dst_buf, addr).await {
                             log::trace!("udp.send_to failed");
                             break;
                         }
@@ -686,12 +700,14 @@ impl<T: DeviceTransports> Device<T> {
                 };
 
                 if flush {
-                    let mut dst_buf = packet_pool.get();
                     // Flush pending queue
                     loop {
+                        let mut dst_buf = packet_pool.get();
                         match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
                             TunnResult::WriteToNetwork(packet) => {
-                                if let Err(_err) = udp.send_to(packet, addr).await {
+                                let len = packet.len();
+                                dst_buf.truncate(len);
+                                if let Err(_err) = udp.send_to(dst_buf, addr).await {
                                     log::trace!("udp.send_to failed");
                                     break;
                                 }
@@ -718,7 +734,7 @@ impl<T: DeviceTransports> Device<T> {
         device: Weak<RwLock<Self>>,
         udp4: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
         udp6: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-        packet_pool: PacketBufPool,
+        mut packet_pool: PacketBufPool,
     ) {
         let tun = {
             let Some(device) = device.upgrade() else {
@@ -728,13 +744,12 @@ impl<T: DeviceTransports> Device<T> {
             Arc::clone(&device.tun_rx)
         };
 
-        let mut buffered_tun_recv = BufferedIpRecv::new(MAX_PACKET_BUFS, packet_pool.clone(), tun);
+        let mut buffered_tun_recv =
+            BufferedIpRecv::new(MAX_PACKET_BUFS, PacketBufPool::new(MAX_PACKET_BUFS), tun);
 
         let encapsulate_task = Task::spawn("encapsulate", async move {
-            let mut dst_buf = packet_pool.get();
-
             loop {
-                let packets = match buffered_tun_recv.recv(&packet_pool).await {
+                let packets = match buffered_tun_recv.recv(&mut packet_pool).await {
                     Ok(packets) => packets,
                     Err(e) => {
                         log::error!("Unexpected error on tun interface: {:?}", e);
@@ -757,6 +772,7 @@ impl<T: DeviceTransports> Device<T> {
                         None => continue,
                     };
 
+                    let mut dst_buf = packet_pool.get();
                     match peer
                         .tunnel
                         .encapsulate(&packet.into_bytes(), &mut dst_buf[..])
@@ -766,13 +782,15 @@ impl<T: DeviceTransports> Device<T> {
                             log::error!("Encapsulate error={e:?}: {e:?}");
                         }
                         TunnResult::WriteToNetwork(packet) => {
+                            let len = packet.len();
+                            dst_buf.truncate(len);
                             let endpoint_addr = peer.endpoint().addr;
                             if let Some(SocketAddr::V4(addr)) = endpoint_addr {
-                                if udp4.send_to(packet, addr.into()).await.is_err() {
+                                if udp4.send_to(dst_buf, addr.into()).await.is_err() {
                                     break;
                                 }
                             } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
-                                if udp6.send_to(packet, addr.into()).await.is_err() {
+                                if udp6.send_to(dst_buf, addr.into()).await.is_err() {
                                     break;
                                 }
                             } else {

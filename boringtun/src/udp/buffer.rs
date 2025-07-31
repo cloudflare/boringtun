@@ -27,7 +27,7 @@ impl<U: UdpTransport> Clone for BufferedUdpTransport<U> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            pool: self.pool.clone(),
+            pool: PacketBufPool::new(self.pool.capacity()),
             _send_task: self._send_task.clone(),
             _recv_task: self._recv_task.clone(),
             send_tx: self.send_tx.clone(),
@@ -52,7 +52,7 @@ impl<U: UdpTransport + 'static> BufferedUdpTransport<U> {
                 buf.clear();
 
                 if send_rx.is_empty() {
-                    let _ = udp_tx.send_to(&packet, addr).await;
+                    let _ = udp_tx.send_to(packet, addr).await;
                 } else {
                     // collect as many packets as possible into a buffer, and use send_many_to
                     [(packet, addr)]
@@ -63,7 +63,7 @@ impl<U: UdpTransport + 'static> BufferedUdpTransport<U> {
 
                     // send all packets at once
                     let _ = udp_tx
-                        .send_many_to(&mut send_many_buf, &buf)
+                        .send_many_to(&mut send_many_buf, &mut buf)
                         .await
                         .inspect_err(|e| log::trace!("send_to_many_err: {e:#}"));
 
@@ -75,7 +75,7 @@ impl<U: UdpTransport + 'static> BufferedUdpTransport<U> {
 
         let (recv_tx, recv_rx) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
 
-        let recv_pool = pool.clone();
+        let mut recv_pool: PacketBufPool = PacketBufPool::new(pool.capacity());
 
         let recv_task = Task::spawn("buffered UDP receive", async move {
             let max_number_of_packets = udp_rx.max_number_of_packets_to_recv();
@@ -137,10 +137,7 @@ impl<U: UdpTransport + 'static> BufferedUdpTransport<U> {
 impl<U: UdpTransport> UdpTransport for BufferedUdpTransport<U> {
     type SendManyBuf = U::SendManyBuf;
 
-    async fn send_to(&self, data: &[u8], destination: SocketAddr) -> io::Result<()> {
-        let mut packet = self.pool.get();
-        packet.truncate(data.len());
-        packet.copy_from_slice(data);
+    async fn send_to(&self, packet: Packet, destination: SocketAddr) -> io::Result<()> {
         self.send_tx.send((packet, destination)).await.unwrap();
         Ok(())
     }

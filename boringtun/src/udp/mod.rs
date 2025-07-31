@@ -28,7 +28,7 @@ pub trait UdpTransport: Send + Sync {
     /// Send a single UDP packet to `destination`.
     fn send_to(
         &self,
-        packet: &[u8],
+        packet: Packet,
         destination: SocketAddr,
     ) -> impl Future<Output = io::Result<()>> + Send;
 
@@ -71,7 +71,7 @@ pub trait UdpTransport: Send + Sync {
     fn send_many_to(
         &self,
         _bufs: &mut Self::SendManyBuf,
-        packets: &[(Packet, SocketAddr)],
+        packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> impl Future<Output = io::Result<()>> + Send {
         generic_send_many_to(self, packets)
     }
@@ -107,10 +107,10 @@ pub trait UdpTransport: Send + Sync {
 
 async fn generic_send_many_to<U: UdpTransport + ?Sized>(
     transport: &U,
-    packets: &[(Packet, SocketAddr)],
+    packets: &mut Vec<(Packet, SocketAddr)>,
 ) -> io::Result<()> {
-    for (packet, target) in packets {
-        transport.send_to(&packet[..], *target).await?;
+    for (packet, target) in packets.drain(..) {
+        transport.send_to(packet, target).await?;
     }
     Ok(())
 }

@@ -1,15 +1,14 @@
 use bytes::BytesMut;
-use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 use crate::packet::Packet;
 
 /// A pool of packet buffers
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PacketBufPool<const N: usize = 4096> {
     // FIXME: Allocate contiguous memory
     packet_tx: mpsc::Sender<BytesMut>,
-    packet_rx: Arc<Mutex<mpsc::Receiver<BytesMut>>>,
+    packet_rx: mpsc::Receiver<BytesMut>,
 }
 
 impl<const N: usize> PacketBufPool<N> {
@@ -17,21 +16,23 @@ impl<const N: usize> PacketBufPool<N> {
     pub fn new(capacity: usize) -> Self {
         let (packet_tx, packet_rx) = mpsc::channel(capacity);
 
-        for _ in 0..capacity {
+        /*for _ in 0..capacity {
             let _ = packet_tx.try_send(BytesMut::zeroed(N));
-        }
+        }*/
 
         PacketBufPool {
             packet_tx,
-            packet_rx: Arc::new(Mutex::new(packet_rx)),
+            packet_rx,
         }
     }
 
+    pub fn capacity(&self) -> usize {
+        self.packet_tx.capacity()
+    }
+
     /// Retrieve an unused packet from the pool
-    pub fn get(&self) -> Packet<[u8]> {
+    pub fn get(&mut self) -> Packet<[u8]> {
         self.packet_rx
-            .lock()
-            .unwrap()
             .try_recv()
             .map(|mut bytes| {
                 // grow BytesMut to `N`

@@ -24,10 +24,10 @@ pub trait IpSend: Send + Sync + Clone + 'static {
 pub trait IpRecv: Send + Sync + 'static {
     /// Receive a complete IP packet.
     // TODO: consider refactoring trait with methods that return `Packet<Ipv4>` and `Packet<Ipv6>`
-    fn recv(
-        &mut self,
-        pool: &PacketBufPool,
-    ) -> impl Future<Output = io::Result<impl Iterator<Item = Packet<Ip>> + Send>> + Send;
+    fn recv<'a>(
+        &'a mut self,
+        pool: &mut PacketBufPool,
+    ) -> impl Future<Output = io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a>> + Send;
 }
 
 /// Implementations of [IpSend] and [IpRecv] for the [::tun] crate.
@@ -44,10 +44,10 @@ mod tun_async_device {
     }
 
     impl IpRecv for Arc<::tun::AsyncDevice> {
-        async fn recv(
-            &mut self,
-            pool: &PacketBufPool,
-        ) -> io::Result<impl Iterator<Item = Packet<Ip>>> {
+        async fn recv<'a>(
+            &'a mut self,
+            pool: &mut PacketBufPool,
+        ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
             let mut packet = pool.get();
             let n = ::tun::AsyncDevice::recv(self.as_ref(), &mut packet).await?;
             packet.truncate(n);

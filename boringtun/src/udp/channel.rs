@@ -122,10 +122,10 @@ impl IpSend for PacketChannel {
 }
 
 impl IpRecv for PacketChannel {
-    async fn recv(
-        &mut self,
-        _pool: &PacketBufPool,
-    ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send> {
+    async fn recv<'a>(
+        &'a mut self,
+        _pool: &mut PacketBufPool,
+    ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a> {
         let mut tun_rx = self
             .inner
             .tun_rx
@@ -174,7 +174,7 @@ const IPV6_HEADER_LEN: usize = 40;
 impl UdpTransport for UdpChannel {
     type SendManyBuf = ();
 
-    async fn send_to(&self, udp_payload: &[u8], destination: SocketAddr) -> io::Result<()> {
+    async fn send_to(&self, udp_payload: Packet, destination: SocketAddr) -> io::Result<()> {
         // send an IP packet on the channel.
         // the IP and UDP headers will need to be added to `udp_payload`
 
@@ -188,7 +188,7 @@ impl UdpTransport for UdpChannel {
                             self.source_port,
                             *dest.ip(),
                             dest.port(),
-                            udp_payload,
+                            &udp_payload,
                         )
                         .await,
                     )
@@ -204,7 +204,7 @@ impl UdpTransport for UdpChannel {
                             self.source_port,
                             dest.ip(),
                             dest.port(),
-                            udp_payload,
+                            &udp_payload,
                             self.connection_id,
                         )
                         .await,
