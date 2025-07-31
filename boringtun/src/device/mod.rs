@@ -653,7 +653,6 @@ impl<T: DeviceTransports> Device<T> {
                     continue;
                 };
                 let mut peer = peer.lock().await;
-                let mut flush = false;
                 match peer
                     .tunnel
                     .handle_verified_packet(parsed_packet, &mut dst_buf[..])
@@ -661,12 +660,32 @@ impl<T: DeviceTransports> Device<T> {
                     TunnResult::Done => (),
                     TunnResult::Err(_) => continue,
                     TunnResult::WriteToNetwork(packet) => {
-                        flush = true;
                         let len = packet.len();
                         dst_buf.truncate(len);
                         if let Err(_err) = udp.send_to(dst_buf, addr).await {
                             log::trace!("udp.send_to failed");
                             break;
+                        }
+
+                        // Flush pending queue
+                        loop {
+                            let mut dst_buf = packet_pool.get();
+                            match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
+                                TunnResult::WriteToNetwork(packet) => {
+                                    let len = packet.len();
+                                    dst_buf.truncate(len);
+                                    if let Err(_err) = udp.send_to(dst_buf, addr).await {
+                                        log::trace!("udp.send_to failed");
+                                        break;
+                                    }
+                                }
+                                TunnResult::Done => break,
+                                // TODO: why do we ignore this error?
+                                TunnResult::Err(_) => continue,
+
+                                // TODO: fix the types so we can't end up here.
+                                _ => panic!("unexpected TunnResult"),
+                            }
                         }
                     }
                     TunnResult::WriteToTunnelV4(packet, addr) => {
@@ -698,29 +717,6 @@ impl<T: DeviceTransports> Device<T> {
                         }
                     }
                 };
-
-                if flush {
-                    // Flush pending queue
-                    loop {
-                        let mut dst_buf = packet_pool.get();
-                        match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
-                            TunnResult::WriteToNetwork(packet) => {
-                                let len = packet.len();
-                                dst_buf.truncate(len);
-                                if let Err(_err) = udp.send_to(dst_buf, addr).await {
-                                    log::trace!("udp.send_to failed");
-                                    break;
-                                }
-                            }
-                            TunnResult::Done => break,
-                            // TODO: why do we ignore this error?
-                            TunnResult::Err(_) => continue,
-
-                            // TODO: fix the types so we can't end up here.
-                            _ => panic!("unexpected TunnResult"),
-                        }
-                    }
-                }
             }
         });
 
