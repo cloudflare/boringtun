@@ -29,8 +29,11 @@ use crate::packet::{Packet, PacketBufPool};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::{IpRecv, IpSend};
-use crate::udp::buffer::BufferedUdpTransport;
-use crate::udp::{UdpSocketFactory, UdpTransport, UdpTransportFactory, UdpTransportFactoryParams};
+use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
+use crate::udp::{
+    UdpRecv, UdpSend, UdpSocketFactory, UdpTransport, UdpTransportFactory,
+    UdpTransportFactoryParams,
+};
 use crate::x25519;
 use allowed_ips::AllowedIps;
 use peer::{AllowedIP, Peer};
@@ -145,8 +148,8 @@ pub struct Device<T: DeviceTransports> {
 }
 
 pub(crate) struct Connection<T: DeviceTransports> {
-    udp4: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-    udp6: Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+    udp4: <T::UdpTransportFactory as UdpTransportFactory>::Send,
+    udp6: <T::UdpTransportFactory as UdpTransportFactory>::Send,
 
     listen_port: Option<u16>,
 
@@ -166,26 +169,25 @@ pub(crate) struct Connection<T: DeviceTransports> {
 impl<T: DeviceTransports> Connection<T> {
     pub async fn set_up(device: Arc<RwLock<Device<T>>>) -> Result<Self, Error> {
         let mut device_guard = device.write().await;
-        let (udp4, udp6) = device_guard.open_listen_socket().await?;
+        let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device_guard.open_listen_socket().await?;
         drop(device_guard);
 
-        let buffered_udp_v4 = BufferedUdpTransport::new(
-            MAX_PACKET_BUFS,
-            udp4.clone(),
-            PacketBufPool::new(MAX_PACKET_BUFS),
-        );
-        let buffered_udp_v6 = BufferedUdpTransport::new(
-            MAX_PACKET_BUFS,
-            udp6.clone(),
-            PacketBufPool::new(MAX_PACKET_BUFS),
-        );
+        let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
+        let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
+
+        let buffered_udp_rx_v4 = BufferedUdpReceive::new::<
+            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+        >(MAX_PACKET_BUFS, udp4_rx);
+        let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
+            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+        >(MAX_PACKET_BUFS, udp6_rx);
 
         let outgoing = Task::spawn(
             "handle_outgoing",
             Device::handle_outgoing(
                 Arc::downgrade(&device),
-                buffered_udp_v4.clone(),
-                buffered_udp_v6.clone(),
+                buffered_udp_tx_v4.clone(),
+                buffered_udp_tx_v6.clone(),
                 PacketBufPool::new(MAX_PACKET_BUFS),
             ),
         );
@@ -193,8 +195,8 @@ impl<T: DeviceTransports> Connection<T> {
             "handle_timers",
             Device::handle_timers(
                 Arc::downgrade(&device),
-                buffered_udp_v4.clone(),
-                buffered_udp_v6.clone(),
+                buffered_udp_tx_v4.clone(),
+                buffered_udp_tx_v6.clone(),
             ),
         );
 
@@ -202,7 +204,8 @@ impl<T: DeviceTransports> Connection<T> {
             "handle_incoming ipv4",
             Device::handle_incoming(
                 Arc::downgrade(&device),
-                buffered_udp_v4,
+                buffered_udp_tx_v4,
+                buffered_udp_rx_v4,
                 PacketBufPool::new(MAX_PACKET_BUFS),
             ),
         );
@@ -210,15 +213,16 @@ impl<T: DeviceTransports> Connection<T> {
             "handle_incoming ipv6",
             Device::handle_incoming(
                 Arc::downgrade(&device),
-                buffered_udp_v6.clone(),
+                buffered_udp_tx_v6,
+                buffered_udp_rx_v6,
                 PacketBufPool::new(MAX_PACKET_BUFS),
             ),
         );
 
         Ok(Connection {
-            listen_port: udp4.local_addr()?.map(|sa| sa.port()),
-            udp4,
-            udp6,
+            listen_port: udp4_tx.local_addr()?.map(|sa| sa.port()),
+            udp4: udp4_tx,
+            udp6: udp6_tx,
             incoming_ipv4,
             incoming_ipv6,
             timers,
@@ -460,8 +464,10 @@ impl<T: DeviceTransports> Device<T> {
         &mut self,
     ) -> Result<
         (
-            Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-            Arc<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+            <T::UdpTransportFactory as UdpTransportFactory>::Send,
+            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+            <T::UdpTransportFactory as UdpTransportFactory>::Send,
+            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
         ),
         Error,
     > {
@@ -472,8 +478,8 @@ impl<T: DeviceTransports> Device<T> {
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         };
-        let (udp_sock4, udp_sock6) = self.udp_factory.bind(&params).await?;
-        Ok((udp_sock4, udp_sock6))
+        let ((udp4_tx, udp4_rx), (udp6_tx, udp6_rx)) = self.udp_factory.bind(&params).await?;
+        Ok((udp4_tx, udp4_rx, udp6_tx, udp6_rx))
     }
 
     async fn set_key(&mut self, private_key: x25519::StaticSecret) -> Reconfigure {
@@ -530,8 +536,8 @@ impl<T: DeviceTransports> Device<T> {
 
     async fn handle_timers(
         device: Weak<RwLock<Self>>,
-        udp4: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-        udp6: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+        udp4: BufferedUdpSend,
+        udp6: BufferedUdpSend,
     ) {
         // TODO: fix rate limiting
         /*
@@ -591,7 +597,8 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
-        udp: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+        udp_tx: BufferedUdpSend,
+        mut udp_rx: BufferedUdpReceive,
         mut packet_pool: PacketBufPool,
     ) -> Result<(), Error> {
         let (tun, private_key, public_key, rate_limiter) = {
@@ -612,7 +619,7 @@ impl<T: DeviceTransports> Device<T> {
             // NOTE: Reusing this appears to be faster than grabbing a buffer and using it for replies
             let mut src_buf = packet_pool.get();
 
-            while let Ok((n, addr)) = udp.recv_from(&mut src_buf[..]).await {
+            while let Ok((n, addr)) = udp_rx.recv_from(&mut src_buf[..]).await {
                 debug_assert!(n <= src_buf.len());
                 let mut dst_buf = packet_pool.get();
 
@@ -625,7 +632,7 @@ impl<T: DeviceTransports> Device<T> {
                     Err(TunnResult::WriteToNetwork(cookie)) => {
                         let len = cookie.len();
                         dst_buf.truncate(len);
-                        if let Err(_err) = udp.send_to(dst_buf, addr).await {
+                        if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
                             log::trace!("udp.send_to failed");
                             break;
                         }
@@ -662,7 +669,7 @@ impl<T: DeviceTransports> Device<T> {
                     TunnResult::WriteToNetwork(packet) => {
                         let len = packet.len();
                         dst_buf.truncate(len);
-                        if let Err(_err) = udp.send_to(dst_buf, addr).await {
+                        if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
                             log::trace!("udp.send_to failed");
                             break;
                         }
@@ -674,7 +681,7 @@ impl<T: DeviceTransports> Device<T> {
                                 TunnResult::WriteToNetwork(packet) => {
                                     let len = packet.len();
                                     dst_buf.truncate(len);
-                                    if let Err(_err) = udp.send_to(dst_buf, addr).await {
+                                    if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
                                         log::trace!("udp.send_to failed");
                                         break;
                                     }
@@ -728,8 +735,8 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
-        udp4: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
-        udp6: BufferedUdpTransport<<T::UdpTransportFactory as UdpTransportFactory>::Transport>,
+        udp4: BufferedUdpSend,
+        udp6: BufferedUdpSend,
         mut packet_pool: PacketBufPool,
     ) {
         let tun = {

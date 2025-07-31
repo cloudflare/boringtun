@@ -8,7 +8,10 @@ use std::{
 };
 use tokio::io::Interest;
 
-use crate::packet::Packet;
+use crate::{
+    packet::Packet,
+    udp::{UdpRecv, UdpSend},
+};
 
 use super::UdpTransport;
 
@@ -19,8 +22,13 @@ pub struct SendmmsgBuf {
     targets: Vec<Option<SockaddrStorage>>,
 }
 
-impl UdpTransport for tokio::net::UdpSocket {
+impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
+
+    async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
+        tokio::net::UdpSocket::send_to(&self.inner, &packet, target).await?;
+        Ok(())
+    }
 
     async fn send_many_to(
         &self,
@@ -30,7 +38,7 @@ impl UdpTransport for tokio::net::UdpSocket {
         let n = packets.len();
         debug_assert!(n <= MAX_PACKET_COUNT);
 
-        let fd = self.as_raw_fd();
+        let fd = self.inner.as_raw_fd();
 
         buf.targets.clear();
         packets
@@ -49,20 +57,21 @@ impl UdpTransport for tokio::net::UdpSocket {
             .for_each(|(i, packet)| packets_buf[i] = packet);
         let pkts = &packets_buf[..n];
 
-        self.async_io(Interest::WRITABLE, || {
-            let mut multiheaders = MultiHeaders::preallocate(pkts.len(), None);
-            nix::sys::socket::sendmmsg(
-                fd,
-                &mut multiheaders,
-                pkts,
-                &buf.targets[..],
-                [],
-                MsgFlags::MSG_DONTWAIT,
-            )?;
+        self.inner
+            .async_io(Interest::WRITABLE, || {
+                let mut multiheaders = MultiHeaders::preallocate(pkts.len(), None);
+                nix::sys::socket::sendmmsg(
+                    fd,
+                    &mut multiheaders,
+                    pkts,
+                    &buf.targets[..],
+                    [],
+                    MsgFlags::MSG_DONTWAIT,
+                )?;
 
-            Ok(())
-        })
-        .await?;
+                Ok(())
+            })
+            .await?;
 
         packets.clear();
 
@@ -72,30 +81,28 @@ impl UdpTransport for tokio::net::UdpSocket {
     fn max_number_of_packets_to_send(&self) -> usize {
         MAX_PACKET_COUNT
     }
+}
 
+impl UdpRecv for super::UdpSocket {
     fn max_number_of_packets_to_recv(&self) -> usize {
         MAX_PACKET_COUNT
     }
 
-    async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-        self.send_to(&packet, target).await?;
-        Ok(())
-    }
-
-    async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-        self.recv_from(buf).await
+    async fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        tokio::net::UdpSocket::recv_from(&self.inner, buf).await
     }
 
     async fn recv_many_from(
-        &self,
+        &mut self,
         bufs: &mut [Packet],
         source_addrs: &mut [Option<SocketAddr>],
     ) -> io::Result<usize> {
         debug_assert_eq!(bufs.len(), source_addrs.len());
 
-        let fd = self.as_raw_fd();
+        let fd = self.inner.as_raw_fd();
 
         let num_bufs = self
+            .inner
             .async_io(Interest::READABLE, move || {
                 let mut headers = MultiHeaders::<SockaddrIn>::preallocate(bufs.len(), None);
 
@@ -132,14 +139,16 @@ impl UdpTransport for tokio::net::UdpSocket {
 
         Ok(num_bufs)
     }
+}
 
+impl UdpTransport for super::UdpSocket {
     fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
-        self.local_addr().map(Some)
+        super::UdpSocket::local_addr(self).map(Some)
     }
 
     #[cfg(target_os = "linux")]
     fn set_fwmark(&self, mark: u32) -> io::Result<()> {
-        setsockopt(self, sockopt::Mark, &mark)?;
+        setsockopt(&self.inner, sockopt::Mark, &mark)?;
         Ok(())
     }
 }

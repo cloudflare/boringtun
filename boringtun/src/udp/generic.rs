@@ -3,21 +3,30 @@ use std::{
     net::SocketAddr,
 };
 
+use crate::{
+    packet::Packet,
+    udp::{UdpRecv, UdpSend},
+};
+
 use super::UdpTransport;
 
-impl UdpTransport for tokio::net::UdpSocket {
+impl UdpTransport for super::UdpSocket {
+    fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
+        super::UdpSocket::local_addr(self).map(Some)
+    }
+}
+
+impl UdpSend for super::UdpSocket {
     type SendManyBuf = ();
 
-    async fn send_to(&self, packet: &[u8], target: SocketAddr) -> io::Result<()> {
-        self.send_to(packet, target).await?;
+    async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
+        self.inner.send_to(&packet, target).await?;
         Ok(())
     }
+}
 
-    async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-        self.recv_from(buf).await
-    }
-
-    fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
-        self.local_addr().map(Some)
+impl UdpRecv for super::UdpSocket {
+    async fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        self.inner.recv_from(buf).await
     }
 }

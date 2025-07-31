@@ -13,7 +13,7 @@ use zerocopy::{FromBytes, IntoBytes, TryFromBytes};
 use crate::{
     packet::{Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, PacketBufPool, Udp},
     tun::{IpRecv, IpSend},
-    udp::{UdpTransport, UdpTransportFactory},
+    udp::{UdpRecv, UdpSend, UdpTransport, UdpTransportFactory},
 };
 
 use super::UdpTransportFactoryParams;
@@ -137,12 +137,13 @@ impl IpRecv for PacketChannel {
 }
 
 impl UdpTransportFactory for PacketChannel {
-    type Transport = UdpChannel;
+    type Send = Arc<UdpChannel>;
+    type Recv = Arc<UdpChannel>;
 
     async fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> io::Result<(Arc<Self::Transport>, Arc<Self::Transport>)> {
+    ) -> io::Result<((Self::Send, Self::Recv), (Self::Send, Self::Recv))> {
         let connection_id = rand_core::OsRng.next_u32().max(1);
         let source_port = match params.port {
             0 => rand_u16().max(1),
@@ -163,7 +164,10 @@ impl UdpTransportFactory for PacketChannel {
             inner: self.inner.clone(),
         });
 
-        Ok((channel_v4, channel_v6))
+        Ok((
+            (channel_v4.clone(), channel_v4),
+            (channel_v6.clone(), channel_v6),
+        ))
     }
 }
 
@@ -171,7 +175,9 @@ const UDP_HEADER_LEN: usize = 8;
 const IPV4_HEADER_LEN: usize = 20;
 const IPV6_HEADER_LEN: usize = 40;
 
-impl UdpTransport for UdpChannel {
+impl UdpTransport for Arc<UdpChannel> {}
+
+impl UdpSend for Arc<UdpChannel> {
     type SendManyBuf = ();
 
     async fn send_to(&self, udp_payload: Packet, destination: SocketAddr) -> io::Result<()> {
@@ -216,8 +222,10 @@ impl UdpTransport for UdpChannel {
 
         Ok(())
     }
+}
 
-    async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+impl UdpRecv for Arc<UdpChannel> {
+    async fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         match self.ip_version {
             IpVersion::V4 => {
                 let mut udp_rx = self

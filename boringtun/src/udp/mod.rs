@@ -22,22 +22,7 @@ pub mod channel;
 /// An abstraction of a UDP socket.
 ///
 /// This allows us to, for example, swap out UDP sockets with a channel.
-pub trait UdpTransport: Send + Sync {
-    type SendManyBuf: Default + Send + Sync;
-
-    /// Send a single UDP packet to `destination`.
-    fn send_to(
-        &self,
-        packet: Packet,
-        destination: SocketAddr,
-    ) -> impl Future<Output = io::Result<()>> + Send;
-
-    /// Receive a single UDP packet.
-    fn recv_from(
-        &self,
-        buf: &mut [u8],
-    ) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + Send;
-
+pub trait UdpTransport: Send + Sync + Clone {
     // --- Optional Methods ---
 
     /// Get the port in use, if any.
@@ -54,27 +39,22 @@ pub trait UdpTransport: Send + Sync {
     fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
         Ok(())
     }
+}
 
-    /// The maximum number of packets that can be passed to [UdpTransport::send_many_to].
-    fn max_number_of_packets_to_send(&self) -> usize {
-        1
-    }
-
+/// An abstraction of a UDP socket.
+///
+/// This allows us to, for example, swap out UDP sockets with a channel.
+pub trait UdpRecv: Send + Sync {
     /// The maximum number of packets that can be passed to [UdpTransport::recv_many_from].
     fn max_number_of_packets_to_recv(&self) -> usize {
         1
     }
 
-    /// Send up to `x` UDP packets to the destination,
-    /// where `x` is [UdpTransport::max_number_of_packets_to_send];
-    // TODO: define how many packets are sent in case of an error.
-    fn send_many_to(
-        &self,
-        _bufs: &mut Self::SendManyBuf,
-        packets: &mut Vec<(Packet, SocketAddr)>,
-    ) -> impl Future<Output = io::Result<()>> + Send {
-        generic_send_many_to(self, packets)
-    }
+    /// Receive a single UDP packet.
+    fn recv_from(
+        &mut self,
+        buf: &mut [u8],
+    ) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + Send;
 
     /// Receive up to `x` packets at once,
     /// where `x` is [UdpTransport::max_number_of_packets_to_recv].
@@ -87,7 +67,7 @@ pub trait UdpTransport: Send + Sync {
     //
     // The default implementation always reads 1 packet.
     fn recv_many_from(
-        &self,
+        &mut self,
         bufs: &mut [Packet],
         source_addrs: &mut [Option<SocketAddr>],
     ) -> impl Future<Output = io::Result<usize>> + Send {
@@ -105,7 +85,37 @@ pub trait UdpTransport: Send + Sync {
     }
 }
 
-async fn generic_send_many_to<U: UdpTransport + ?Sized>(
+/// An abstraction of a UDP socket.
+///
+/// This allows us to, for example, swap out UDP sockets with a channel.
+pub trait UdpSend: Send + Sync {
+    type SendManyBuf: Default + Send + Sync;
+
+    /// Send a single UDP packet to `destination`.
+    fn send_to(
+        &self,
+        packet: Packet,
+        destination: SocketAddr,
+    ) -> impl Future<Output = io::Result<()>> + Send;
+
+    /// The maximum number of packets that can be passed to [UdpTransport::send_many_to].
+    fn max_number_of_packets_to_send(&self) -> usize {
+        1
+    }
+
+    /// Send up to `x` UDP packets to the destination,
+    /// where `x` is [UdpTransport::max_number_of_packets_to_send];
+    // TODO: define how many packets are sent in case of an error.
+    fn send_many_to(
+        &self,
+        _bufs: &mut Self::SendManyBuf,
+        packets: &mut Vec<(Packet, SocketAddr)>,
+    ) -> impl Future<Output = io::Result<()>> + Send {
+        generic_send_many_to(self, packets)
+    }
+}
+
+async fn generic_send_many_to<U: UdpSend + ?Sized>(
     transport: &U,
     packets: &mut Vec<(Packet, SocketAddr)>,
 ) -> io::Result<()> {
@@ -113,6 +123,42 @@ async fn generic_send_many_to<U: UdpTransport + ?Sized>(
         transport.send_to(packet, target).await?;
     }
     Ok(())
+}
+
+/// Default UDP socket implementation
+#[derive(Clone)]
+pub struct UdpSocket {
+    inner: Arc<tokio::net::UdpSocket>,
+}
+
+impl UdpSocket {
+    pub fn bind(addr: SocketAddr) -> io::Result<Self> {
+        let domain = match addr {
+            SocketAddr::V4(..) => socket2::Domain::IPV4,
+            SocketAddr::V6(..) => socket2::Domain::IPV6,
+        };
+
+        // Construct the socket using `socket2` because we need to set the reuse_address flag.
+        let udp_sock =
+            socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
+        udp_sock.set_nonblocking(true)?;
+        udp_sock.set_reuse_address(true)?;
+        udp_sock.set_recv_buffer_size(UDP_RECV_BUFFER_SIZE)?;
+        udp_sock.set_send_buffer_size(UDP_SEND_BUFFER_SIZE)?;
+        // TODO: set forced buffer sizes?
+
+        udp_sock.bind(&addr.into())?;
+
+        let inner = tokio::net::UdpSocket::from_std(udp_sock.into())?;
+
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.inner.local_addr()
+    }
 }
 
 #[derive(Clone)]
@@ -129,7 +175,8 @@ pub struct UdpTransportFactoryParams {
 ///
 /// See [UdpTransport].
 pub trait UdpTransportFactory: Send + Sync + 'static {
-    type Transport: UdpTransport + 'static;
+    type Send: UdpSend + UdpTransport + 'static;
+    type Recv: UdpRecv + 'static;
 
     /// Bind sockets for sending and receiving UDP.
     ///
@@ -138,7 +185,7 @@ pub trait UdpTransportFactory: Send + Sync + 'static {
     fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> impl Future<Output = io::Result<(Arc<Self::Transport>, Arc<Self::Transport>)>> + Send;
+    ) -> impl Future<Output = io::Result<((Self::Send, Self::Recv), (Self::Send, Self::Recv))>> + Send;
 }
 
 pub struct UdpSocketFactory;
@@ -147,41 +194,21 @@ const UDP_RECV_BUFFER_SIZE: usize = 7 * 1024 * 1024;
 const UDP_SEND_BUFFER_SIZE: usize = 7 * 1024 * 1024;
 
 impl UdpTransportFactory for UdpSocketFactory {
-    type Transport = tokio::net::UdpSocket;
+    type Send = UdpSocket;
+    type Recv = UdpSocket;
 
     async fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> io::Result<(Arc<Self::Transport>, Arc<Self::Transport>)> {
-        fn bind(addr: SocketAddr) -> io::Result<Arc<tokio::net::UdpSocket>> {
-            let domain = match addr {
-                SocketAddr::V4(..) => socket2::Domain::IPV4,
-                SocketAddr::V6(..) => socket2::Domain::IPV6,
-            };
-
-            // Construct the socket using `socket2` because we need to set the reuse_address flag.
-            let udp_sock =
-                socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
-            udp_sock.set_nonblocking(true)?;
-            udp_sock.set_reuse_address(true)?;
-
-            udp_sock.set_recv_buffer_size(UDP_RECV_BUFFER_SIZE)?;
-            udp_sock.set_send_buffer_size(UDP_SEND_BUFFER_SIZE)?;
-            // TODO: set forced buffer sizes?
-
-            udp_sock.bind(&addr.into())?;
-
-            tokio::net::UdpSocket::from_std(udp_sock.into()).map(Arc::new)
-        }
-
+    ) -> io::Result<((Self::Send, Self::Recv), (Self::Send, Self::Recv))> {
         let mut port = params.port;
-        let udp_v4 = bind((params.addr_v4, port).into())?;
+        let udp_v4 = UdpSocket::bind((params.addr_v4, port).into())?;
         if port == 0 {
             // The socket is using a random port, copy it so we can re-use it for IPv6.
-            port = tokio::net::UdpSocket::local_addr(&udp_v4)?.port();
+            port = UdpSocket::local_addr(&udp_v4)?.port();
         }
 
-        let udp_v6 = bind((params.addr_v6, port).into())?;
+        let udp_v6 = UdpSocket::bind((params.addr_v6, port).into())?;
 
         #[cfg(target_os = "linux")]
         if let Some(mark) = params.fwmark {
@@ -189,6 +216,6 @@ impl UdpTransportFactory for UdpSocketFactory {
             udp_v6.set_fwmark(mark)?;
         }
 
-        Ok((udp_v4, udp_v6))
+        Ok(((udp_v4.clone(), udp_v4), (udp_v6.clone(), udp_v6)))
     }
 }
