@@ -125,15 +125,18 @@ impl UdpRecv for super::UdpSocket {
             .async_io(Interest::READABLE, move || {
                 let headers = &mut recv_many_bufs.headers;
 
-                let mut msgs: Vec<_> = bufs
-                    .iter_mut()
-                    .map(|buf| [IoSliceMut::new(&mut buf[..])])
-                    .collect();
+                let mut io_slices: [[IoSliceMut; 1]; MAX_PACKET_COUNT] =
+                    std::array::from_fn(|_| [IoSliceMut::new(&mut [])]);
+
+                let num_packets = bufs.len();
+                bufs.iter_mut()
+                    .enumerate()
+                    .for_each(|(i, packet)| io_slices[i] = [IoSliceMut::new(&mut packet[..])]);
 
                 let results = nix::sys::socket::recvmmsg(
                     fd,
                     headers,
-                    &mut msgs,
+                    &mut io_slices[..num_packets],
                     MsgFlags::MSG_DONTWAIT,
                     None,
                 )?;
