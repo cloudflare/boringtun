@@ -1,4 +1,5 @@
 use std::{
+    fmt::{self, Debug},
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
@@ -45,7 +46,7 @@ pub use udp::*;
 /// let ip_header_bytes = ip_header.as_bytes();
 ///
 /// let raw_packet: Packet<[u8]> = Packet::copy_from_slice(ip_header_bytes);
-/// let ipv4_packet: Packet<Ipv4> = raw_packet.try_into_ip().unwrap().unwrap_left();
+/// let ipv4_packet: Packet<Ipv4> = raw_packet.try_into_ipvx().unwrap().unwrap_left();
 /// assert_eq!(&ip_header, &ipv4_packet.header);
 /// ```
 pub struct Packet<Kind: ?Sized = [u8]> {
@@ -289,3 +290,12 @@ impl<Kind> Clone for Packet<Kind> {
     }
 }
  */
+
+impl<Kind: Debug> Debug for Packet<Kind>
+where
+    Kind: CheckedPayload + ?Sized,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Packet").field(&self.deref()).finish()
+    }
+}
