@@ -196,6 +196,11 @@ impl Peer {
             allowed_ip: vec![],
         }
     }
+
+    pub fn with_endpoint(mut self, endpoint: impl Into<SocketAddr>) -> Self {
+        self.endpoint = Some(endpoint.into());
+        self
+    }
 }
 
 impl SetPeer {
@@ -207,6 +212,11 @@ impl SetPeer {
             update_only: false,
             replace_allowed_ips: false,
         }
+    }
+
+    pub fn with_endpoint(mut self, endpoint: impl Into<SocketAddr>) -> Self {
+        self.peer.endpoint = Some(endpoint.into());
+        self
     }
 }
 
