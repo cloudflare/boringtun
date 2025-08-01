@@ -88,18 +88,14 @@ impl BufferedUdpReceive {
             let mut recv_many_buf = Default::default();
 
             loop {
-                while packet_bufs.len() < max_number_of_packets {
-                    packet_bufs.push(recv_pool.get());
-                }
-                let n_available_bufs = packet_bufs.len();
-
                 // Read packets from the socket.
                 // TODO: src in PacketBuf?
-                let Ok(num_packets) = udp_rx
+                let Ok(()) = udp_rx
                     .recv_many_from(
                         &mut recv_many_buf,
-                        &mut packet_bufs[..n_available_bufs],
-                        &mut source_addrs[..n_available_bufs],
+                        &mut recv_pool,
+                        &mut packet_bufs,
+                        &mut source_addrs[..],
                     )
                     .await
                 else {
@@ -107,9 +103,7 @@ impl BufferedUdpReceive {
                     return;
                 };
 
-                for (i, packet_buf) in packet_bufs.drain(..num_packets).enumerate() {
-                    let src = source_addrs[i];
-
+                for (packet_buf, &src) in packet_bufs.drain(..).zip(source_addrs.iter()) {
                     let Some(src) = src else {
                         log::trace!("recv_many_from returned packet with no src; ignoring");
                         continue;
@@ -140,13 +134,11 @@ impl BufferedUdpReceive {
 impl UdpRecv for BufferedUdpReceive {
     type RecvManyBuf = ();
 
-    async fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+    async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
         let Some((rx_packet, src)) = self.recv_rx.recv().await else {
             return Err(io::Error::other("No packet available"));
         };
-        let len = rx_packet.len();
-        buf[..len].copy_from_slice(&rx_packet);
-        Ok((len, src))
+        Ok((rx_packet, src))
     }
 
     // TODO: implement recv_from many with mpsc::Receiver::recv_many?

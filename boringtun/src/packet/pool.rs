@@ -89,9 +89,7 @@ pub struct ReturnToPool {
 impl Drop for ReturnToPool {
     fn drop(&mut self) {
         let p = mem::take(&mut self.pointer_to_start_of_allocation);
-        if self.drop_tx.try_send(p).is_err() {
-            log::debug!("capacity :(");
-        }
+        let _ = self.drop_tx.try_send(p);
     }
 }
 

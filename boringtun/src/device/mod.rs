@@ -617,29 +617,23 @@ impl<T: DeviceTransports> Device<T> {
 
         let decapsulate_task = Task::spawn("decapsulate", async move {
             // NOTE: Reusing this appears to be faster than grabbing a buffer and using it for replies
-            let mut src_buf = packet_pool.get();
-
-            while let Ok((n, addr)) = udp_rx.recv_from(&mut src_buf[..]).await {
-                debug_assert!(n <= src_buf.len());
+            while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
                 let mut dst_buf = packet_pool.get();
 
-                let parsed_packet = match rate_limiter.verify_packet(
-                    Some(addr.ip()),
-                    &src_buf[..n],
-                    &mut dst_buf[..],
-                ) {
-                    Ok(packet) => packet,
-                    Err(TunnResult::WriteToNetwork(cookie)) => {
-                        let len = cookie.len();
-                        dst_buf.truncate(len);
-                        if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
-                            log::trace!("udp.send_to failed");
-                            break;
+                let parsed_packet =
+                    match rate_limiter.verify_packet(Some(addr.ip()), &src_buf, &mut dst_buf[..]) {
+                        Ok(packet) => packet,
+                        Err(TunnResult::WriteToNetwork(cookie)) => {
+                            let len = cookie.len();
+                            dst_buf.truncate(len);
+                            if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
+                                log::trace!("udp.send_to failed");
+                                break;
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                    Err(_) => continue,
-                };
+                        Err(_) => continue,
+                    };
 
                 let Some(device) = device.upgrade() else {
                     break;

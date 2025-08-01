@@ -1,6 +1,10 @@
-use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrIn, SockaddrStorage};
+use bytes::BytesMut;
 #[cfg(target_os = "linux")]
 use nix::sys::socket::{setsockopt, sockopt};
+use nix::{
+    cmsg_space,
+    sys::socket::{ControlMessageOwned, MsgFlags, MultiHeaders, SockaddrIn, SockaddrStorage},
+};
 use std::{
     io::{self, IoSlice, IoSliceMut},
     net::SocketAddr,
@@ -9,13 +13,19 @@ use std::{
 use tokio::io::Interest;
 
 use crate::{
-    packet::Packet,
+    packet::{Packet, PacketBufPool},
     udp::{UdpRecv, UdpSend},
 };
 
 use super::UdpTransport;
 
+/// Max number of packets/messages for sendmmsg/recvmmsg
 const MAX_PACKET_COUNT: usize = 100;
+/// Number of segments per message received
+const MAX_SEGMENTS: usize = 64;
+/// Size of a single UDP packet with multiple segments
+// TODO: Fix constant
+const MAX_GRO_SIZE: usize = MAX_SEGMENTS * 4096;
 
 #[derive(Default)]
 pub struct SendmmsgBuf {
@@ -84,8 +94,7 @@ impl UdpSend for super::UdpSocket {
 }
 
 pub struct RecvManyBuf {
-    headers: MultiHeaders<SockaddrIn>,
-    lengths: Vec<usize>,
+    gro_bufs: Box<[BytesMut; MAX_PACKET_COUNT]>,
 }
 
 // SAFETY: MultiHeaders contains pointers, but we only ever mutate data in [Self::recv_many_from].
@@ -94,10 +103,12 @@ unsafe impl Send for RecvManyBuf {}
 
 impl Default for RecvManyBuf {
     fn default() -> Self {
-        Self {
-            headers: MultiHeaders::<SockaddrIn>::preallocate(MAX_PACKET_COUNT, None),
-            lengths: vec![],
-        }
+        let mut gro_buf = BytesMut::zeroed(MAX_PACKET_COUNT * MAX_GRO_SIZE);
+        let gro_bufs = [(); MAX_PACKET_COUNT];
+        let gro_bufs = gro_bufs.map(|_| gro_buf.split_to(MAX_GRO_SIZE));
+        let gro_bufs = Box::new(gro_bufs);
+
+        Self { gro_bufs }
     }
 }
 
@@ -105,66 +116,98 @@ impl UdpRecv for super::UdpSocket {
     type RecvManyBuf = RecvManyBuf;
 
     fn max_number_of_packets_to_recv(&self) -> usize {
-        MAX_PACKET_COUNT
+        MAX_SEGMENTS * MAX_PACKET_COUNT
     }
 
-    async fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-        tokio::net::UdpSocket::recv_from(&self.inner, buf).await
+    async fn recv_from(&mut self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
+        let mut buf = pool.get();
+        let (n, src) = self.inner.recv_from(&mut buf).await?;
+        buf.truncate(n);
+        Ok((buf, src))
     }
 
     async fn recv_many_from(
         &mut self,
         recv_many_bufs: &mut Self::RecvManyBuf,
-        bufs: &mut [Packet],
+        pool: &mut PacketBufPool,
+        bufs: &mut Vec<Packet>,
         source_addrs: &mut [Option<SocketAddr>],
-    ) -> io::Result<usize> {
-        debug_assert_eq!(bufs.len(), source_addrs.len());
-
+    ) -> io::Result<()> {
         let fd = self.inner.as_raw_fd();
 
-        let num_bufs = self
-            .inner
+        self.inner
             .async_io(Interest::READABLE, move || {
-                let headers = &mut recv_many_bufs.headers;
+                // TODO: the CMSG space cannot be reused, so we must allocate new headers each time
+                // [ControlMessageOwned::UdpGroSegments(i32)] contains the size of all smaller packets/segments
+                let headers = &mut MultiHeaders::<SockaddrIn>::preallocate(
+                    MAX_PACKET_COUNT,
+                    Some(cmsg_space!(i32)),
+                );
 
                 let mut io_slices: [[IoSliceMut; 1]; MAX_PACKET_COUNT] =
                     std::array::from_fn(|_| [IoSliceMut::new(&mut [])]);
 
-                let num_packets = bufs.len();
-                bufs.iter_mut()
-                    .enumerate()
-                    .for_each(|(i, packet)| io_slices[i] = [IoSliceMut::new(&mut packet[..])]);
+                for (i, buf) in recv_many_bufs.gro_bufs.iter_mut().enumerate() {
+                    io_slices[i] = [IoSliceMut::new(&mut buf[..])];
+                }
 
                 let results = nix::sys::socket::recvmmsg(
                     fd,
                     headers,
-                    &mut io_slices[..num_packets],
+                    &mut io_slices[..MAX_PACKET_COUNT],
                     MsgFlags::MSG_DONTWAIT,
                     None,
                 )?;
 
-                recv_many_bufs
-                    .lengths
-                    .extend(
-                        results
-                            .zip(source_addrs.iter_mut())
-                            .map(|(result, out_addr)| {
-                                *out_addr = result.address.map(|addr| addr.into());
-                                result.bytes
-                            }),
-                    );
+                let mut bufs_index = 0;
 
-                let num_bufs = recv_many_bufs.lengths.len();
+                for result in results {
+                    let iov = result.iovs().next().expect("we create exactly one IoSlice");
 
-                for (buf, length) in bufs.iter_mut().zip(recv_many_bufs.lengths.drain(..)) {
-                    buf.truncate(length);
+                    // TODO: is this true? Under what circumstance can the cmsg buffer overflow?
+                    let mut cmsgs = result.cmsgs().expect("we have allocated enough memory");
+
+                    let gro_size = cmsgs
+                        .find_map(|cmsg| match cmsg {
+                            ControlMessageOwned::UdpGroSegments(gro_size) => Some(gro_size),
+                            _ => None,
+                        })
+                        .and_then(|gro_size| usize::try_from(gro_size).ok())
+                        .filter(|&gro_size| gro_size > 0);
+
+                    // Generic Receive Offload
+                    if let Some(gro_size) = gro_size {
+                        // Divide packet into GRO-sized segments and copy them into Packet bufs
+                        for gro_segment in iov.chunks(gro_size) {
+                            let mut buf = pool.get();
+                            // TODO: consider splitting the iov backing buffer into multiple
+                            // BytesMut to avoid copying the data here.
+                            buf[..gro_segment.len()].copy_from_slice(gro_segment);
+                            buf.truncate(gro_segment.len());
+                            bufs.push(buf);
+
+                            source_addrs[bufs_index] = result.address.map(|addr| addr.into());
+                            bufs_index += 1;
+                        }
+                    } else {
+                        // Single packet
+                        source_addrs[bufs_index] = result.address.map(|addr| addr.into());
+
+                        let size = result.bytes;
+                        let mut buf = pool.get();
+                        buf[..size].copy_from_slice(&iov[..size]);
+                        buf.truncate(size);
+                        bufs.push(buf);
+
+                        bufs_index += 1;
+                    }
                 }
 
-                Ok(num_bufs)
+                Ok(())
             })
             .await?;
 
-        Ok(num_bufs)
+        Ok(())
     }
 }
 

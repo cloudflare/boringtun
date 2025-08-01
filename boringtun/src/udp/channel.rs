@@ -227,7 +227,7 @@ impl UdpSend for Arc<UdpChannel> {
 impl UdpRecv for Arc<UdpChannel> {
     type RecvManyBuf = ();
 
-    async fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+    async fn recv_from(&mut self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
         match self.ip_version {
             IpVersion::V4 => {
                 let mut udp_rx = self
@@ -244,11 +244,11 @@ impl UdpRecv for Arc<UdpChannel> {
                 let source_port = udp.header.source_port.get();
                 let source_addr = SocketAddr::from((source_addr, source_port));
 
+                let mut buf = pool.get();
                 let len = udp.payload.len().min(buf.len());
-
                 buf[..len].copy_from_slice(&udp.payload);
 
-                Ok((len, source_addr))
+                Ok((buf, source_addr))
             }
 
             IpVersion::V6 => {
@@ -265,11 +265,11 @@ impl UdpRecv for Arc<UdpChannel> {
                 let source_port = udp.header.source_port.get();
                 let source_addr = SocketAddr::from((source_addr, source_port));
 
+                let mut buf = pool.get();
                 let len = udp.payload.len().min(buf.len());
-
                 buf[..len].copy_from_slice(&udp.payload);
 
-                Ok((len, source_addr))
+                Ok((buf, source_addr))
             }
         }
     }

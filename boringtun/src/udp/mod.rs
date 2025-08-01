@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::packet::Packet;
+use crate::packet::{Packet, PacketBufPool};
 
 pub mod buffer;
 
@@ -57,8 +57,8 @@ pub trait UdpRecv: Send + Sync {
     /// Receive a single UDP packet.
     fn recv_from(
         &mut self,
-        buf: &mut [u8],
-    ) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + Send;
+        pool: &mut PacketBufPool,
+    ) -> impl Future<Output = io::Result<(Packet, SocketAddr)>> + Send;
 
     /// Receive up to `x` packets at once,
     /// where `x` is [UdpTransport::max_number_of_packets_to_recv].
@@ -66,26 +66,28 @@ pub trait UdpRecv: Send + Sync {
     /// Returns the number of packets received.
     ///
     /// # Arguments
-    /// - `bufs` - A slice of buffers that will receive UDP datagrams.
+    /// - `pool` - A pool that allocates packets.
+    /// - `packets` - A vector that will receive UDP datagrams.
     /// - 'source_addrs' - Source addresses to receive. The length must equal that of 'bufs'.
     //
     // The default implementation always reads 1 packet.
     fn recv_many_from(
         &mut self,
         _recv_buf: &mut Self::RecvManyBuf,
-        bufs: &mut [Packet],
+        pool: &mut PacketBufPool,
+        packets: &mut Vec<Packet>,
         source_addrs: &mut [Option<SocketAddr>],
-    ) -> impl Future<Output = io::Result<usize>> + Send {
-        async {
-            let ([buf, ..], [source_addr_out, ..]) = (bufs, source_addrs) else {
-                return Ok(0);
+    ) -> impl Future<Output = io::Result<()>> + Send {
+        async move {
+            let [source_addr_out, ..] = source_addrs else {
+                return Err(io::Error::other("source_addrs.len() must be > 0"));
             };
 
-            let (n, source_addr) = self.recv_from(&mut buf[..]).await?;
-            buf.truncate(n);
+            let (p, source_addr) = self.recv_from(pool).await?;
             *source_addr_out = Some(source_addr);
+            packets.push(p);
 
-            Ok(1)
+            Ok(())
         }
     }
 }
@@ -155,6 +157,17 @@ impl UdpSocket {
         udp_sock.bind(&addr.into())?;
 
         let inner = tokio::net::UdpSocket::from_std(udp_sock.into())?;
+
+        #[cfg(target_os = "linux")]
+        {
+            // TODO: Clean this up
+            use std::os::fd::AsFd;
+            nix::sys::socket::setsockopt(
+                &inner.as_fd(),
+                nix::sys::socket::sockopt::UdpGroSegment,
+                &true,
+            )?;
+        }
 
         Ok(Self {
             inner: Arc::new(inner),
