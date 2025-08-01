@@ -25,6 +25,7 @@ where
 }
 
 impl Task {
+    #[track_caller]
     pub fn spawn<Fut, O>(name: &'static str, fut: Fut) -> Self
     where
         Fut: Future<Output = O> + Send + 'static,
