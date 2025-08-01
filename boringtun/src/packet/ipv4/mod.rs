@@ -170,10 +170,11 @@ impl Debug for Ipv4Header {
 
 #[cfg(test)]
 mod tests {
+    use zerocopy::FromBytes;
+
     use super::{Ipv4, Ipv4Header};
     use crate::packet::IpNextProtocol;
     use std::net::Ipv4Addr;
-    use zerocopy::TryFromBytes;
 
     const EXAMPLE_IPV4_ICMP: &[u8] = &[
         0x45, 0x83, 0x0, 0x54, 0xa3, 0x13, 0x40, 0x0, 0x40, 0x1, 0xc6, 0x26, 0xa, 0x8c, 0xc2, 0xdd,
@@ -186,7 +187,7 @@ mod tests {
 
     #[test]
     fn ipv4_header_layout() {
-        let packet = Ipv4::<[u8]>::try_ref_from_bytes(EXAMPLE_IPV4_ICMP).unwrap();
+        let packet = Ipv4::<[u8]>::ref_from_bytes(EXAMPLE_IPV4_ICMP).unwrap();
         let header = &packet.header;
 
         assert_eq!(header.version(), 4);

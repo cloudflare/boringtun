@@ -7,7 +7,7 @@ use std::{
 use bytes::BytesMut;
 use either::Either;
 use eyre::{Context, bail, eyre};
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 mod ip;
 mod ipv4;
@@ -45,7 +45,7 @@ pub use udp::*;
 ///
 /// let ip_header_bytes = ip_header.as_bytes();
 ///
-/// let raw_packet: Packet<[u8]> = Packet::copy_from_slice(ip_header_bytes);
+/// let raw_packet: Packet<[u8]> = Packet::copy_from(ip_header_bytes);
 /// let ipv4_packet: Packet<Ipv4> = raw_packet.try_into_ipvx().unwrap().unwrap_left();
 /// assert_eq!(&ip_header, &ipv4_packet.header);
 /// ```
@@ -94,6 +94,16 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     fn buf(&self) -> &[u8] {
         &self.inner.buf
     }
+
+    pub fn copy_from(payload: &T) -> Self {
+        Self {
+            inner: PacketInner {
+                buf: BytesMut::from(payload.as_bytes()),
+                _return_to_pool: None,
+            },
+            _kind: PhantomData::<T>,
+        }
+    }
 }
 
 impl Packet<[u8]> {
@@ -111,16 +121,6 @@ impl Packet<[u8]> {
         Self {
             inner: PacketInner {
                 buf: bytes,
-                _return_to_pool: None,
-            },
-            _kind: PhantomData::<[u8]>,
-        }
-    }
-
-    pub fn copy_from_slice(bytes: &[u8]) -> Self {
-        Self {
-            inner: PacketInner {
-                buf: BytesMut::from(bytes),
                 _return_to_pool: None,
             },
             _kind: PhantomData::<[u8]>,
@@ -155,7 +155,7 @@ impl Packet<Ip> {
             4 => {
                 let buf_len = self.buf().len();
 
-                let ipv4 = Ipv4::<[u8]>::try_ref_from_bytes(self.buf())
+                let ipv4 = Ipv4::<[u8]>::ref_from_bytes(self.buf())
                     .map_err(|e| eyre!("Bad IPv4 packet: {e:?}"))?;
 
                 let ip_len = usize::from(ipv4.header.total_len.get());
@@ -170,7 +170,7 @@ impl Packet<Ip> {
                 Ok(Either::Left(self.cast::<Ipv4>()))
             }
             6 => {
-                let ipv6 = Ipv6::<[u8]>::try_ref_from_bytes(self.buf())
+                let ipv6 = Ipv6::<[u8]>::ref_from_bytes(self.buf())
                     .map_err(|e| eyre!("Bad IPv6 packet: {e:?}"))?;
 
                 let payload_len = usize::from(ipv6.header.payload_length.get());
@@ -238,8 +238,7 @@ fn validate_udp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<(
     };
 
     let ip_payload_len = payload.len();
-    let udp =
-        Udp::<[u8]>::try_ref_from_bytes(payload).map_err(|e| eyre!("Bad UDP packet: {e:?}"))?;
+    let udp = Udp::<[u8]>::ref_from_bytes(payload).map_err(|e| eyre!("Bad UDP packet: {e:?}"))?;
 
     let udp_len = usize::from(udp.header.length.get());
     if udp_len != ip_payload_len {
@@ -264,7 +263,7 @@ where
     type Target = Kind;
 
     fn deref(&self) -> &Self::Target {
-        Self::Target::try_ref_from_bytes(&self.inner.buf)
+        Self::Target::ref_from_bytes(&self.inner.buf)
             .expect("We have previously checked that the payload is valid")
     }
 }
@@ -274,7 +273,7 @@ where
     Kind: CheckedPayload + ?Sized,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        Self::Target::try_mut_from_bytes(&mut self.inner.buf)
+        Self::Target::mut_from_bytes(&mut self.inner.buf)
             .expect("We have previously checked that the payload is valid")
     }
 }

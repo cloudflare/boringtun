@@ -94,7 +94,7 @@ impl Debug for Ipv6Header {
 
 #[cfg(test)]
 mod tests {
-    use zerocopy::TryFromBytes;
+    use zerocopy::FromBytes;
 
     use super::Ipv6;
     use crate::packet::{IpNextProtocol, Ipv6Header};
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn ipv6_header_layout() {
-        let packet = Ipv6::<[u8]>::try_ref_from_bytes(EXAMPLE_IPV6_ICMP).unwrap();
+        let packet = Ipv6::<[u8]>::ref_from_bytes(EXAMPLE_IPV6_ICMP).unwrap();
         let header = &packet.header;
 
         assert_eq!(header.version(), 6);

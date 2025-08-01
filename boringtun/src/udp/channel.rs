@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, atomic::AtomicU16},
 };
 use tokio::sync::{Mutex, mpsc};
-use zerocopy::{FromBytes, IntoBytes, TryFromBytes};
+use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
     packet::{Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, PacketBufPool, Udp},
@@ -302,7 +302,7 @@ async fn create_ipv4_payload(
 
     let mut payload = packet.split_off(IPV4_HEADER_LEN);
 
-    let udp = Udp::<[u8]>::try_mut_from_bytes(&mut payload).expect("bad UDP packet buffer");
+    let udp = Udp::<[u8]>::mut_from_bytes(&mut payload).expect("bad UDP packet buffer");
     udp.header.source_port = source_port.into();
     udp.header.destination_port = destination_port.into();
     udp.header.length = udp_len.into();
@@ -349,7 +349,7 @@ async fn create_ipv6_payload(
 
     let mut payload = packet.split_off(IPV6_HEADER_LEN);
 
-    let udp = Udp::<[u8]>::try_mut_from_bytes(&mut payload).expect("bad UDP packet buffer");
+    let udp = Udp::<[u8]>::mut_from_bytes(&mut payload).expect("bad UDP packet buffer");
     udp.header.source_port = source_port.into();
     udp.header.destination_port = destination_port.into();
     udp.header.length = udp_len.into();
