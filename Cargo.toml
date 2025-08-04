@@ -6,6 +6,12 @@ resolver = "2"
 lto = true        # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
 
+# build with optimizations, but keep debug symbols
+[profile.release-debuginfo]
+inherits = "release"
+debug = true
+strip = false
+
 [profile.bench]
 lto = true        # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
