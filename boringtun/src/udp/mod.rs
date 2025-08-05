@@ -1,8 +1,9 @@
+#[cfg(unix)]
+use std::os::fd::AsFd;
 use std::{
     future::Future,
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::fd::AsFd,
     sync::Arc,
 };
 
@@ -165,6 +166,7 @@ impl UdpSocket {
     }
 }
 
+#[cfg(unix)]
 impl AsFd for UdpSocket {
     fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
         self.inner.as_fd()
