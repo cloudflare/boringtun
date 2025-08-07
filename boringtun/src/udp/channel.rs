@@ -287,7 +287,7 @@ async fn create_ipv4_payload(
 
     let mut packet = BytesMut::zeroed(usize::from(total_len));
 
-    let ipv4 = Ipv4::<[u8]>::mut_from_bytes(&mut packet).expect("bad IP packet buffer");
+    let ipv4 = Ipv4::<Udp>::mut_from_bytes(&mut packet).expect("bad IP packet buffer");
     ipv4.header =
         Ipv4Header::new_for_length(source_ip, destination_ip, IpNextProtocol::Udp, udp_len);
 
@@ -300,9 +300,7 @@ async fn create_ipv4_payload(
     let ipv4_checksum = pnet_packet::util::checksum(ipv4.header.as_bytes(), 5);
     ipv4.header.header_checksum = ipv4_checksum.into();
 
-    let mut payload = packet.split_off(IPV4_HEADER_LEN);
-
-    let udp = Udp::<[u8]>::mut_from_bytes(&mut payload).expect("bad UDP packet buffer");
+    let udp = &mut ipv4.payload;
     udp.header.source_port = source_port.into();
     udp.header.destination_port = destination_port.into();
     udp.header.length = udp_len.into();
@@ -318,8 +316,6 @@ async fn create_ipv4_payload(
         IpNextHeaderProtocols::Udp,
     );
     udp.header.checksum = csum.into();
-
-    packet.unsplit(payload);
 
     Packet::from_bytes(packet)
         .try_into_ip()
@@ -339,7 +335,7 @@ async fn create_ipv6_payload(
 
     let mut packet = BytesMut::zeroed(usize::from(total_len));
 
-    let ipv6 = Ipv6::<[u8]>::mut_from_bytes(&mut packet).expect("bad IP packet buffer");
+    let ipv6 = Ipv6::<Udp>::mut_from_bytes(&mut packet).expect("bad IP packet buffer");
     ipv6.header.set_version(6);
     ipv6.header.set_flow_label(connection_id);
     ipv6.header.next_header = IpNextProtocol::Udp;
@@ -347,9 +343,7 @@ async fn create_ipv6_payload(
     ipv6.header.destination_address = destination_ip.to_bits().into();
     ipv6.header.hop_limit = 64;
 
-    let mut payload = packet.split_off(IPV6_HEADER_LEN);
-
-    let udp = Udp::<[u8]>::mut_from_bytes(&mut payload).expect("bad UDP packet buffer");
+    let udp = &mut ipv6.payload;
     udp.header.source_port = source_port.into();
     udp.header.destination_port = destination_port.into();
     udp.header.length = udp_len.into();
@@ -366,7 +360,6 @@ async fn create_ipv6_payload(
     );
     udp.header.checksum = csum.into();
 
-    packet.unsplit(payload);
     Packet::from_bytes(packet)
         .try_into_ip()
         .expect("packet is valid")
