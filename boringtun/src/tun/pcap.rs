@@ -2,14 +2,16 @@
 
 use std::{
     io::{self, Write},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Instant,
 };
 
 use pcap_file::pcap::{PcapHeader, PcapPacket};
-use tokio::sync::Mutex;
 
-use crate::tun::{IpRecv, IpSend};
+use crate::{
+    packet::{Ip, Packet, PacketBufPool},
+    tun::{IpRecv, IpSend},
+};
 
 #[derive(Clone)]
 pub struct PcapStream {
@@ -53,29 +55,34 @@ impl<R> PcapSniffer<R> {
 }
 
 impl<R: IpRecv> IpRecv for PcapSniffer<R> {
-    async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.inner.recv(buf).await?;
+    async fn recv<'a>(
+        &'a mut self,
+        buf: &mut PacketBufPool,
+    ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a> {
+        let packets = self.inner.recv(buf).await?;
 
-        let packet = &buf[..n];
+        let packets = packets.inspect(|packet| {
+            let timestamp = Instant::now().duration_since(self.epoch);
+            if let Ok(mut write) = self.writer.writer.lock() {
+                let pcap_packet =
+                    PcapPacket::new(timestamp, packet.payload.len() as u32, &packet.payload);
+                let _ = write.write_packet(&pcap_packet);
+            }
+        });
 
-        let timestamp = Instant::now().duration_since(self.epoch);
-        let pcap_packet = PcapPacket::new(timestamp, packet.len() as u32, packet);
-        let mut write = self.writer.writer.lock().await;
-        let _ = write.write_packet(&pcap_packet);
-
-        Ok(n)
+        Ok(packets)
     }
 }
 
 impl<S: IpSend> IpSend for PcapSniffer<S> {
-    async fn send(&self, packet: &[u8]) -> io::Result<()> {
+    async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
+        if let Ok(mut write) = self.writer.writer.lock() {
+            let timestamp = Instant::now().duration_since(self.epoch);
+            let pcap_packet =
+                PcapPacket::new(timestamp, packet.payload.len() as u32, &packet.payload);
+            let _ = write.write_packet(&pcap_packet);
+        }
         self.inner.send(packet).await?;
-
-        let timestamp = Instant::now().duration_since(self.epoch);
-        let pcap_packet = PcapPacket::new(timestamp, packet.len() as u32, packet);
-        let mut write = self.writer.writer.lock().await;
-        let _ = write.write_packet(&pcap_packet);
-
         Ok(())
     }
 }

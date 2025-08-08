@@ -25,7 +25,7 @@ use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::{Tunn, TunnResult};
-use crate::packet::{Packet, PacketBufPool};
+use crate::packet::PacketBufPool;
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::{IpRecv, IpSend};
