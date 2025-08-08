@@ -221,4 +221,18 @@ impl UdpTransport for super::UdpSocket {
         setsockopt(&self.inner, sockopt::Mark, &mark)?;
         Ok(())
     }
+
+    fn enable_udp_gro(&self) -> io::Result<()> {
+        // TODO: missing constants on Android
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsFd;
+            nix::sys::socket::setsockopt(
+                &self.inner.as_fd(),
+                nix::sys::socket::sockopt::UdpGroSegment,
+                &true,
+            )?;
+        }
+        Ok(())
+    }
 }

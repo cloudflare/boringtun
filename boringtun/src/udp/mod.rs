@@ -41,6 +41,11 @@ pub trait UdpTransport: Send + Sync + Clone {
     fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
         Ok(())
     }
+
+    /// Enable UDP GRO, if available
+    fn enable_udp_gro(&self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// An abstraction of a UDP socket.
@@ -158,17 +163,6 @@ impl UdpSocket {
 
         let inner = tokio::net::UdpSocket::from_std(udp_sock.into())?;
 
-        #[cfg(target_os = "linux")]
-        {
-            // TODO: Clean this up
-            use std::os::fd::AsFd;
-            nix::sys::socket::setsockopt(
-                &inner.as_fd(),
-                nix::sys::socket::sockopt::UdpGroSegment,
-                &true,
-            )?;
-        }
-
         Ok(Self {
             inner: Arc::new(inner),
         })
@@ -239,6 +233,13 @@ impl UdpTransportFactory for UdpSocketFactory {
         if let Some(mark) = params.fwmark {
             udp_v4.set_fwmark(mark)?;
             udp_v6.set_fwmark(mark)?;
+        }
+
+        if let Err(err) = udp_v4.enable_udp_gro() {
+            log::warn!("Failed to enable UDP GRO for IPv4 socket: {err}");
+        }
+        if let Err(err) = udp_v6.enable_udp_gro() {
+            log::warn!("Failed to enable UDP GRO for IPv6 socket: {err}");
         }
 
         Ok(((udp_v4.clone(), udp_v4), (udp_v6.clone(), udp_v6)))
