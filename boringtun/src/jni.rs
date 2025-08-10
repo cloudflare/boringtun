@@ -8,10 +8,10 @@
 use core::os::raw::c_char;
 use core::ptr;
 
+use jni::JNIEnv;
 use jni::objects::{JByteBuffer, JClass, JString};
 use jni::strings::JNIStr;
 use jni::sys::{jbyteArray, jint, jlong, jshort, jstring};
-use jni::JNIEnv;
 use parking_lot::Mutex;
 
 use crate::ffi::new_tunnel;
@@ -62,7 +62,7 @@ pub unsafe extern "C" fn generate_public_key1(
     }
 
     let secret_key = x25519_key {
-        key: std::mem::transmute::<[i8; 32], [u8; 32]>(key_inner),
+        key: core::mem::transmute::<[i8; 32], [u8; 32]>(key_inner),
     };
 
     match env.byte_array_from_slice(&x25519_public_key(secret_key).key) {
@@ -86,7 +86,7 @@ pub unsafe extern "C" fn convert_x25519_key_to_hex(
     }
 
     let x25519_key = x25519_key {
-        key: std::mem::transmute::<[i8; 32], [u8; 32]>(key),
+        key: core::mem::transmute::<[i8; 32], [u8; 32]>(key),
     };
 
     let output = match env.new_string(JNIStr::from_ptr(x25519_key_to_hex(x25519_key)).to_owned()) {
@@ -112,7 +112,7 @@ pub unsafe extern "C" fn convert_x25519_key_to_base64(
     }
 
     let x25519_key = x25519_key {
-        key: std::mem::transmute::<[i8; 32], [u8; 32]>(key),
+        key: core::mem::transmute::<[i8; 32], [u8; 32]>(key),
     };
 
     let output = match env.new_string(JNIStr::from_ptr(x25519_key_to_base64(x25519_key)).to_owned())

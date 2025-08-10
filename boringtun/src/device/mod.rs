@@ -30,8 +30,8 @@ use std::io::{self, Write as _};
 use std::mem::MaybeUninit;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::AsRawFd;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -316,7 +316,7 @@ impl Device {
         }
 
         // Update an existing peer
-        if self.peers.get(&pub_key).is_some() {
+        if self.peers.contains_key(&pub_key) {
             // We already have a peer, we need to merge the existing config into the newly created one
             panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
         }
@@ -726,7 +726,7 @@ impl Device {
                         &mut t.dst_buf[..],
                     ) {
                         TunnResult::Done => {}
-                        TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
+                        TunnResult::Err(e) => eprintln!("Decapsulate error {e:?}"),
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
                             let _: Result<_, _> = udp.send(packet);
@@ -787,11 +787,11 @@ impl Device {
                             if ek == io::ErrorKind::Interrupted || ek == io::ErrorKind::WouldBlock {
                                 break;
                             }
-                            eprintln!("Fatal read error on tun interface: {:?}", e);
+                            eprintln!("Fatal read error on tun interface: {e:?}");
                             return Action::Exit;
                         }
                         Err(e) => {
-                            eprintln!("Unexpected error on tun interface: {:?}", e);
+                            eprintln!("Unexpected error on tun interface: {e:?}");
                             return Action::Exit;
                         }
                     };

@@ -1,15 +1,21 @@
 #![forbid(unsafe_code)]
 //! Attempts to provide the same functionality as std::time::Instant, except it
 //! uses a timer which accounts for time when the system is asleep
-use core::time::Duration;
+
+use embedded_time::Clock;
+use embedded_time::duration::Generic;
 
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(windows)]
+pub use inner::WindowsClock as ClockImpl;
 #[cfg(target_os = "windows")]
 use windows as inner;
 
 #[cfg(unix)]
 mod unix;
+#[cfg(unix)]
+pub use inner::UnixClock as ClockImpl;
 #[cfg(unix)]
 use unix as inner;
 
@@ -36,14 +42,14 @@ use unix as inner;
 ///
 #[derive(Clone, Copy, Debug)]
 pub struct Instant {
-    t: inner::Instant,
+    t: embedded_time::Instant<ClockImpl>,
 }
 
 impl Instant {
     /// Returns an instant corresponding to "now".
     pub fn now() -> Self {
         Self {
-            t: inner::Instant::now(),
+            t: ClockImpl.try_now().unwrap(),
         }
     }
 
@@ -53,12 +59,12 @@ impl Instant {
     /// # Panics
     ///
     /// panics when `earlier` was later than `self`.
-    pub fn duration_since(&self, earlier: Instant) -> Duration {
-        self.t.duration_since(earlier.t)
+    pub fn duration_since(&self, earlier: Instant) -> Generic<<ClockImpl as Clock>::T> {
+        self.t.checked_duration_since(&earlier.t).unwrap()
     }
 
     /// Returns the amount of time elapsed since this instant was created.
-    pub fn elapsed(&self) -> Duration {
+    pub fn elapsed(&self) -> Generic<<ClockImpl as Clock>::T> {
         Self::now().duration_since(*self)
     }
 }
@@ -66,13 +72,16 @@ impl Instant {
 #[cfg(test)]
 mod tests {
     extern crate std;
+
     use super::*;
+    use core::convert::TryInto;
+    use embedded_time::duration::Milliseconds;
 
     #[test]
     fn time_increments_after_sleep() {
-        let sleep_time = Duration::from_millis(10);
+        let sleep_time = Milliseconds(10u32);
         let start = Instant::now();
-        std::thread::sleep(sleep_time);
+        std::thread::sleep(sleep_time.try_into().unwrap());
         assert!(start.elapsed() >= sleep_time);
     }
 }

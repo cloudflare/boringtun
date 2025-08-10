@@ -2,27 +2,31 @@ use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_2
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
 use core::net::IpAddr;
 use core::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "mock-instant")]
+use mock_instant::Instant;
 
 #[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::Instant;
 
+use crate::sleepyinstant::ClockImpl;
 use aead::generic_array::GenericArray;
 use aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{Key, XChaCha20Poly1305};
+use embedded_time::Clock;
+use embedded_time::duration::Seconds;
+use embedded_time::fixed_point::FixedPoint;
 use parking_lot::Mutex;
 use rand_core::{OsRng, RngCore};
 use ring::constant_time::verify_slices_are_equal;
 
-const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can optimize out the division
+const COOKIE_REFRESH: Seconds = Seconds(128); // Use 128 and not 120 so the compiler can optimize out the division
 const COOKIE_SIZE: usize = 16;
 const COOKIE_NONCE_SIZE: usize = 24;
 
 /// How often should reset count in seconds
-const RESET_PERIOD: u64 = 1;
+const RESET_PERIOD: Seconds = Seconds(1);
 
 type Cookie = [u8; COOKIE_SIZE];
 
@@ -79,7 +83,7 @@ impl RateLimiter {
         // The rate limiter is not very accurate, but at the scale we care about it doesn't matter much
         let current_time = Instant::now();
         let mut last_reset_time = self.last_reset.lock();
-        if current_time.duration_since(*last_reset_time).as_secs() >= RESET_PERIOD {
+        if current_time.duration_since(*last_reset_time) >= RESET_PERIOD {
             self.count.store(0, Ordering::SeqCst);
             *last_reset_time = current_time;
         }
@@ -96,10 +100,18 @@ impl RateLimiter {
 
         // The current cookie for a given IP is the MAC(responder.changing_secret_every_two_minutes, initiator.ip_address)
         // First we derive the secret from the current time, the value of cur_counter would change with time.
-        let cur_counter = Instant::now().duration_since(self.start_time).as_secs() / COOKIE_REFRESH;
+        let cur_counter = Seconds::<<ClockImpl as Clock>::T>::try_from(
+            Instant::now().duration_since(self.start_time),
+        )
+        .unwrap()
+            / COOKIE_REFRESH.integer() as <ClockImpl as Clock>::T;
 
         // Next we derive the cookie
-        b2s_keyed_mac_16_2(&self.secret_key, &cur_counter.to_le_bytes(), &addr_bytes)
+        b2s_keyed_mac_16_2(
+            &self.secret_key,
+            &cur_counter.integer().to_le_bytes(),
+            &addr_bytes,
+        )
     }
 
     fn nonce(&self) -> [u8; COOKIE_NONCE_SIZE] {

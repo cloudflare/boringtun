@@ -14,11 +14,13 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::x25519;
 
+use crate::sleepyinstant::ClockImpl;
 use alloc::collections::VecDeque;
+use alloc::sync::Arc;
 use core::convert::{TryFrom, TryInto};
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use alloc::sync::Arc;
-use core::time::Duration;
+use embedded_time::Clock;
+use embedded_time::duration::Generic;
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
@@ -574,7 +576,15 @@ impl Tunn {
     /// * Time since last handshake in seconds
     /// * Data bytes sent
     /// * Data bytes received
-    pub fn stats(&self) -> (Option<Duration>, usize, usize, f32, Option<u32>) {
+    pub fn stats(
+        &self,
+    ) -> (
+        Option<Generic<<ClockImpl as Clock>::T>>,
+        usize,
+        usize,
+        f32,
+        Option<u32>,
+    ) {
         let time = self.time_since_last_handshake();
         let tx_bytes = self.tx_bytes;
         let rx_bytes = self.rx_bytes;
@@ -589,10 +599,10 @@ impl Tunn {
 mod tests {
     extern crate std;
 
-    use std::vec::Vec;
-    use std::vec;
     #[cfg(feature = "mock-instant")]
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
+    use std::vec;
+    use std::vec::Vec;
 
     use super::*;
     use rand_core::{OsRng, RngCore};
