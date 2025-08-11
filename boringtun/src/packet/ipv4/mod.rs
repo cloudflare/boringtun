@@ -35,13 +35,14 @@ pub struct Ipv4DscpEcn {
 }
 
 /// A bitfield struct containing the IPv4 fields `flags` and `fragment_offset`.
-#[bitfield(u16, repr = big_endian::U16, from = big_endian::U16::new, into = big_endian::U16::get)]
+#[bitfield(u16, order = Msb, repr = big_endian::U16, from = big_endian::U16::new, into = big_endian::U16::get)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4FlagsFragmentOffset {
+    _reserved: bool,
+    pub dont_fragment: bool,
+    pub more_fragments: bool,
     #[bits(13)]
     pub fragment_offset: u16,
-    #[bits(3)]
-    pub flags: u8,
 }
 
 #[repr(C, packed)]
@@ -139,8 +140,12 @@ impl Ipv4Header {
         self.dscp_and_ecn.ecn()
     }
 
-    pub const fn flags(&self) -> u8 {
-        self.flags_and_fragment_offset.flags()
+    pub const fn dont_fragment(&self) -> bool {
+        self.flags_and_fragment_offset.dont_fragment()
+    }
+
+    pub const fn more_fragments(&self) -> bool {
+        self.flags_and_fragment_offset.more_fragments()
     }
 
     pub const fn fragment_offset(&self) -> u16 {
@@ -157,7 +162,8 @@ impl Debug for Ipv4Header {
             .field("ecn", &self.ecn())
             .field("total_len", &self.total_len.get())
             .field("identification", &self.identification.get())
-            .field("flags", &self.flags())
+            .field("dont_fragment", &self.dont_fragment())
+            .field("more_fragments", &self.more_fragments())
             .field("fragment_offset", &self.fragment_offset())
             .field("time_to_live", &self.time_to_live)
             .field("protocol", &self.protocol)
@@ -196,7 +202,8 @@ mod tests {
         assert_eq!(header.ecn(), 0x3);
         assert_eq!(header.total_len, 84);
         assert_eq!(header.identification, 41747);
-        assert_eq!(header.flags(), 0b010);
+        assert_eq!(header.dont_fragment(), true);
+        assert_eq!(header.more_fragments(), false);
         assert_eq!(header.fragment_offset(), 0);
         assert_eq!(header.time_to_live, 64);
         assert_eq!(header.protocol, IpNextProtocol::Icmp);
