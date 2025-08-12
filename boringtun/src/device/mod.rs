@@ -170,6 +170,12 @@ impl<T: DeviceTransports> Connection<T> {
     pub async fn set_up(device: Arc<RwLock<Device<T>>>) -> Result<Self, Error> {
         let mut device_guard = device.write().await;
         let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device_guard.open_listen_socket().await?;
+        let buffered_ip_rx = BufferedIpRecv::new(
+            MAX_PACKET_BUFS,
+            PacketBufPool::new(MAX_PACKET_BUFS),
+            Arc::clone(&device_guard.tun_rx),
+        );
+        let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, device_guard.tun_tx.clone());
         drop(device_guard);
 
         let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
@@ -186,6 +192,7 @@ impl<T: DeviceTransports> Connection<T> {
             "handle_outgoing",
             Device::handle_outgoing(
                 Arc::downgrade(&device),
+                buffered_ip_rx,
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
                 PacketBufPool::new(MAX_PACKET_BUFS),
@@ -204,6 +211,7 @@ impl<T: DeviceTransports> Connection<T> {
             "handle_incoming ipv4",
             Device::handle_incoming(
                 Arc::downgrade(&device),
+                buffered_ip_tx.clone(),
                 buffered_udp_tx_v4,
                 buffered_udp_rx_v4,
                 PacketBufPool::new(MAX_PACKET_BUFS),
@@ -213,6 +221,7 @@ impl<T: DeviceTransports> Connection<T> {
             "handle_incoming ipv6",
             Device::handle_incoming(
                 Arc::downgrade(&device),
+                buffered_ip_tx,
                 buffered_udp_tx_v6,
                 buffered_udp_rx_v6,
                 PacketBufPool::new(MAX_PACKET_BUFS),
@@ -534,11 +543,7 @@ impl<T: DeviceTransports> Device<T> {
         self.peers_by_ip.clear();
     }
 
-    async fn handle_timers(
-        device: Weak<RwLock<Self>>,
-        udp4: BufferedUdpSend,
-        udp6: BufferedUdpSend,
-    ) {
+    async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {
         // TODO: fix rate limiting
         /*
         self.queue.new_periodic_event(
@@ -597,23 +602,21 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
-        udp_tx: BufferedUdpSend,
-        mut udp_rx: BufferedUdpReceive,
+        mut tun_tx: impl IpSend,
+        udp_tx: impl UdpSend,
+        mut udp_rx: impl UdpRecv,
         mut packet_pool: PacketBufPool,
     ) -> Result<(), Error> {
-        let (tun, private_key, public_key, rate_limiter) = {
+        let (private_key, public_key, rate_limiter) = {
             let Some(device) = device.upgrade() else {
                 return Ok(());
             };
             let device = device.read().await;
 
-            let tun = device.tun_tx.clone();
             let (private_key, public_key) = device.key_pair.clone().expect("Key not set");
             let rate_limiter = device.rate_limiter.clone().unwrap();
-            (tun, private_key, public_key, rate_limiter)
+            (private_key, public_key, rate_limiter)
         };
-
-        let buffered_tun_send = BufferedIpSend::new(MAX_PACKET_BUFS, tun);
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
             let mut dst_buf = packet_pool.get();
@@ -695,7 +698,7 @@ impl<T: DeviceTransports> Device<T> {
                         continue;
                     };
                     if peer.is_allowed_ip(addr)
-                        && let Err(_err) = buffered_tun_send.send(dst_buf).await
+                        && let Err(_err) = tun_tx.send(dst_buf).await
                     {
                         log::trace!("buffered_tun_send.send failed");
                         break;
@@ -709,7 +712,7 @@ impl<T: DeviceTransports> Device<T> {
                         continue;
                     };
                     if peer.is_allowed_ip(addr)
-                        && let Err(_err) = buffered_tun_send.send(dst_buf).await
+                        && let Err(_err) = tun_tx.send(dst_buf).await
                     {
                         log::trace!("buffered_tun_send.send failed");
                         break;
@@ -724,23 +727,13 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
-        udp4: BufferedUdpSend,
-        udp6: BufferedUdpSend,
+        mut tun_rx: impl IpRecv,
+        udp4: impl UdpSend,
+        udp6: impl UdpSend,
         mut packet_pool: PacketBufPool,
     ) {
-        let tun = {
-            let Some(device) = device.upgrade() else {
-                return;
-            };
-            let device = device.write().await;
-            Arc::clone(&device.tun_rx)
-        };
-
-        let mut buffered_tun_recv =
-            BufferedIpRecv::new(MAX_PACKET_BUFS, PacketBufPool::new(MAX_PACKET_BUFS), tun);
-
         loop {
-            let packets = match buffered_tun_recv.recv(&mut packet_pool).await {
+            let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
                 Err(e) => {
                     log::error!("Unexpected error on tun interface: {:?}", e);

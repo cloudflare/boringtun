@@ -13,14 +13,13 @@ use tokio::{
 };
 
 #[derive(Clone)]
-pub struct BufferedIpSend<I> {
+pub struct BufferedIpSend {
     tx: mpsc::Sender<Packet<Ip>>,
     _task: Arc<Task>,
-    _phantom: std::marker::PhantomData<I>,
 }
 
-impl<I: IpSend> BufferedIpSend<I> {
-    pub fn new(capacity: usize, inner: I) -> Self {
+impl BufferedIpSend {
+    pub fn new<I: IpSend>(capacity: usize, inner: I) -> Self {
         let (tx, mut rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
         let task = Task::spawn("buffered IP send", async move {
@@ -34,12 +33,11 @@ impl<I: IpSend> BufferedIpSend<I> {
         Self {
             tx,
             _task: Arc::new(task),
-            _phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<I: IpSend> IpSend for BufferedIpSend<I> {
+impl IpSend for BufferedIpSend {
     async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
         self.tx
             .send(packet)
