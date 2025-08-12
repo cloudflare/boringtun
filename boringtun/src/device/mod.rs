@@ -615,113 +615,108 @@ impl<T: DeviceTransports> Device<T> {
 
         let buffered_tun_send = BufferedIpSend::new(MAX_PACKET_BUFS, tun);
 
-        let decapsulate_task = Task::spawn("decapsulate", async move {
-            // NOTE: Reusing this appears to be faster than grabbing a buffer and using it for replies
-            while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
-                let mut dst_buf = packet_pool.get();
+        while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
+            let mut dst_buf = packet_pool.get();
 
-                let parsed_packet =
-                    match rate_limiter.verify_packet(Some(addr.ip()), &src_buf, &mut dst_buf[..]) {
-                        Ok(packet) => packet,
-                        Err(TunnResult::WriteToNetwork(cookie)) => {
-                            let len = cookie.len();
-                            dst_buf.truncate(len);
-                            if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
-                                log::trace!("udp.send_to failed");
-                                break;
-                            }
-                            continue;
-                        }
-                        Err(_) => continue,
-                    };
-
-                let Some(device) = device.upgrade() else {
-                    break;
-                };
-                let device_guard = &device.read().await;
-                let peers = &device_guard.peers;
-                let peers_by_idx = &device_guard.peers_by_idx;
-                use crate::noise::Packet;
-                let peer = match &parsed_packet {
-                    Packet::HandshakeInit(p) => parse_handshake_anon(&private_key, &public_key, p)
-                        .ok()
-                        .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public))),
-                    Packet::HandshakeResponse(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
-                    Packet::PacketCookieReply(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
-                    Packet::PacketData(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
-                };
-                let Some(peer) = peer else {
-                    continue;
-                };
-                let mut peer = peer.lock().await;
-                match peer
-                    .tunnel
-                    .handle_verified_packet(parsed_packet, &mut dst_buf[..])
-                {
-                    TunnResult::Done => (),
-                    TunnResult::Err(_) => continue,
-                    TunnResult::WriteToNetwork(packet) => {
-                        let len = packet.len();
+            let parsed_packet =
+                match rate_limiter.verify_packet(Some(addr.ip()), &src_buf, &mut dst_buf[..]) {
+                    Ok(packet) => packet,
+                    Err(TunnResult::WriteToNetwork(cookie)) => {
+                        let len = cookie.len();
                         dst_buf.truncate(len);
                         if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
                             log::trace!("udp.send_to failed");
                             break;
                         }
-
-                        // Flush pending queue
-                        loop {
-                            let mut dst_buf = packet_pool.get();
-                            match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
-                                TunnResult::WriteToNetwork(packet) => {
-                                    let len = packet.len();
-                                    dst_buf.truncate(len);
-                                    if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
-                                        log::trace!("udp.send_to failed");
-                                        break;
-                                    }
-                                }
-                                TunnResult::Done => break,
-                                // TODO: why do we ignore this error?
-                                TunnResult::Err(_) => continue,
-
-                                // TODO: fix the types so we can't end up here.
-                                _ => panic!("unexpected TunnResult"),
-                            }
-                        }
+                        continue;
                     }
-                    TunnResult::WriteToTunnelV4(packet, addr) => {
-                        let len = packet.len();
-                        dst_buf.truncate(len); // hacky but works
-                        let Ok(dst_buf) = dst_buf.try_into_ip() else {
-                            log::trace!("Invalid packet");
-                            continue;
-                        };
-                        if peer.is_allowed_ip(addr)
-                            && let Err(_err) = buffered_tun_send.send(dst_buf).await
-                        {
-                            log::trace!("buffered_tun_send.send failed");
-                            break;
-                        }
-                    }
-                    TunnResult::WriteToTunnelV6(packet, addr) => {
-                        let len = packet.len();
-                        dst_buf.truncate(len); // hacky but works
-                        let Ok(dst_buf) = dst_buf.try_into_ip() else {
-                            log::trace!("Invalid packet");
-                            continue;
-                        };
-                        if peer.is_allowed_ip(addr)
-                            && let Err(_err) = buffered_tun_send.send(dst_buf).await
-                        {
-                            log::trace!("buffered_tun_send.send failed");
-                            break;
-                        }
-                    }
+                    Err(_) => continue,
                 };
-            }
-        });
 
-        let _ = decapsulate_task.await;
+            let Some(device) = device.upgrade() else {
+                break;
+            };
+            let device_guard = &device.read().await;
+            let peers = &device_guard.peers;
+            let peers_by_idx = &device_guard.peers_by_idx;
+            use crate::noise::Packet;
+            let peer = match &parsed_packet {
+                Packet::HandshakeInit(p) => parse_handshake_anon(&private_key, &public_key, p)
+                    .ok()
+                    .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public))),
+                Packet::HandshakeResponse(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
+                Packet::PacketCookieReply(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
+                Packet::PacketData(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
+            };
+            let Some(peer) = peer else {
+                continue;
+            };
+            let mut peer = peer.lock().await;
+            match peer
+                .tunnel
+                .handle_verified_packet(parsed_packet, &mut dst_buf[..])
+            {
+                TunnResult::Done => (),
+                TunnResult::Err(_) => continue,
+                TunnResult::WriteToNetwork(packet) => {
+                    let len = packet.len();
+                    dst_buf.truncate(len);
+                    if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
+                        log::trace!("udp.send_to failed");
+                        break;
+                    }
+
+                    // Flush pending queue
+                    loop {
+                        let mut dst_buf = packet_pool.get();
+                        match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
+                            TunnResult::WriteToNetwork(packet) => {
+                                let len = packet.len();
+                                dst_buf.truncate(len);
+                                if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
+                                    log::trace!("udp.send_to failed");
+                                    break;
+                                }
+                            }
+                            TunnResult::Done => break,
+                            // TODO: why do we ignore this error?
+                            TunnResult::Err(_) => continue,
+
+                            // TODO: fix the types so we can't end up here.
+                            _ => panic!("unexpected TunnResult"),
+                        }
+                    }
+                }
+                TunnResult::WriteToTunnelV4(packet, addr) => {
+                    let len = packet.len();
+                    dst_buf.truncate(len); // hacky but works
+                    let Ok(dst_buf) = dst_buf.try_into_ip() else {
+                        log::trace!("Invalid packet");
+                        continue;
+                    };
+                    if peer.is_allowed_ip(addr)
+                        && let Err(_err) = buffered_tun_send.send(dst_buf).await
+                    {
+                        log::trace!("buffered_tun_send.send failed");
+                        break;
+                    }
+                }
+                TunnResult::WriteToTunnelV6(packet, addr) => {
+                    let len = packet.len();
+                    dst_buf.truncate(len); // hacky but works
+                    let Ok(dst_buf) = dst_buf.try_into_ip() else {
+                        log::trace!("Invalid packet");
+                        continue;
+                    };
+                    if peer.is_allowed_ip(addr)
+                        && let Err(_err) = buffered_tun_send.send(dst_buf).await
+                    {
+                        log::trace!("buffered_tun_send.send failed");
+                        break;
+                    }
+                }
+            };
+        }
 
         Ok(())
     }
@@ -744,63 +739,59 @@ impl<T: DeviceTransports> Device<T> {
         let mut buffered_tun_recv =
             BufferedIpRecv::new(MAX_PACKET_BUFS, PacketBufPool::new(MAX_PACKET_BUFS), tun);
 
-        let encapsulate_task = Task::spawn("encapsulate", async move {
-            loop {
-                let packets = match buffered_tun_recv.recv(&mut packet_pool).await {
-                    Ok(packets) => packets,
-                    Err(e) => {
-                        log::error!("Unexpected error on tun interface: {:?}", e);
-                        break;
-                    }
+        loop {
+            let packets = match buffered_tun_recv.recv(&mut packet_pool).await {
+                Ok(packets) => packets,
+                Err(e) => {
+                    log::error!("Unexpected error on tun interface: {:?}", e);
+                    break;
+                }
+            };
+
+            for packet in packets {
+                // Determine peer to use from the destination address
+                let Some(dst_addr) = packet.destination() else {
+                    continue;
+                };
+                let Some(device) = device.upgrade() else {
+                    break;
+                };
+                let peers = &device.read().await.peers_by_ip;
+                let mut peer = match peers.find(dst_addr) {
+                    Some(peer) => peer.lock().await,
+                    // Drop packet if no peer has allowed IPs for destination
+                    None => continue,
                 };
 
-                for packet in packets {
-                    // Determine peer to use from the destination address
-                    let Some(dst_addr) = packet.destination() else {
-                        continue;
-                    };
-                    let Some(device) = device.upgrade() else {
-                        break;
-                    };
-                    let peers = &device.read().await.peers_by_ip;
-                    let mut peer = match peers.find(dst_addr) {
-                        Some(peer) => peer.lock().await,
-                        // Drop packet if no peer has allowed IPs for destination
-                        None => continue,
-                    };
-
-                    let mut dst_buf = packet_pool.get();
-                    match peer
-                        .tunnel
-                        .encapsulate(&packet.into_bytes(), &mut dst_buf[..])
-                    {
-                        TunnResult::Done => {}
-                        TunnResult::Err(e) => {
-                            log::error!("Encapsulate error={e:?}: {e:?}");
-                        }
-                        TunnResult::WriteToNetwork(packet) => {
-                            let len = packet.len();
-                            dst_buf.truncate(len);
-                            let endpoint_addr = peer.endpoint().addr;
-                            if let Some(SocketAddr::V4(addr)) = endpoint_addr {
-                                if udp4.send_to(dst_buf, addr.into()).await.is_err() {
-                                    break;
-                                }
-                            } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
-                                if udp6.send_to(dst_buf, addr.into()).await.is_err() {
-                                    break;
-                                }
-                            } else {
-                                log::error!("No endpoint");
+                let mut dst_buf = packet_pool.get();
+                match peer
+                    .tunnel
+                    .encapsulate(&packet.into_bytes(), &mut dst_buf[..])
+                {
+                    TunnResult::Done => {}
+                    TunnResult::Err(e) => {
+                        log::error!("Encapsulate error={e:?}: {e:?}");
+                    }
+                    TunnResult::WriteToNetwork(packet) => {
+                        let len = packet.len();
+                        dst_buf.truncate(len);
+                        let endpoint_addr = peer.endpoint().addr;
+                        if let Some(SocketAddr::V4(addr)) = endpoint_addr {
+                            if udp4.send_to(dst_buf, addr.into()).await.is_err() {
+                                break;
                             }
+                        } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
+                            if udp6.send_to(dst_buf, addr.into()).await.is_err() {
+                                break;
+                            }
+                        } else {
+                            log::error!("No endpoint");
                         }
-                        _ => panic!("Unexpected result from encapsulate"),
-                    };
-                }
+                    }
+                    _ => panic!("Unexpected result from encapsulate"),
+                };
             }
-        });
-
-        let _ = encapsulate_task.await;
+        }
     }
 }
 
