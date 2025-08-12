@@ -634,7 +634,7 @@ impl<T: DeviceTransports> Device<T> {
                 };
 
             let Some(device) = device.upgrade() else {
-                break;
+                return Ok(());
             };
             let device_guard = &device.read().await;
             let peers = &device_guard.peers;
@@ -754,7 +754,7 @@ impl<T: DeviceTransports> Device<T> {
                     continue;
                 };
                 let Some(device) = device.upgrade() else {
-                    break;
+                    return;
                 };
                 let peers = &device.read().await.peers_by_ip;
                 let mut peer = match peers.find(dst_addr) {
