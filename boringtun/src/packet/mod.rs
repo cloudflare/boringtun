@@ -5,6 +5,7 @@ use std::{
 };
 
 use bytes::BytesMut;
+use duplicate::duplicate_item;
 use either::Either;
 use eyre::{Context, bail, eyre};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
@@ -106,6 +107,41 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     }
 }
 
+// Trivial From conversions between packet types
+#[duplicate_item(
+    FromType ToType;
+    [Ipv4<Udp>] [Ipv4];
+    [Ipv6<Udp>] [Ipv6];
+
+    [Ipv4<Udp>] [Ip];
+    [Ipv6<Udp>] [Ip];
+    [Ipv4]      [Ip];
+    [Ipv6]      [Ip];
+
+    [Ipv4<Udp>] [[u8]];
+    [Ipv6<Udp>] [[u8]];
+    [Ipv4]      [[u8]];
+    [Ipv6]      [[u8]];
+    [Ip]        [[u8]];
+)]
+impl From<Packet<FromType>> for Packet<ToType> {
+    fn from(value: Packet<FromType>) -> Packet<ToType> {
+        value.cast()
+    }
+}
+
+impl Default for Packet<[u8]> {
+    fn default() -> Self {
+        Self {
+            inner: PacketInner {
+                buf: BytesMut::default(),
+                _return_to_pool: None,
+            },
+            _kind: PhantomData,
+        }
+    }
+}
+
 impl Packet<[u8]> {
     pub fn new_from_pool(return_to_pool: ReturnToPool, bytes: BytesMut) -> Self {
         Self {
@@ -129,6 +165,10 @@ impl Packet<[u8]> {
 
     pub fn truncate(&mut self, new_len: usize) {
         self.inner.buf.truncate(new_len);
+    }
+
+    pub fn buf_mut(&mut self) -> &mut BytesMut {
+        &mut self.inner.buf
     }
 
     pub fn try_into_ip(self) -> eyre::Result<Packet<Ip>> {
