@@ -11,10 +11,10 @@ pub mod pcap;
 ///
 /// This is used as an abstraction of the TUN device used by wireguard,
 /// and enables us to, for example, swap it out with a channel.
-pub trait IpSend: Send + Sync + Clone + 'static {
+pub trait IpSend: Send + Sync + 'static {
     /// Send a complete IP packet.
     // TODO: consider refactoring trait with methods that take `Packet<Ipv4>` and `Packet<Ipv6>`
-    fn send(&self, packet: Packet<Ip>) -> impl Future<Output = io::Result<()>> + Send;
+    fn send(&mut self, packet: Packet<Ip>) -> impl Future<Output = io::Result<()>> + Send;
 }
 
 /// A type that let's you receive an IP packet.
@@ -37,7 +37,7 @@ mod tun_async_device {
     use std::{iter, sync::Arc};
 
     impl IpSend for Arc<::tun::AsyncDevice> {
-        async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
+        async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
             ::tun::AsyncDevice::send(self, &packet.into_bytes()).await?;
             Ok(())
         }

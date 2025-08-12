@@ -85,7 +85,7 @@ impl PacketChannel {
 }
 
 impl IpSend for PacketChannel {
-    async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
+    async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         let ip_packet = match packet.try_into_ipvx() {
             Ok(p) => p,
             Err(e) => {
