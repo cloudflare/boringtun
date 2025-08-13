@@ -128,6 +128,7 @@ pub struct Device<T: DeviceTransports> {
     /// This is `Arc<Mutex>`:ed because:
     /// - The task responsible from reading from the tun_rx must have ownership of it.
     /// - We must be able to claim the ownership after that task is stopped.
+    ///
     /// This is implemented by the task taking the lock upon startup, and holding it until it is
     /// stopped.
     tun_rx: Arc<Mutex<T::IpRecv>>,
