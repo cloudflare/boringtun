@@ -4,13 +4,8 @@
 
 use embedded_time::Clock;
 use embedded_time::duration::Generic;
-
-#[cfg(target_os = "windows")]
-mod windows;
 #[cfg(windows)]
-pub use inner::WindowsClock as ClockImpl;
-#[cfg(target_os = "windows")]
-use windows as inner;
+pub use std_embedded_time::StandardClock as ClockImpl;
 
 #[cfg(unix)]
 mod unix;
@@ -49,7 +44,7 @@ impl Instant {
     /// Returns an instant corresponding to "now".
     pub fn now() -> Self {
         Self {
-            t: ClockImpl.try_now().unwrap(),
+            t: ClockImpl::default().try_now().unwrap(),
         }
     }
 

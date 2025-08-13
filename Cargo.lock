@@ -83,7 +83,7 @@ dependencies = [
  "blake2",
  "chacha20poly1305",
  "criterion",
- "embedded-time",
+ "embedded-time 0.13.0",
  "etherparse",
  "hex",
  "hmac",
@@ -97,6 +97,7 @@ dependencies = [
  "rand_core",
  "ring",
  "socket2",
+ "std-embedded-time",
  "thiserror",
  "tracing",
  "tracing-subscriber",
@@ -437,6 +438,15 @@ name = "either"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f107b87b6afc2a64fd13cac55fe06d6c8859f12d4b14cbcdd2c67d0976781be"
+
+[[package]]
+name = "embedded-time"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7a4b4d10ac48d08bfe3db7688c402baadb244721f30a77ce360bd24c3dffe58"
+dependencies = [
+ "num",
+]
 
 [[package]]
 name = "embedded-time"
@@ -1047,6 +1057,15 @@ checksum = "02e2d2db9033d13a1567121ddd7a095ee144db4e1ca1b1bda3419bc0da294ebd"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "std-embedded-time"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7a82a83bf323e55022f3d875305319a23a4936de5a316b9c67cf31e9758bb63"
+dependencies = [
+ "embedded-time 0.12.1",
 ]
 
 [[package]]

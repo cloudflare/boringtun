@@ -16,7 +16,7 @@ edition = "2024"
 [features]
 default = [ "std" ]
 alloc = [ ]
-std = [ "alloc" ]
+std = [ "alloc", "dep:std-embedded-time" ]
 device = ["socket2", "thiserror", "std"]
 jni-bindings = ["ffi-bindings", "jni"]
 ffi-bindings = ["tracing-subscriber"]
@@ -48,6 +48,7 @@ mock_instant = { version = "0.3", optional = true }
 socket2 = { version = "0.4.7", features = ["all"], optional = true }
 thiserror = { version = "1", optional = true }
 embedded-time = { git = "https://github.com/FluenTech/embedded-time.git", branch = "release/v0.13.0" }
+std-embedded-time =  { version = "0.1.0", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.25", default-features = false, features = [

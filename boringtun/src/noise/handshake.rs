@@ -178,7 +178,10 @@ impl TimeStamper {
     /// Create a new TimeStamper
     pub fn new() -> TimeStamper {
         TimeStamper {
-            duration_at_start: ClockImpl.try_now().unwrap().duration_since_epoch(),
+            duration_at_start: ClockImpl::default()
+                .try_now()
+                .unwrap()
+                .duration_since_epoch(),
             instant_at_start: Instant::now(),
         }
     }
