@@ -202,8 +202,8 @@ mod tests {
         assert_eq!(header.ecn(), 0x3);
         assert_eq!(header.total_len, 84);
         assert_eq!(header.identification, 41747);
-        assert_eq!(header.dont_fragment(), true);
-        assert_eq!(header.more_fragments(), false);
+        assert!(header.dont_fragment());
+        assert!(!header.more_fragments());
         assert_eq!(header.fragment_offset(), 0);
         assert_eq!(header.time_to_live, 64);
         assert_eq!(header.protocol, IpNextProtocol::Icmp);

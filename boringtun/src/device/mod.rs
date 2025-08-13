@@ -602,7 +602,7 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
-        mut tun_tx: impl IpSend,
+        tun_tx: impl IpSend,
         udp_tx: impl UdpSend,
         mut udp_rx: impl UdpRecv,
         mut packet_pool: PacketBufPool,
@@ -736,7 +736,7 @@ impl<T: DeviceTransports> Device<T> {
             let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
                 Err(e) => {
-                    log::error!("Unexpected error on tun interface: {:?}", e);
+                    log::error!("Unexpected error on tun interface: {e:?}");
                     break;
                 }
             };
