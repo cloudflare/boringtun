@@ -83,7 +83,7 @@ dependencies = [
  "blake2",
  "chacha20poly1305",
  "criterion",
- "embedded-time 0.13.0",
+ "embedded-time",
  "etherparse",
  "hex",
  "hmac",
@@ -438,15 +438,6 @@ name = "either"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f107b87b6afc2a64fd13cac55fe06d6c8859f12d4b14cbcdd2c67d0976781be"
-
-[[package]]
-name = "embedded-time"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7a4b4d10ac48d08bfe3db7688c402baadb244721f30a77ce360bd24c3dffe58"
-dependencies = [
- "num",
-]
 
 [[package]]
 name = "embedded-time"
@@ -1062,10 +1053,9 @@ dependencies = [
 [[package]]
 name = "std-embedded-time"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7a82a83bf323e55022f3d875305319a23a4936de5a316b9c67cf31e9758bb63"
+source = "git+https://github.com/SimonIT/std-embedded-time.git?branch=release%2Fv0.13.0#2c4b90174c841b075fde0e53b270385d5a5198a7"
 dependencies = [
- "embedded-time 0.12.1",
+ "embedded-time",
 ]
 
 [[package]]
