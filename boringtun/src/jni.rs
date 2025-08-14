@@ -35,8 +35,7 @@ pub extern "C" fn log_print(_log_string: *const c_char) {
 }
 
 /// Generates new x25519 secret key and converts into java byte array.
-#[no_mangle]
-#[export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_x25519_1secret_1key"]
+#[unsafe(export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_x25519_1secret_1key")]
 pub extern "C" fn generate_secret_key(env: JNIEnv, _class: JClass) -> jbyteArray {
     match env.byte_array_from_slice(&x25519_secret_key().key) {
         Ok(v) => v,
@@ -45,8 +44,7 @@ pub extern "C" fn generate_secret_key(env: JNIEnv, _class: JClass) -> jbyteArray
 }
 
 /// Computes public x25519 key from secret key and converts into java byte array.
-#[no_mangle]
-#[export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_x25519_1public_1key"]
+#[unsafe(export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_x25519_1public_1key")]
 pub unsafe extern "C" fn generate_public_key1(
     env: JNIEnv,
     _class: JClass,
@@ -72,8 +70,7 @@ pub unsafe extern "C" fn generate_public_key1(
 }
 
 /// Converts x25519 key to hex string.
-#[no_mangle]
-#[export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_x25519_1key_1to_1hex"]
+#[unsafe(export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_x25519_1key_1to_1hex")]
 pub unsafe extern "C" fn convert_x25519_key_to_hex(
     env: JNIEnv,
     _class: JClass,
@@ -98,8 +95,7 @@ pub unsafe extern "C" fn convert_x25519_key_to_hex(
 }
 
 /// Converts x25519 key to base64 string.
-#[no_mangle]
-#[export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_x25519_1key_1to_1base64"]
+#[unsafe(export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_x25519_1key_1to_1base64")]
 pub unsafe extern "C" fn convert_x25519_key_to_base64(
     env: JNIEnv,
     _class: JClass,
@@ -125,8 +121,7 @@ pub unsafe extern "C" fn convert_x25519_key_to_base64(
 }
 
 /// Creates new tunnel
-#[no_mangle]
-#[export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_new_1tunnel"]
+#[unsafe(export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_new_1tunnel")]
 pub unsafe extern "C" fn create_new_tunnel(
     env: JNIEnv,
     _class: JClass,
@@ -171,8 +166,7 @@ pub unsafe extern "C" fn create_new_tunnel(
 }
 
 /// Encrypts raw IP packets into WG formatted packets.
-#[no_mangle]
-#[export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_wireguard_1write"]
+#[unsafe(export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_wireguard_1write")]
 pub unsafe extern "C" fn encrypt_raw_packet(
     env: JNIEnv,
     _class: JClass,
@@ -206,8 +200,7 @@ pub unsafe extern "C" fn encrypt_raw_packet(
 }
 
 /// Decrypts WG formatted packets into raw IP packets.
-#[no_mangle]
-#[export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_wireguard_1read"]
+#[unsafe(export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_wireguard_1read")]
 pub unsafe extern "C" fn decrypt_to_raw_packet(
     env: JNIEnv,
     _class: JClass,
@@ -242,8 +235,7 @@ pub unsafe extern "C" fn decrypt_to_raw_packet(
 }
 
 /// Periodic function that writes WG formatted packets into destination buffer
-#[no_mangle]
-#[export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_wireguard_1tick"]
+#[unsafe(export_name = "Java_com_cloudflare_app_boringtun_BoringTunJNI_wireguard_1tick")]
 pub unsafe extern "C" fn run_periodic_task(
     env: JNIEnv,
     _class: JClass,

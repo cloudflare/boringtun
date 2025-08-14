@@ -25,7 +25,7 @@ impl BufferedIpSend {
         let task = Task::spawn("buffered IP send", async move {
             while let Some(packet) = rx.recv().await {
                 if let Err(e) = inner.send(packet).await {
-                    log::error!("Error sending IP packet: {}", e);
+                    log::error!("Error sending IP packet: {e}");
                 }
             }
         });
@@ -76,7 +76,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
                         }
                     }
                     Err(e) => {
-                        log::error!("Error receiving IP packet: {}", e);
+                        log::error!("Error receiving IP packet: {e}");
                         // exit?
                         continue;
                     }

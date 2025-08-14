@@ -332,7 +332,7 @@ impl Tunn {
         self.timer_tick(TimerName::TimeLastPacketSent);
         self.timer_tick_session_established(false, index); // New session established, we are not the initiator
 
-        log::debug!("Sending handshake_response: {}", index);
+        log::debug!("Sending handshake_response: {index}");
 
         Ok(TunnResult::WriteToNetwork(packet))
     }
@@ -392,7 +392,7 @@ impl Tunn {
                 >= self.timers.session_timers[cur_idx % N_SESSIONS]
         {
             self.current = new_idx;
-            log::debug!("New session: {}", new_idx);
+            log::debug!("New session: {new_idx}");
         }
     }
 

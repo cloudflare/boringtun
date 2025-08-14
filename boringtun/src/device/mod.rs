@@ -128,6 +128,7 @@ pub struct Device<T: DeviceTransports> {
     /// This is `Arc<Mutex>`:ed because:
     /// - The task responsible from reading from the tun_rx must have ownership of it.
     /// - We must be able to claim the ownership after that task is stopped.
+    ///
     /// This is implemented by the task taking the lock upon startup, and holding it until it is
     /// stopped.
     tun_rx: Arc<Mutex<T::IpRecv>>,
@@ -602,7 +603,7 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
-        mut tun_tx: impl IpSend,
+        tun_tx: impl IpSend,
         udp_tx: impl UdpSend,
         mut udp_rx: impl UdpRecv,
         mut packet_pool: PacketBufPool,
@@ -736,7 +737,7 @@ impl<T: DeviceTransports> Device<T> {
             let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
                 Err(e) => {
-                    log::error!("Unexpected error on tun interface: {:?}", e);
+                    log::error!("Unexpected error on tun interface: {e:?}");
                     break;
                 }
             };
