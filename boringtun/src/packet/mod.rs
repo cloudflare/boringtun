@@ -4,7 +4,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use duplicate::duplicate_item;
 use either::Either;
 use eyre::{Context, bail, eyre};
@@ -269,6 +269,26 @@ impl Packet<Ipv6> {
         // we have asserted that the packet is a valid IPv6 UDP packet.
         // update `_kind` to reflect this.
         Ok(self.cast::<Ipv6<Udp>>())
+    }
+}
+
+impl<T: CheckedPayload + ?Sized> Packet<Ipv4<T>> {
+    pub fn into_payload(mut self) -> Packet<T> {
+        let header_length = self.header.ihl() * 4;
+        self.inner.buf.advance(header_length as usize);
+        self.cast::<T>()
+    }
+}
+impl<T: CheckedPayload + ?Sized> Packet<Ipv6<T>> {
+    pub fn into_payload(mut self) -> Packet<T> {
+        self.inner.buf.advance(Ipv6Header::LEN);
+        self.cast::<T>()
+    }
+}
+impl<T: CheckedPayload + ?Sized> Packet<Udp<T>> {
+    pub fn into_payload(mut self) -> Packet<T> {
+        self.inner.buf.advance(UdpHeader::LEN);
+        self.cast::<T>()
     }
 }
 
