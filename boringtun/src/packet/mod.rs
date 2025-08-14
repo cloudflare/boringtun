@@ -274,8 +274,12 @@ impl Packet<Ipv6> {
 
 impl<T: CheckedPayload + ?Sized> Packet<Ipv4<T>> {
     pub fn into_payload(mut self) -> Packet<T> {
-        let header_length = self.header.ihl() * 4;
-        self.inner.buf.advance(header_length as usize);
+        debug_assert_eq!(
+            self.header.ihl() as usize * 4,
+            Ipv4Header::LEN,
+            "IPv4 header length must be 20 bytes (IHL = 5)"
+        );
+        self.inner.buf.advance(Ipv4Header::LEN);
         self.cast::<T>()
     }
 }

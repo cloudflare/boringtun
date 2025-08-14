@@ -227,7 +227,7 @@ impl UdpSend for Arc<UdpChannel> {
 impl UdpRecv for Arc<UdpChannel> {
     type RecvManyBuf = ();
 
-    async fn recv_from(&mut self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
+    async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
         match self.ip_version {
             IpVersion::V4 => {
                 let mut udp_rx = self
@@ -238,18 +238,16 @@ impl UdpRecv for Arc<UdpChannel> {
 
                 let ipv4 = udp_rx.recv().await.expect("sender exists");
 
-                let udp = &ipv4.payload;
-
                 let source_addr = ipv4.header.source();
+
+                let udp = ipv4.into_payload();
                 let source_port = udp.header.source_port.get();
-                let source_addr = SocketAddr::from((source_addr, source_port));
 
-                let mut buf = pool.get();
-                let len = udp.payload.len().min(buf.len());
-                buf[..len].copy_from_slice(&udp.payload);
-                buf.truncate(len);
+                // Packet with IP and UDP headers shed.
+                let inner_packet = udp.into_payload();
+                let socket_addr = SocketAddr::from((source_addr, source_port));
 
-                Ok((buf, source_addr))
+                Ok((inner_packet, socket_addr))
             }
 
             IpVersion::V6 => {
@@ -260,18 +258,17 @@ impl UdpRecv for Arc<UdpChannel> {
                     .expect("multiple concurrent calls to recv_from");
 
                 let ipv6 = udp_rx.recv().await.expect("sender exists");
-                let udp = &ipv6.payload;
 
                 let source_addr = ipv6.header.source();
+
+                let udp = ipv6.into_payload();
                 let source_port = udp.header.source_port.get();
-                let source_addr = SocketAddr::from((source_addr, source_port));
 
-                let mut buf = pool.get();
-                let len = udp.payload.len().min(buf.len());
-                buf[..len].copy_from_slice(&udp.payload);
-                buf.truncate(len);
+                // Packet with IP and UDP headers shed.
+                let inner_packet = udp.into_payload();
+                let socket_addr = SocketAddr::from((source_addr, source_port));
 
-                Ok((buf, source_addr))
+                Ok((inner_packet, socket_addr))
             }
         }
     }
