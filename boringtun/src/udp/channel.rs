@@ -247,6 +247,7 @@ impl UdpRecv for Arc<UdpChannel> {
                 let mut buf = pool.get();
                 let len = udp.payload.len().min(buf.len());
                 buf[..len].copy_from_slice(&udp.payload);
+                buf.truncate(len);
 
                 Ok((buf, source_addr))
             }
@@ -268,6 +269,7 @@ impl UdpRecv for Arc<UdpChannel> {
                 let mut buf = pool.get();
                 let len = udp.payload.len().min(buf.len());
                 buf[..len].copy_from_slice(&udp.payload);
+                buf.truncate(len);
 
                 Ok((buf, source_addr))
             }
