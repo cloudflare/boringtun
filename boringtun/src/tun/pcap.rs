@@ -7,6 +7,7 @@ use std::{
 };
 
 use pcap_file::pcap::{PcapHeader, PcapPacket};
+use zerocopy::IntoBytes;
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -62,10 +63,10 @@ impl<R: IpRecv> IpRecv for PcapSniffer<R> {
         let packets = self.inner.recv(buf).await?;
 
         let packets = packets.inspect(|packet| {
+            let packet = packet.as_bytes();
             let timestamp = Instant::now().duration_since(self.epoch);
             if let Ok(mut write) = self.writer.writer.lock() {
-                let pcap_packet =
-                    PcapPacket::new(timestamp, packet.payload.len() as u32, &packet.payload);
+                let pcap_packet = PcapPacket::new(timestamp, packet.len() as u32, packet);
                 let _ = write.write_packet(&pcap_packet);
             }
         });
@@ -77,9 +78,9 @@ impl<R: IpRecv> IpRecv for PcapSniffer<R> {
 impl<S: IpSend> IpSend for PcapSniffer<S> {
     async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
         if let Ok(mut write) = self.writer.writer.lock() {
+            let packet = packet.as_bytes();
             let timestamp = Instant::now().duration_since(self.epoch);
-            let pcap_packet =
-                PcapPacket::new(timestamp, packet.payload.len() as u32, &packet.payload);
+            let pcap_packet = PcapPacket::new(timestamp, packet.len() as u32, packet);
             let _ = write.write_packet(&pcap_packet);
         }
         self.inner.send(packet).await?;
