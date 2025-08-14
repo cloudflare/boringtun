@@ -72,7 +72,7 @@ impl TunSocket {
             });
         }
 
-        let fd = match unsafe { open(c"/dev/net/tun".as_ptr() as _, O_RDWR) } {
+        let fd = match unsafe { open(b"/dev/net/tun\0".as_ptr() as _, O_RDWR) } {
             -1 => return Err(Error::Socket(io::Error::last_os_error())),
             fd => fd,
         };

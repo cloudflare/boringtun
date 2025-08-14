@@ -2,8 +2,8 @@
 //! Attempts to provide the same functionality as std::time::Instant, except it
 //! uses a timer which accounts for time when the system is asleep
 
-use embedded_time::Clock;
 use embedded_time::duration::Generic;
+use embedded_time::Clock;
 #[cfg(windows)]
 pub use std_embedded_time::StandardClock as ClockImpl;
 

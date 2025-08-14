@@ -13,13 +13,13 @@ use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
 use core::convert::TryFrom;
 use core::convert::TryInto;
-use embedded_time::Clock;
 use embedded_time::duration::{Generic, Milliseconds, Nanoseconds, Seconds};
 use embedded_time::fixed_point::FixedPoint;
+use embedded_time::Clock;
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 use rand_core::OsRng;
-use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 
 pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
 pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";

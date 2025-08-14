@@ -6,6 +6,7 @@ use core::net::IpAddr;
 use core::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
+use std::convert::TryFrom;
 
 #[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::Instant;
@@ -14,10 +15,12 @@ use crate::sleepyinstant::ClockImpl;
 use aead::generic_array::GenericArray;
 use aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{Key, XChaCha20Poly1305};
-use embedded_time::Clock;
 use embedded_time::duration::Seconds;
 use embedded_time::fixed_point::FixedPoint;
-use parking_lot::Mutex;
+use embedded_time::Clock;
+use lock_api::Mutex;
+#[cfg(feature = "std")]
+use parking_lot::RawMutex;
 use rand_core::{OsRng, RngCore};
 use ring::constant_time::verify_slices_are_equal;
 
@@ -52,7 +55,7 @@ pub struct RateLimiter {
     /// The counter since last reset
     count: AtomicU64,
     /// The time last reset was performed on this rate limiter
-    last_reset: Mutex<Instant>,
+    last_reset: Mutex<RawMutex, Instant>,
 }
 
 impl RateLimiter {

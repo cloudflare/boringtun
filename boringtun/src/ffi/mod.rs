@@ -10,21 +10,28 @@ use super::noise::{Tunn, TunnResult};
 use crate::x25519::{PublicKey, StaticSecret};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
-use libc::{SIGSEGV, raise};
-use parking_lot::Mutex;
+use libc::{raise, SIGSEGV};
+use lock_api::Mutex;
+use parking_lot::RawMutex;
 use rand_core::OsRng;
 use tracing;
 use tracing_subscriber::fmt;
 
 use crate::serialization::KeyBytes;
-use core::ffi::{CStr, CString};
-use core::io::{Error, ErrorKind, Write};
-use core::os::raw::c_char;
-use core::panic;
+use crate::sleepyinstant::ClockImpl;
+use core::ffi::CStr;
 use core::ptr;
 use core::ptr::null_mut;
 use core::slice;
-use core::sync::Once;
+use embedded_time::duration::Seconds;
+use embedded_time::fixed_point::FixedPoint;
+use embedded_time::Clock;
+use std::convert::TryFrom;
+use std::ffi::CString;
+use std::io::{Error, ErrorKind, Write};
+use std::os::raw::c_char;
+use std::panic;
+use std::sync::Once;
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -153,7 +160,11 @@ pub unsafe extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> 
         for b in key {
             zero |= b
         }
-        if len == 32 && zero != 0 { 1 } else { 0 }
+        if len == 32 && zero != 0 {
+            1
+        } else {
+            0
+        }
     } else {
         0
     }
@@ -166,7 +177,7 @@ struct FFIFunctionPointerWriter {
 
 /// Implements Write trait for use with tracing_subscriber
 impl Write for FFIFunctionPointerWriter {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, core::io::Error> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         let out_str = String::from_utf8_lossy(buf).to_string();
         if let Ok(c_string) = CString::new(out_str) {
             unsafe { (self.log_func)(c_string.as_ptr()) }
@@ -179,7 +190,7 @@ impl Write for FFIFunctionPointerWriter {
         }
     }
 
-    fn flush(&mut self) -> Result<(), core::io::Error> {
+    fn flush(&mut self) -> Result<(), std::io::Error> {
         // no-op
         Ok(())
     }
@@ -203,7 +214,7 @@ impl Write for FFIFunctionPointerWriter {
 pub unsafe extern "C" fn set_logging_function(
     log_func: unsafe extern "C" fn(*const c_char),
 ) -> bool {
-    let result = core::panic::catch_unwind(|| -> bool {
+    let result = std::panic::catch_unwind(|| -> bool {
         let writer = FFIFunctionPointerWriter { log_func };
         let format = fmt::format()
             // don't include levels in formatted output
@@ -221,13 +232,17 @@ pub unsafe extern "C" fn set_logging_function(
 
         fmt()
             .event_format(format)
-            .with_writer(core::sync::Mutex::new(writer))
+            .with_writer(std::sync::Mutex::new(writer))
             .with_max_level(tracing::Level::TRACE)
             .with_ansi(false)
             .try_init()
             .is_ok()
     });
-    if let Ok(value) = result { value } else { false }
+    if let Ok(value) = result {
+        value
+    } else {
+        false
+    }
 }
 
 /// Allocate a new tunnel, return NULL on failure.
@@ -239,7 +254,7 @@ pub unsafe extern "C" fn new_tunnel(
     preshared_key: *const c_char,
     keep_alive: u16,
     index: u32,
-) -> *mut Mutex<Tunn> {
+) -> *mut Mutex<RawMutex, Tunn> {
     let c_str = CStr::from_ptr(static_private);
     let static_private = match c_str.to_str() {
         Err(_) => return ptr::null_mut(),
@@ -305,7 +320,7 @@ pub unsafe extern "C" fn new_tunnel(
 
 /// Drops the Tunn object
 #[no_mangle]
-pub unsafe extern "C" fn tunnel_free(tunnel: *mut Mutex<Tunn>) {
+pub unsafe extern "C" fn tunnel_free(tunnel: *mut Mutex<RawMutex, Tunn>) {
     drop(Box::from_raw(tunnel));
 }
 
@@ -313,7 +328,7 @@ pub unsafe extern "C" fn tunnel_free(tunnel: *mut Mutex<Tunn>) {
 /// For more details check noise::tunnel_to_network functions.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_write(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const Mutex<RawMutex, Tunn>,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
@@ -330,7 +345,7 @@ pub unsafe extern "C" fn wireguard_write(
 /// For more details check noise::network_to_tunnel functions.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_read(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const Mutex<RawMutex, Tunn>,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
@@ -347,7 +362,7 @@ pub unsafe extern "C" fn wireguard_read(
 /// Recommended interval: 100ms.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_tick(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const Mutex<RawMutex, Tunn>,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
@@ -360,7 +375,7 @@ pub unsafe extern "C" fn wireguard_tick(
 /// Force the tunnel to initiate a new handshake, dst buffer must be at least 148 byte long.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_force_handshake(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const Mutex<RawMutex, Tunn>,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
@@ -375,11 +390,17 @@ pub unsafe extern "C" fn wireguard_force_handshake(
 /// Number of data bytes encapsulated
 /// Number of data bytes decapsulated
 #[no_mangle]
-pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<Tunn>) -> stats {
+pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<RawMutex, Tunn>) -> stats {
     let tunnel = tunnel.as_ref().unwrap().lock();
     let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt) = tunnel.stats();
     stats {
-        time_since_last_handshake: time.map(|t| t.as_secs() as i64).unwrap_or(-1),
+        time_since_last_handshake: time
+            .map(|t| {
+                Seconds::<<ClockImpl as Clock>::T>::try_from(t)
+                    .unwrap()
+                    .integer() as i64
+            })
+            .unwrap_or(-1),
         tx_bytes,
         rx_bytes,
         estimated_loss,

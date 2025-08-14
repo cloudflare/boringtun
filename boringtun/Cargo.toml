@@ -11,15 +11,15 @@ license = "BSD-3-Clause"
 readme = "../README.md"
 repository = "https://github.com/cloudflare/boringtun"
 documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
-edition = "2024"
+edition = "2018"
 
 [features]
 default = [ "std" ]
 alloc = [ ]
-std = [ "alloc", "dep:std-embedded-time" ]
-device = ["socket2", "thiserror", "std"]
+std = [ "alloc", "dep:parking_lot", "dep:std-embedded-time" ]
+device = ["std", "socket2", "thiserror"]
 jni-bindings = ["ffi-bindings", "jni"]
-ffi-bindings = ["tracing-subscriber"]
+ffi-bindings = ["std", "tracing-subscriber"]
 # mocks std::time::Instant with mock_instant
 mock-instant = ["mock_instant"]
 
@@ -28,7 +28,8 @@ base64 = { version = "0.13", features = ["alloc"] }
 hex = { version = "0.4", features = ["alloc"] }
 untrusted = "0.9.0"
 libc = { version = "0.2", default-features = false }
-parking_lot = "0.12"
+parking_lot = { version = "0.12.4", optional = true }
+lock_api = "0.4.13"
 tracing = { version = "0.1.40", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["fmt"], optional = true }
 ip_network = "0.4.1"

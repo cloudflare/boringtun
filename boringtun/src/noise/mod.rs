@@ -19,8 +19,8 @@ use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use core::convert::{TryFrom, TryInto};
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use embedded_time::Clock;
 use embedded_time::duration::Generic;
+use embedded_time::Clock;
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;

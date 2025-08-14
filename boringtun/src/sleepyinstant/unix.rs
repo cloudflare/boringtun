@@ -2,7 +2,7 @@ use core::ops::Add;
 use embedded_time::duration::Seconds;
 use embedded_time::rate::Fraction;
 use embedded_time::{Clock, Instant};
-use nix::time::{ClockId, clock_gettime};
+use nix::time::{clock_gettime, ClockId};
 
 #[cfg(any(
     target_os = "macos",
