@@ -12,6 +12,7 @@ use embedded_time::duration::{Nanoseconds, Seconds};
 use embedded_time::Clock;
 use hex::encode as encode_hex;
 use libc::*;
+use std::convert::TryFrom;
 use std::fs::{create_dir, remove_file};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd};
