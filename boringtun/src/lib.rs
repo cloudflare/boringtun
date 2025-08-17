@@ -20,7 +20,6 @@ pub mod ffi;
 pub mod jni;
 pub mod noise;
 
-#[cfg(not(feature = "mock-instant"))]
 pub(crate) mod sleepyinstant;
 
 pub(crate) mod serialization;

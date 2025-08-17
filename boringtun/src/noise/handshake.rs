@@ -4,7 +4,6 @@
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
-#[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::{ClockImpl, Instant};
 use crate::x25519;
 use aead::{Aead, Payload};
@@ -16,8 +15,6 @@ use core::convert::TryInto;
 use embedded_time::duration::{Generic, Milliseconds, Nanoseconds, Seconds};
 use embedded_time::fixed_point::FixedPoint;
 use embedded_time::Clock;
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
 use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 

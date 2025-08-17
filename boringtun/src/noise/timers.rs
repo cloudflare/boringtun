@@ -4,14 +4,11 @@
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
 use crate::sleepyinstant::ClockImpl;
-#[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::Instant;
 use core::mem;
 use core::ops::{Index, IndexMut};
 use embedded_time::duration::{Generic, Seconds};
 use embedded_time::Clock;
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14

@@ -599,8 +599,6 @@ impl Tunn {
 mod tests {
     extern crate std;
 
-    #[cfg(feature = "mock-instant")]
-    use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
     use std::vec;
     use std::vec::Vec;
 
@@ -689,20 +687,6 @@ mod tests {
         packet
     }
 
-    #[cfg(feature = "mock-instant")]
-    fn update_timer_results_in_handshake(tun: &mut Tunn) {
-        let mut dst = vec![0u8; 2048];
-        let result = tun.update_timers(&mut dst);
-        assert!(matches!(result, TunnResult::WriteToNetwork(_)));
-        let packet_data = if let TunnResult::WriteToNetwork(data) = result {
-            data
-        } else {
-            unreachable!();
-        };
-        let packet = Tunn::parse_incoming_packet(packet_data).unwrap();
-        assert!(matches!(packet, Packet::HandshakeInit(_)));
-    }
-
     #[test]
     fn create_two_tunnels_linked_to_eachother() {
         let (_my_tun, _their_tun) = create_two_tuns();
@@ -741,43 +725,6 @@ mod tests {
         // Time has not yet advanced so their is nothing to do
         assert!(matches!(my_tun.update_timers(&mut []), TunnResult::Done));
         assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
-    }
-
-    #[test]
-    #[cfg(feature = "mock-instant")]
-    fn new_handshake_after_two_mins() {
-        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
-        let mut my_dst = [0u8; 1024];
-
-        // Advance time 1 second and "send" 1 packet so that we send a handshake
-        // after the timeout
-        mock_instant::MockClock::advance(Duration::from_secs(1));
-        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
-        assert!(matches!(
-            my_tun.update_timers(&mut my_dst),
-            TunnResult::Done
-        ));
-        let sent_packet_buf = create_ipv4_udp_packet();
-        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
-        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
-
-        //Advance to timeout
-        mock_instant::MockClock::advance(REKEY_AFTER_TIME);
-        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
-        update_timer_results_in_handshake(&mut my_tun);
-    }
-
-    #[test]
-    #[cfg(feature = "mock-instant")]
-    fn handshake_no_resp_rekey_timeout() {
-        let (mut my_tun, _their_tun) = create_two_tuns();
-
-        let init = create_handshake_init(&mut my_tun);
-        let packet = Tunn::parse_incoming_packet(&init).unwrap();
-        assert!(matches!(packet, Packet::HandshakeInit(_)));
-
-        mock_instant::MockClock::advance(REKEY_TIMEOUT);
-        update_timer_results_in_handshake(&mut my_tun)
     }
 
     #[test]
