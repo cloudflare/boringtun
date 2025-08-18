@@ -73,6 +73,7 @@ nix = { version = "0.30", default-features = false, features = [
 etherparse = "0.13"
 tracing-subscriber = "0.3"
 criterion = { version = "0.7.0", features = ["html_reports"] }
+rand = "0.9.2"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
