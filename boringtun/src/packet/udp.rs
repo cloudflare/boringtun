@@ -2,6 +2,8 @@ use std::fmt;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
+use super::util::size_must_be;
+
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Udp<Payload: ?Sized = [u8]> {
@@ -16,6 +18,11 @@ pub struct UdpHeader {
     pub destination_port: big_endian::U16,
     pub length: big_endian::U16,
     pub checksum: big_endian::U16,
+}
+
+impl UdpHeader {
+    #[allow(dead_code)]
+    pub const LEN: usize = size_must_be::<UdpHeader>(8);
 }
 
 impl fmt::Debug for UdpHeader {

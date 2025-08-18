@@ -193,6 +193,7 @@ dependencies = [
  "bytes",
  "chacha20poly1305",
  "criterion",
+ "duplicate",
  "either",
  "etherparse",
  "eyre",
@@ -611,6 +612,12 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
+
+[[package]]
+name = "duplicate"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97af9b5f014e228b33e77d75ee0e6e87960124f0f4b16337b586a6bec91867b1"
 
 [[package]]
 name = "either"
