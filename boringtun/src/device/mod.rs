@@ -183,10 +183,10 @@ impl<T: DeviceTransports> Connection<T> {
         let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
 
         let buffered_udp_rx_v4 = BufferedUdpReceive::new::<
-            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
         >(MAX_PACKET_BUFS, udp4_rx);
         let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
-            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
         >(MAX_PACKET_BUFS, udp6_rx);
 
         let outgoing = Task::spawn(
@@ -475,9 +475,9 @@ impl<T: DeviceTransports> Device<T> {
     ) -> Result<
         (
             <T::UdpTransportFactory as UdpTransportFactory>::Send,
-            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
             <T::UdpTransportFactory as UdpTransportFactory>::Send,
-            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
         ),
         Error,
     > {

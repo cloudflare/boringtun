@@ -195,7 +195,8 @@ pub struct UdpTransportFactoryParams {
 /// See [UdpTransport].
 pub trait UdpTransportFactory: Send + Sync + 'static {
     type Send: UdpSend + UdpTransport + 'static;
-    type Recv: UdpRecv + 'static;
+    type RecvV4: UdpRecv + 'static;
+    type RecvV6: UdpRecv + 'static;
 
     /// Bind sockets for sending and receiving UDP.
     ///
@@ -204,7 +205,7 @@ pub trait UdpTransportFactory: Send + Sync + 'static {
     fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> impl Future<Output = io::Result<((Self::Send, Self::Recv), (Self::Send, Self::Recv))>> + Send;
+    ) -> impl Future<Output = io::Result<((Self::Send, Self::RecvV4), (Self::Send, Self::RecvV6))>> + Send;
 }
 
 pub struct UdpSocketFactory;
@@ -214,12 +215,13 @@ const UDP_SEND_BUFFER_SIZE: usize = 7 * 1024 * 1024;
 
 impl UdpTransportFactory for UdpSocketFactory {
     type Send = UdpSocket;
-    type Recv = UdpSocket;
+    type RecvV4 = UdpSocket;
+    type RecvV6 = UdpSocket;
 
     async fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> io::Result<((Self::Send, Self::Recv), (Self::Send, Self::Recv))> {
+    ) -> io::Result<((Self::Send, Self::RecvV4), (Self::Send, Self::RecvV6))> {
         let mut port = params.port;
         let udp_v4 = UdpSocket::bind((params.addr_v4, port).into())?;
         if port == 0 {
