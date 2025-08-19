@@ -231,7 +231,7 @@ impl UdpTransportFactory for PacketChannelUdp {
     ) -> io::Result<((Self::Send, Self::RecvV4), (Self::Send, Self::RecvV6))> {
         let connection_id = rand_core::OsRng.next_u32().max(1);
         let source_port = match params.port {
-            0 => rand_u16().max(1),
+            0 => rand::random_range(1u16..u16::MAX),
             p => p,
         };
 
@@ -447,10 +447,6 @@ async fn create_ipv6_payload(
     Packet::from_bytes(packet)
         .try_into_ip()
         .expect("packet is valid")
-}
-
-fn rand_u16() -> u16 {
-    u16::try_from(rand_core::OsRng.next_u32().overflowing_shr(16).0).unwrap()
 }
 
 mod fragmentation {
