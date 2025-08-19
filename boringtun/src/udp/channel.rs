@@ -49,13 +49,39 @@ type Ipv6UdpReceiver = mpsc::Receiver<Packet<Ipv6<Udp>>>;
 /// An implementation of [`UdpRecv`] for IPv4 UDP packets. Create using
 /// [`get_packet_channels`].
 pub struct UdpChannelV4Rx {
-    udp_rx_v4: Arc<Mutex<mpsc::Receiver<Packet<Ipv4<Udp>>>>>,
+    /// The receiver for IPv4 UDP packets. Is always `Some` until drop.
+    udp_rx_v4: Option<Ipv4UdpReceiver>,
+    /// Shared memory with `PacketChannelUdp` to return the receiver after drop.
+    return_udp_rx_v4: Arc<Mutex<Option<Ipv4UdpReceiver>>>,
+}
+
+impl Drop for UdpChannelV4Rx {
+    fn drop(&mut self) {
+        // Return the receiver to `PacketChannelUdp`
+        *self
+            .return_udp_rx_v4
+            .try_lock()
+            .expect("multiple concurrent calls to drop") = self.udp_rx_v4.take();
+    }
 }
 
 /// An implementation of [`UdpRecv`] for IPv6 UDP packets. Create using
 /// [`get_packet_channels`].
 pub struct UdpChannelV6Rx {
-    udp_rx_v6: Arc<Mutex<mpsc::Receiver<Packet<Ipv6<Udp>>>>>,
+    /// The receiver for IPv6 UDP packets. Is always `Some` until drop.
+    udp_rx_v6: Option<Ipv6UdpReceiver>,
+    /// Shared memory with `PacketChannelUdp` to return the receiver after drop.
+    return_udp_rx_v6: Arc<Mutex<Option<Ipv6UdpReceiver>>>,
+}
+
+impl Drop for UdpChannelV6Rx {
+    fn drop(&mut self) {
+        // Return the receiver to `PacketChannelUdp`
+        *self
+            .return_udp_rx_v6
+            .try_lock()
+            .expect("multiple concurrent calls to drop") = self.udp_rx_v6.take();
+    }
 }
 
 /// An implementation of [`UdpTransportFactory`], producing [`UdpSend`] and
@@ -66,8 +92,8 @@ pub struct PacketChannelUdp {
 
     // FIXME: remove Mutexes
     udp_tx: mpsc::Sender<Packet<Ip>>,
-    udp_rx_v4: Arc<Mutex<mpsc::Receiver<Packet<Ipv4<Udp>>>>>,
-    udp_rx_v6: Arc<Mutex<mpsc::Receiver<Packet<Ipv6<Udp>>>>>,
+    udp_rx_v4: Arc<Mutex<Option<Ipv4UdpReceiver>>>,
+    udp_rx_v6: Arc<Mutex<Option<Ipv6UdpReceiver>>>,
 }
 
 /// Create a set of channel-based TUN and UDP endpoints for in-process device communication.
@@ -121,8 +147,8 @@ pub fn get_packet_channels(
         source_ip_v4,
         source_ip_v6,
         udp_tx,
-        udp_rx_v4: Arc::new(Mutex::new(udp_rx_v4)),
-        udp_rx_v6: Arc::new(Mutex::new(udp_rx_v6)),
+        udp_rx_v4: Arc::new(Mutex::new(Some(udp_rx_v4))),
+        udp_rx_v6: Arc::new(Mutex::new(Some(udp_rx_v6))),
     };
     (tun_tx, tun_rx, udp_channel_factory)
 }
@@ -197,10 +223,12 @@ impl UdpTransportFactory for PacketChannelUdp {
         };
 
         let channel_rx_v4 = UdpChannelV4Rx {
-            udp_rx_v4: self.udp_rx_v4.clone(),
+            return_udp_rx_v4: self.udp_rx_v4.clone(),
+            udp_rx_v4: self.udp_rx_v4.clone().lock().await.take(),
         };
         let channel_rx_v6 = UdpChannelV6Rx {
-            udp_rx_v6: self.udp_rx_v6.clone(),
+            return_udp_rx_v6: self.udp_rx_v6.clone(),
+            udp_rx_v6: self.udp_rx_v6.clone().lock().await.take(),
         };
         Ok((
             (channel_tx.clone(), channel_rx_v4),
@@ -263,11 +291,13 @@ impl UdpRecv for UdpChannelV4Rx {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let mut udp_rx_v4 = self
+        let ipv4 = self
             .udp_rx_v4
-            .try_lock()
-            .expect("multiple concurrent calls to recv_from");
-        let ipv4 = udp_rx_v4.recv().await.expect("sender exists");
+            .as_mut()
+            .expect("UdpChannelV4Rx holds sender for its entire lifetime")
+            .recv()
+            .await
+            .expect("sender exists");
 
         let source_addr = ipv4.header.source();
 
@@ -286,11 +316,13 @@ impl UdpRecv for UdpChannelV6Rx {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let mut udp_rx_v6 = self
+        let ipv6 = self
             .udp_rx_v6
-            .try_lock()
-            .expect("multiple concurrent calls to recv_from");
-        let ipv6 = udp_rx_v6.recv().await.expect("sender exists");
+            .as_mut()
+            .expect("UdpChannelV4Rx holds sender for its entire lifetime")
+            .recv()
+            .await
+            .expect("sender exists");
 
         let source_addr = ipv6.header.source();
 
