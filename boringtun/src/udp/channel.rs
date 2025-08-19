@@ -211,7 +211,11 @@ impl IpRecv for TunChannelRx {
         &'a mut self,
         _pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a> {
-        let packet = self.tun_rx.recv().await.expect("sender exists");
+        let Some(packet) = self.tun_rx.recv().await else {
+            log::trace!("tun_rx sender dropped and no more packet can be received");
+            let () = std::future::pending().await;
+            unreachable!();
+        };
         Ok(iter::once(packet))
     }
 }
