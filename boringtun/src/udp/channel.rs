@@ -457,7 +457,7 @@ mod fragmentation {
         udp::channel::{IPV4_HEADER_LEN, IPV4_MAX_LEN},
     };
     use std::{
-        collections::{BTreeMap, HashMap, VecDeque},
+        collections::{BTreeMap, VecDeque},
         net::Ipv4Addr,
     };
 
@@ -471,10 +471,17 @@ mod fragmentation {
     }
     const MAX_CONCURRENT_FRAGS: usize = 64;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub struct Ipv4Fragments {
-        fragments: HashMap<FragmentId, BTreeMap<u16, Packet<Ipv4>>>,
-        fragment_index_fifo: VecDeque<FragmentId>,
+        fragments: VecDeque<(FragmentId, BTreeMap<u16, Packet<Ipv4>>)>,
+    }
+
+    impl Default for Ipv4Fragments {
+        fn default() -> Self {
+            Self {
+                fragments: VecDeque::with_capacity(MAX_CONCURRENT_FRAGS),
+            }
+        }
     }
 
     impl Ipv4Fragments {
@@ -510,21 +517,20 @@ mod fragmentation {
                 source_ip: ipv4_packet.header.source(),
                 destination_ip: ipv4_packet.header.destination(),
             };
-            let Some(fragments) = fragment_map.get_mut(&id) else {
-                if self.fragment_index_fifo.len() >= MAX_CONCURRENT_FRAGS {
-                    let id = self.fragment_index_fifo.pop_front().expect("fifo is full");
-                    let _removed_frags = fragment_map.remove(&id);
-                    debug_assert!(
-                        _removed_frags.is_some(),
-                        "Failed to remove fragments for ID {id:?}, fifo out of sync"
+
+            let Some(frag_pos) = fragment_map.iter_mut().position(|(id2, _)| id2 == &id) else {
+                if fragment_map.len() >= MAX_CONCURRENT_FRAGS {
+                    fragment_map.pop_front();
+                    log::trace!(
+                        "Fragment map at full capacity {MAX_CONCURRENT_FRAGS}, dropping oldest fragment for ID {id:?} to make space"
                     );
                 }
                 // Since this was the first fragment, we don't check if the packet
                 // can be reassembled yet.
-                fragment_map.insert(id, BTreeMap::from([(fragment_offset, ipv4_packet)]));
-                self.fragment_index_fifo.push_back(id);
+                fragment_map.push_back((id, BTreeMap::from([(fragment_offset, ipv4_packet)])));
                 return None;
             };
+            let (_, fragments) = fragment_map.get_mut(frag_pos).unwrap();
             let _frag_with_same_offset = fragments.insert(fragment_offset, ipv4_packet);
             #[cfg(debug_assertions)]
             if _frag_with_same_offset.is_some() {
@@ -557,14 +563,7 @@ mod fragmentation {
             let len = last_frag.header.fragment_offset() as usize * 8
                 + last_frag.payload.len()
                 + IPV4_HEADER_LEN;
-
-            self.fragment_index_fifo.remove(
-                self.fragment_index_fifo
-                    .iter()
-                    .position(|x| x == &id)
-                    .unwrap(),
-            );
-            let mut packet_fragments = fragment_map.remove(&id).unwrap();
+            let (_, mut packet_fragments) = fragment_map.remove(frag_pos).unwrap();
             // To potentially avoid allocating a new packet, we will use the first fragment
             // and extend it with the payloads of the other fragments.
             let (_, first_packet) = packet_fragments.pop_first().unwrap();
