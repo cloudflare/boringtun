@@ -76,9 +76,12 @@ pub struct BufferedUdpReceive {
 }
 
 impl BufferedUdpReceive {
-    pub fn new<U: UdpRecv + 'static>(capacity: usize, mut udp_rx: impl UdpRecv + 'static) -> Self {
+    pub fn new<U: UdpRecv + 'static>(
+        capacity: usize,
+        mut udp_rx: impl UdpRecv + 'static,
+        mut recv_pool: PacketBufPool,
+    ) -> Self {
         let (recv_tx, recv_rx) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
-        let mut recv_pool: PacketBufPool = PacketBufPool::new(capacity);
 
         let recv_task = Task::spawn("buffered UDP receive", async move {
             let max_number_of_packets = udp_rx.max_number_of_packets_to_recv();

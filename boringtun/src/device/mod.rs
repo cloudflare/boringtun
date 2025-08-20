@@ -169,11 +169,13 @@ pub(crate) struct Connection<T: DeviceTransports> {
 
 impl<T: DeviceTransports> Connection<T> {
     pub async fn set_up(device: Arc<RwLock<Device<T>>>) -> Result<Self, Error> {
+        let pool = PacketBufPool::new(MAX_PACKET_BUFS);
+
         let mut device_guard = device.write().await;
         let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device_guard.open_listen_socket().await?;
         let buffered_ip_rx = BufferedIpRecv::new(
             MAX_PACKET_BUFS,
-            PacketBufPool::new(MAX_PACKET_BUFS),
+            pool.clone(),
             Arc::clone(&device_guard.tun_rx),
         );
         let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device_guard.tun_tx));
@@ -184,10 +186,10 @@ impl<T: DeviceTransports> Connection<T> {
 
         let buffered_udp_rx_v4 = BufferedUdpReceive::new::<
             <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
-        >(MAX_PACKET_BUFS, udp4_rx);
+        >(MAX_PACKET_BUFS, udp4_rx, pool.clone());
         let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
             <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
-        >(MAX_PACKET_BUFS, udp6_rx);
+        >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
 
         let outgoing = Task::spawn(
             "handle_outgoing",
@@ -196,7 +198,7 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_ip_rx,
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
-                PacketBufPool::new(MAX_PACKET_BUFS),
+                pool.clone(),
             ),
         );
         let timers = Task::spawn(
@@ -215,7 +217,7 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_ip_tx.clone(),
                 buffered_udp_tx_v4,
                 buffered_udp_rx_v4,
-                PacketBufPool::new(MAX_PACKET_BUFS),
+                pool.clone(),
             ),
         );
         let incoming_ipv6 = Task::spawn(
@@ -225,7 +227,7 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_ip_tx,
                 buffered_udp_tx_v6,
                 buffered_udp_rx_v6,
-                PacketBufPool::new(MAX_PACKET_BUFS),
+                pool.clone(),
             ),
         );
 

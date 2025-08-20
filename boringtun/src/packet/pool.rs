@@ -1,40 +1,47 @@
 use bytes::BytesMut;
-use std::mem;
-use tokio::sync::mpsc;
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
 
 use crate::packet::Packet;
 
 /// A pool of packet buffers.
+#[derive(Clone)]
 pub struct PacketBufPool<const N: usize = 4096> {
-    // FIXME: Allocate contiguous memory
-    packet_tx: mpsc::Sender<BytesMut>,
-    packet_rx: mpsc::Receiver<BytesMut>,
+    queue: Arc<Mutex<VecDeque<BytesMut>>>,
+    capacity: usize,
 }
 
 impl<const N: usize> PacketBufPool<N> {
     /// Create `num_packets` packets, each `N` bytes.
     pub fn new(capacity: usize) -> Self {
-        let (packet_tx, packet_rx) = mpsc::channel(capacity);
+        let mut queue = VecDeque::with_capacity(capacity);
 
-        /*for _ in 0..capacity {
-            let _ = packet_tx.try_send(BytesMut::zeroed(N));
-        }*/
+        // pre-allocate contiguous backing buffer
+        let mut backing_buffer = BytesMut::zeroed(N * capacity);
+        for _ in 0..capacity {
+            let buf = backing_buffer.split_to(N).split_to(0);
+            queue.push_back(buf);
+        }
 
         PacketBufPool {
-            packet_tx,
-            packet_rx,
+            queue: Arc::new(Mutex::new(queue)),
+            capacity,
         }
     }
 
     pub fn capacity(&self) -> usize {
-        self.packet_tx.capacity()
+        self.capacity
     }
 
     /// Get a new [Packet] from the pool.
     ///
     /// This will try to re-use an already allocated packet if possible, or allocate one otherwise.
     pub fn get(&mut self) -> Packet<[u8]> {
-        while let Ok(mut pointer_to_start_of_allocation) = self.packet_rx.try_recv() {
+        while let Some(mut pointer_to_start_of_allocation) =
+            { self.queue.lock().unwrap().pop_front() }
+        {
             debug_assert_eq!(pointer_to_start_of_allocation.len(), 0);
             if pointer_to_start_of_allocation.try_reclaim(N) {
                 let mut buf = pointer_to_start_of_allocation.split_off(0);
@@ -49,8 +56,8 @@ impl<const N: usize> PacketBufPool<N> {
                 unsafe { buf.set_len(N) };
 
                 let return_to_pool = ReturnToPool {
-                    pointer_to_start_of_allocation,
-                    drop_tx: self.packet_tx.clone(),
+                    pointer_to_start_of_allocation: Some(pointer_to_start_of_allocation),
+                    queue: self.queue.clone(),
                 };
 
                 return Packet::new_from_pool(return_to_pool, buf);
@@ -67,8 +74,8 @@ impl<const N: usize> PacketBufPool<N> {
         debug_assert_eq!(buf.len(), N);
 
         let return_to_pool = ReturnToPool {
-            pointer_to_start_of_allocation,
-            drop_tx: self.packet_tx.clone(),
+            pointer_to_start_of_allocation: Some(pointer_to_start_of_allocation),
+            queue: self.queue.clone(),
         };
 
         Packet::new_from_pool(return_to_pool, buf)
@@ -82,14 +89,19 @@ pub struct ReturnToPool {
     ///
     /// INVARIANT:
     /// - Points to the start of an `N`-sized allocation.
-    pointer_to_start_of_allocation: BytesMut,
-    drop_tx: mpsc::Sender<BytesMut>,
+    // Note: Option is faster than mem::take
+    pointer_to_start_of_allocation: Option<BytesMut>,
+    queue: Arc<Mutex<VecDeque<BytesMut>>>,
 }
 
 impl Drop for ReturnToPool {
     fn drop(&mut self) {
-        let p = mem::take(&mut self.pointer_to_start_of_allocation);
-        let _ = self.drop_tx.try_send(p);
+        let p = self.pointer_to_start_of_allocation.take().unwrap();
+        let mut queue_g = self.queue.lock().unwrap();
+        if queue_g.len() < queue_g.capacity() {
+            // Add the packet back to the pool unless we're at capacity
+            queue_g.push_back(p);
+        }
     }
 }
 
