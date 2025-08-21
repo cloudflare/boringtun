@@ -466,6 +466,15 @@ mod fragmentation {
         source_ip: Ipv4Addr,
         destination_ip: Ipv4Addr,
     }
+
+    // TODO: Switch to a total memory limit
+    /// The maximum number of unique IPv4 fragments that can be concurrently assembled.
+    /// When this limit is reached, the fragments belonging to the older packet is dropped
+    /// to make space.
+    ///
+    /// The sum of all fragments for a given packet cannot exceed the maximum IPv4 length,
+    /// which is 65535 bytes. In total, this means that the maximum size that can be
+    /// buffered is 64 * 65535 = 4194304 bytes, or 4 MiB.
     const MAX_CONCURRENT_FRAGS: usize = 64;
 
     #[derive(Debug)]
@@ -521,6 +530,7 @@ mod fragmentation {
                     log::trace!(
                         "Fragment map at full capacity {MAX_CONCURRENT_FRAGS}, dropping oldest fragment for ID {id:?} to make space"
                     );
+                    // TODO: send "Fragment Reassembly Timeout" ICMP message, per RFC792
                 }
                 // Since this was the first fragment, we don't check if the packet
                 // can be reassembled yet.
