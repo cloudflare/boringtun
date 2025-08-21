@@ -457,7 +457,7 @@ mod fragmentation {
         udp::channel::{IPV4_HEADER_LEN, IPV4_MAX_LEN},
     };
     use std::{
-        collections::{BTreeMap, HashMap},
+        collections::{BTreeMap, HashMap, VecDeque},
         net::Ipv4Addr,
     };
 
@@ -469,10 +469,12 @@ mod fragmentation {
         source_ip: Ipv4Addr,
         destination_ip: Ipv4Addr,
     }
+    const MAX_CONCURRENT_FRAGS: usize = 64;
 
     #[derive(Debug, Default)]
     pub struct Ipv4Fragments {
         fragments: HashMap<FragmentId, BTreeMap<u16, Packet<Ipv4>>>,
+        fragment_index_fifo: VecDeque<FragmentId>,
     }
 
     impl Ipv4Fragments {
@@ -509,9 +511,18 @@ mod fragmentation {
                 destination_ip: ipv4_packet.header.destination(),
             };
             let Some(fragments) = fragment_map.get_mut(&id) else {
+                if self.fragment_index_fifo.len() >= MAX_CONCURRENT_FRAGS {
+                    let id = self.fragment_index_fifo.pop_front().expect("fifo is full");
+                    let _removed_frags = fragment_map.remove(&id);
+                    debug_assert!(
+                        _removed_frags.is_some(),
+                        "Failed to remove fragments for ID {id:?}, fifo out of sync"
+                    );
+                }
                 // Since this was the first fragment, we don't check if the packet
                 // can be reassembled yet.
                 fragment_map.insert(id, BTreeMap::from([(fragment_offset, ipv4_packet)]));
+                self.fragment_index_fifo.push_back(id);
                 return None;
             };
             let _frag_with_same_offset = fragments.insert(fragment_offset, ipv4_packet);
@@ -546,6 +557,13 @@ mod fragmentation {
             let len = last_frag.header.fragment_offset() as usize * 8
                 + last_frag.payload.len()
                 + IPV4_HEADER_LEN;
+
+            self.fragment_index_fifo.remove(
+                self.fragment_index_fifo
+                    .iter()
+                    .position(|x| x == &id)
+                    .unwrap(),
+            );
             let mut packet_fragments = fragment_map.remove(&id).unwrap();
             // To potentially avoid allocating a new packet, we will use the first fragment
             // and extend it with the payloads of the other fragments.
@@ -765,6 +783,53 @@ mod fragmentation {
                 fragments.incomplete_packet_count(),
                 0,
                 "All fragments should be processed"
+            );
+        }
+
+        #[test]
+        fn test_fragment_eviction_max_concurrent_frags() {
+            let mut fragments = Ipv4Fragments::default();
+            let src = Ipv4Addr::new(1, 2, 3, 4);
+            let dst = Ipv4Addr::new(5, 6, 7, 8);
+            let payload = make_udp_bytes(b"0123456789");
+
+            let id = 1000;
+            // Each packet will be split into 2 fragments
+            let old_frag_first_half = make_ip_fragment(id, src, dst, 0, true, &payload[0..8]);
+            let old_frag_second_half = make_ip_fragment(id, src, dst, 1, false, &payload[8..]);
+            // Only insert the first fragment for now
+            assert!(
+                fragments
+                    .assemble_ipv4_fragment(old_frag_first_half)
+                    .is_none()
+            );
+
+            let mut second_halves = Vec::new();
+            for i in 0..super::MAX_CONCURRENT_FRAGS {
+                let id = 1000 + i as u16;
+                // Each packet will be split into 2 fragments
+                let frag1 = make_ip_fragment(id, src, dst, 0, true, &payload[0..8]);
+                let frag2 = make_ip_fragment(id, src, dst, 1, false, &payload[8..]);
+                // Only insert the first fragment for now
+                assert!(fragments.assemble_ipv4_fragment(frag1).is_none());
+                second_halves.push(frag2);
+            }
+            for second_half in second_halves {
+                // Insert the second fragment for all but the oldest
+                let res = fragments.assemble_ipv4_fragment(second_half);
+                assert!(res.is_some(), "Should reassemble remaining fragments");
+            }
+            assert!(
+                fragments
+                    .assemble_ipv4_fragment(old_frag_second_half)
+                    .is_none(),
+                "Should not reassemble oldest fragment, as first half should have been discarded"
+            );
+
+            assert_eq!(
+                fragments.incomplete_packet_count(),
+                1,
+                "Only second half of the first packet should be left"
             );
         }
     }
