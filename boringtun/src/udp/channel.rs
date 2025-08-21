@@ -456,10 +456,7 @@ mod fragmentation {
         packet::Udp,
         udp::channel::{IPV4_HEADER_LEN, IPV4_MAX_LEN},
     };
-    use std::{
-        collections::{BTreeMap, VecDeque},
-        net::Ipv4Addr,
-    };
+    use std::{collections::VecDeque, net::Ipv4Addr};
 
     use crate::packet::{Ipv4, Packet};
 
@@ -473,7 +470,7 @@ mod fragmentation {
 
     #[derive(Debug)]
     pub struct Ipv4Fragments {
-        fragments: VecDeque<(FragmentId, BTreeMap<u16, Packet<Ipv4>>)>,
+        fragments: VecDeque<(FragmentId, Vec<Packet<Ipv4>>)>,
     }
 
     impl Default for Ipv4Fragments {
@@ -527,51 +524,67 @@ mod fragmentation {
                 }
                 // Since this was the first fragment, we don't check if the packet
                 // can be reassembled yet.
-                fragment_map.push_back((id, BTreeMap::from([(fragment_offset, ipv4_packet)])));
+                fragment_map.push_back((id, vec![ipv4_packet]));
                 return None;
             };
             let (_, fragments) = fragment_map.get_mut(frag_pos).unwrap();
-            let _frag_with_same_offset = fragments.insert(fragment_offset, ipv4_packet);
-            #[cfg(debug_assertions)]
-            if _frag_with_same_offset.is_some() {
-                log::trace!(
-                    "Fragment with offset {fragment_offset} already existed for for ID {id:?} and was replaced"
-                );
-            }
 
-            let (first_frag_offset, _) = fragments.first_key_value().expect("Cannot be empty");
-            let (_, last_frag) = fragments.last_key_value().expect("Cannot be empty");
+            // Check if the fragment with the same offset already exists.
+            let Err(i) =
+                fragments.binary_search_by_key(&fragment_offset, |f| f.header.fragment_offset())
+            else {
+                log::trace!(
+                    "Fragment with offset {fragment_offset} already existed for for ID {id:?} and was dropped"
+                );
+                return None;
+            };
+            if let Some(prev_i) = i.checked_sub(1)
+                && fragments[prev_i].header.fragment_offset()
+                    + (fragments[prev_i].payload.len() / 8) as u16
+                    > fragment_offset
+            {
+                log::debug!(
+                    "Fragment with offset {fragment_offset} overlaps with existing fragment with offset {} and length {} for ID {id:?}, dropping",
+                    fragments[i].header.fragment_offset(),
+                    fragments[i].payload.len()
+                );
+                return None;
+            }
+            fragments.insert(i, ipv4_packet);
 
             // Check that we have the first and last fragment
-            if last_frag.header.more_fragments() || *first_frag_offset != 0 {
+            if fragments.last().unwrap().header.more_fragments()
+                || fragments.first().unwrap().header.fragment_offset() != 0
+            {
                 return None;
             }
 
             // Check if the IP packet can be reassembled.
             // The fragments must be consecutive, i.e. each fragment must begin where the previous one ended.
             // Note that fragment offset is given in units of 8 bytes.
-            let fragment_offsets = fragments.keys().cloned();
+            let fragment_offsets = fragments.iter().map(|f| f.header.fragment_offset());
             let fragment_ends = fragments
                 .iter()
-                .map(|(k, v)| k + (v.payload.len() / 8) as u16);
+                .map(|f| f.header.fragment_offset() + (f.payload.len() / 8) as u16);
             if !fragment_offsets
                 .skip(1)
                 .eq(fragment_ends.take(fragments.len() - 1))
             {
                 return None;
             }
-            let len = last_frag.header.fragment_offset() as usize * 8
-                + last_frag.payload.len()
+            let len = fragments.last().unwrap().header.fragment_offset() as usize * 8
+                + fragments.last().unwrap().payload.len()
                 + IPV4_HEADER_LEN;
-            let (_, mut packet_fragments) = fragment_map.remove(frag_pos).unwrap();
+            let (_, packet_fragments) = fragment_map.remove(frag_pos).unwrap();
             // To potentially avoid allocating a new packet, we will use the first fragment
             // and extend it with the payloads of the other fragments.
-            let (_, first_packet) = packet_fragments.pop_first().unwrap();
+            let mut remaining_fragments = packet_fragments.into_iter();
+            let first_packet = remaining_fragments.next().unwrap();
 
             let mut bytes = first_packet.into_bytes();
             let additional_bytes_needed = len.saturating_sub(bytes.buf_mut().len());
             bytes.buf_mut().reserve(additional_bytes_needed);
-            for frag in packet_fragments.values() {
+            for frag in remaining_fragments {
                 bytes.buf_mut().extend_from_slice(&frag.payload);
             }
 
