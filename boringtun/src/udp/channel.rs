@@ -468,8 +468,8 @@ mod fragmentation {
     }
 
     // TODO: Switch to a total memory limit
-    /// The maximum number of unique IPv4 fragments that can be concurrently assembled.
-    /// When this limit is reached, the fragments belonging to the older packet is dropped
+    /// The maximum number of unique fragmented IPv4 that can be concurrently assembled.
+    /// When this limit is reached, the fragments belonging to the oldest packet is dropped
     /// to make space.
     ///
     /// The sum of all fragments for a given packet cannot exceed the maximum IPv4 length,
@@ -479,6 +479,10 @@ mod fragmentation {
 
     #[derive(Debug)]
     pub struct Ipv4Fragments {
+        // The `VecDeque` is holds the fragments for each unique packet being assembled.
+        // It is also a FIFO queue, so that the oldest fragments are dropped when the maximum
+        // number of fragments is reached. The inner `Vec` is used to store the fragments.
+        // INVARIANT: The inner `Vec` must always be sorted by fragment_offset
         fragments: VecDeque<(FragmentId, Vec<Packet<Ipv4>>)>,
     }
 
@@ -526,9 +530,10 @@ mod fragmentation {
 
             let Some(frag_pos) = fragment_map.iter_mut().position(|(id2, _)| id2 == &id) else {
                 if fragment_map.len() >= MAX_CONCURRENT_FRAGS {
-                    fragment_map.pop_front();
+                    let (dropped_id, _) =
+                        fragment_map.pop_front().expect("Fragment map is not empty");
                     log::trace!(
-                        "Fragment map at full capacity {MAX_CONCURRENT_FRAGS}, dropping oldest fragment for ID {id:?} to make space"
+                        "Fragment map at full capacity {MAX_CONCURRENT_FRAGS}, dropping oldest fragment with ID {dropped_id:?} to make space"
                     );
                     // TODO: send "Fragment Reassembly Timeout" ICMP message, per RFC792
                 }
@@ -537,7 +542,9 @@ mod fragmentation {
                 fragment_map.push_back((id, vec![ipv4_packet]));
                 return None;
             };
-            let (_, fragments) = fragment_map.get_mut(frag_pos).unwrap();
+            let (_, fragments) = fragment_map
+                .get_mut(frag_pos)
+                .expect("Fragment exists because of the above check");
 
             // Check if the fragment with the same offset already exists.
             let Err(i) =
@@ -553,7 +560,7 @@ mod fragmentation {
                     + (fragments[prev_i].payload.len() / 8) as u16
                     > fragment_offset
             {
-                log::debug!(
+                log::trace!(
                     "Fragment with offset {fragment_offset} overlaps with existing fragment with offset {} and length {} for ID {id:?}, dropping",
                     fragments[i].header.fragment_offset(),
                     fragments[i].payload.len()
@@ -562,10 +569,11 @@ mod fragmentation {
             }
             fragments.insert(i, ipv4_packet);
 
+            let [first, .., last] = &fragments[..] else {
+                unreachable!("There are at least 2 fragments.");
+            };
             // Check that we have the first and last fragment
-            if fragments.last().unwrap().header.more_fragments()
-                || fragments.first().unwrap().header.fragment_offset() != 0
-            {
+            if last.header.more_fragments() || first.header.fragment_offset() != 0 {
                 return None;
             }
 
@@ -582,14 +590,18 @@ mod fragmentation {
             {
                 return None;
             }
-            let len = fragments.last().unwrap().header.fragment_offset() as usize * 8
-                + fragments.last().unwrap().payload.len()
-                + IPV4_HEADER_LEN;
-            let (_, packet_fragments) = fragment_map.remove(frag_pos).unwrap();
+
+            let len =
+                last.header.fragment_offset() as usize * 8 + last.payload.len() + IPV4_HEADER_LEN;
+            let (_, packet_fragments) = fragment_map
+                .remove(frag_pos)
+                .expect("The same fragment as we accessed above must exist");
             // To potentially avoid allocating a new packet, we will use the first fragment
             // and extend it with the payloads of the other fragments.
             let mut remaining_fragments = packet_fragments.into_iter();
-            let first_packet = remaining_fragments.next().unwrap();
+            let first_packet = remaining_fragments
+                .next()
+                .expect("At least one fragment exists");
 
             let mut bytes = first_packet.into_bytes();
             let additional_bytes_needed = len.saturating_sub(bytes.buf_mut().len());
