@@ -19,10 +19,11 @@ pub struct BufferedIpSend {
 }
 
 impl BufferedIpSend {
-    pub fn new<I: IpSend>(capacity: usize, inner: I) -> Self {
+    pub fn new<I: IpSend>(capacity: usize, inner: Arc<Mutex<I>>) -> Self {
         let (tx, mut rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
         let task = Task::spawn("buffered IP send", async move {
+            let mut inner = inner.try_lock().expect("Lock must not be taken");
             while let Some(packet) = rx.recv().await {
                 if let Err(e) = inner.send(packet).await {
                     log::error!("Error sending IP packet: {e}");
@@ -38,7 +39,7 @@ impl BufferedIpSend {
 }
 
 impl IpSend for BufferedIpSend {
-    async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
+    async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         self.tx
             .send(packet)
             .await

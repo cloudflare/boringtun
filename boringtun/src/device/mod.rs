@@ -122,7 +122,7 @@ pub struct Device<T: DeviceTransports> {
     key_pair: Option<(x25519::StaticSecret, x25519::PublicKey)>,
     fwmark: Option<u32>,
 
-    tun_tx: T::IpSend,
+    tun_tx: Arc<Mutex<T::IpSend>>,
     /// The tun device reader.
     ///
     /// This is `Arc<Mutex>`:ed because:
@@ -176,17 +176,17 @@ impl<T: DeviceTransports> Connection<T> {
             PacketBufPool::new(MAX_PACKET_BUFS),
             Arc::clone(&device_guard.tun_rx),
         );
-        let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, device_guard.tun_tx.clone());
+        let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device_guard.tun_tx));
         drop(device_guard);
 
         let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
         let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
 
         let buffered_udp_rx_v4 = BufferedUdpReceive::new::<
-            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
         >(MAX_PACKET_BUFS, udp4_rx);
         let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
-            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
         >(MAX_PACKET_BUFS, udp6_rx);
 
         let outgoing = Task::spawn(
@@ -435,7 +435,7 @@ impl<T: DeviceTransports> Device<T> {
         let device = Device {
             api: None,
             udp_factory,
-            tun_tx,
+            tun_tx: Arc::new(Mutex::new(tun_tx)),
             tun_rx: Arc::new(Mutex::new(tun_rx)),
             fwmark: Default::default(),
             key_pair: Default::default(),
@@ -475,9 +475,9 @@ impl<T: DeviceTransports> Device<T> {
     ) -> Result<
         (
             <T::UdpTransportFactory as UdpTransportFactory>::Send,
-            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
             <T::UdpTransportFactory as UdpTransportFactory>::Send,
-            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
         ),
         Error,
     > {
@@ -603,7 +603,7 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from UDP socket, decapsulate, write to tunnel device
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
-        tun_tx: impl IpSend,
+        mut tun_tx: impl IpSend,
         udp_tx: impl UdpSend,
         mut udp_rx: impl UdpRecv,
         mut packet_pool: PacketBufPool,

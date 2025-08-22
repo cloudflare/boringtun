@@ -17,75 +17,151 @@ use crate::{
 };
 
 use super::UdpTransportFactoryParams;
+pub use fragmentation::Ipv4Fragments;
 
-/// An implementation of [IpSend], [IpRecv], and [UdpTransportFactory] using tokio channels.
-///
-/// Enables connecting one [Device](crate::device::Device) directly to another.
-/// Can be used to set up a multi-hop wireguard tunnel.
+/// An implementation of [`IpRecv`] using tokio channels. Create using
+/// [`get_packet_channels`].
+pub struct TunChannelRx {
+    tun_rx: mpsc::Receiver<Packet<Ip>>,
+}
+
+/// An implementation of [`IpSend`] using tokio channels. Create using
+/// [`get_packet_channels`].
+pub struct TunChannelTx {
+    tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
+    tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
+
+    /// A map of fragments, keyed by a tuple of (identification, source IP, destination IP).
+    /// The value is a BTreeMap of fragment offsets to the corresponding fragments.
+    /// The BTreeMap is used to ensure that fragments are kept in order, even if they arrive out of
+    /// order. This is used to efficiently check if all fragments have been received.
+    fragments_v4: Ipv4Fragments,
+    // TODO: Ipv6 fragments?
+}
+
+/// An implementation of [`UdpSend`] using tokio channels. Create using
+/// [`get_packet_channels`].
 #[derive(Clone)]
-pub struct PacketChannel {
-    inner: Arc<PacketChannelInner>,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum IpVersion {
-    V4,
-    V6,
-}
-
-#[derive(Clone)]
-pub struct UdpChannel {
-    ip_version: IpVersion,
-    source_port: u16,
-    connection_id: u32,
-    inner: Arc<PacketChannelInner>,
-}
-
-pub struct PacketChannelInner {
+pub struct UdpChannelTx {
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
+    source_port: u16,
+    connection_id: u32,
 
-    // FIXME: remove Mutexes
     udp_tx: mpsc::Sender<Packet<Ip>>,
-    tun_rx: Mutex<mpsc::Receiver<Packet<Ip>>>,
-
-    tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
-    udp_rx_v4: Mutex<mpsc::Receiver<Packet<Ipv4<Udp>>>>,
-
-    tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
-    udp_rx_v6: Mutex<mpsc::Receiver<Packet<Ipv6<Udp>>>>,
 }
 
-impl PacketChannel {
-    pub fn new(capacity: usize, source_ip_v4: Ipv4Addr, source_ip_v6: Ipv6Addr) -> Self {
-        let (udp_tx, tun_rx) = mpsc::channel(capacity);
-        let (tun_tx_v4, udp_rx_v4) = mpsc::channel(capacity);
-        let (tun_tx_v6, udp_rx_v6) = mpsc::channel(capacity);
+type Ipv4UdpReceiver = mpsc::Receiver<Packet<Ipv4<Udp>>>;
+type Ipv6UdpReceiver = mpsc::Receiver<Packet<Ipv6<Udp>>>;
 
-        let tun_rx = Mutex::new(tun_rx);
-        let udp_rx_v4 = Mutex::new(udp_rx_v4);
-        let udp_rx_v6 = Mutex::new(udp_rx_v6);
+/// An implementation of [`UdpRecv`] for IPv4 UDP packets. Create using
+/// [`get_packet_channels`].
+pub struct UdpChannelV4Rx {
+    /// The receiver for IPv4 UDP packets. Is always `Some` until drop.
+    udp_rx_v4: Option<Ipv4UdpReceiver>,
+    /// Shared memory with `PacketChannelUdp` to return the receiver after drop.
+    return_udp_rx_v4: Arc<Mutex<Option<Ipv4UdpReceiver>>>,
+}
 
-        Self {
-            inner: Arc::new(PacketChannelInner {
-                source_ip_v4,
-                source_ip_v6,
-
-                udp_tx,
-                tun_rx,
-
-                tun_tx_v4,
-                udp_rx_v4,
-
-                tun_tx_v6,
-                udp_rx_v6,
-            }),
-        }
+impl Drop for UdpChannelV4Rx {
+    fn drop(&mut self) {
+        // Return the receiver to `PacketChannelUdp`
+        *self
+            .return_udp_rx_v4
+            .try_lock()
+            .expect("multiple concurrent calls to drop") = self.udp_rx_v4.take();
     }
 }
 
-impl IpSend for PacketChannel {
-    async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
+/// An implementation of [`UdpRecv`] for IPv6 UDP packets. Create using
+/// [`get_packet_channels`].
+pub struct UdpChannelV6Rx {
+    /// The receiver for IPv6 UDP packets. Is always `Some` until drop.
+    udp_rx_v6: Option<Ipv6UdpReceiver>,
+    /// Shared memory with `PacketChannelUdp` to return the receiver after drop.
+    return_udp_rx_v6: Arc<Mutex<Option<Ipv6UdpReceiver>>>,
+}
+
+impl Drop for UdpChannelV6Rx {
+    fn drop(&mut self) {
+        // Return the receiver to `PacketChannelUdp`
+        *self
+            .return_udp_rx_v6
+            .try_lock()
+            .expect("multiple concurrent calls to drop") = self.udp_rx_v6.take();
+    }
+}
+
+/// An implementation of [`UdpTransportFactory`], producing [`UdpSend`] and
+/// [`UdpRecv`] implementations that use channels to send and receive packets.
+pub struct PacketChannelUdp {
+    source_ip_v4: Ipv4Addr,
+    source_ip_v6: Ipv6Addr,
+
+    udp_tx: mpsc::Sender<Packet<Ip>>,
+    udp_rx_v4: Arc<Mutex<Option<Ipv4UdpReceiver>>>,
+    udp_rx_v6: Arc<Mutex<Option<Ipv6UdpReceiver>>>,
+}
+
+/// Create a set of channel-based TUN and UDP endpoints for in-process device communication.
+///
+/// This function returns a tuple of (TunChannelTx, TunChannelRx, PacketChannelUdp), which can be used
+/// to connect two [`Device`]s (e.g. for a multihop tunnel or for testing) entirely in memory.
+///
+/// # Arguments
+/// * `capacity` - The channel buffer size for each direction.
+/// * `source_ip_v4` - The IPv4 address to use as the source for outgoing packets.
+/// * `source_ip_v6` - The IPv6 address to use as the source for outgoing packets.
+///
+/// # Returns
+/// A tuple of (TunChannelTx, TunChannelRx, PacketChannelUdp).
+///
+/// # Example
+/// ```no_run
+/// use boringtun::udp::channel::{get_packet_channels, TunChannelTx, TunChannelRx, PacketChannelUdp};
+/// use boringtun::device::{DeviceHandle, DeviceConfig};
+/// use std::net::{Ipv4Addr, Ipv6Addr};
+/// use std::sync::Arc;
+/// use tokio::runtime::Runtime;
+///
+/// let capacity = 100;
+/// let source_v4 = Ipv4Addr::new(10, 0, 0, 1);
+/// let source_v6 = Ipv6Addr::UNSPECIFIED;
+/// let (tun_tx, tun_rx, udp_channels) = get_packet_channels(capacity, source_v4, source_v6);
+///
+/// // Create entry and exit devices using the returned channels
+/// let entry_device = DeviceHandle::new(UdpSocketFactory, tun_tx, tun_rx, /* device_config */);
+/// let exit_device = DeviceHandle::new(udp_channels, Arc::new(/* async_tun */), Arc::new(/* async_tun */), /* device_config */);
+/// // Now entry_device and exit_device can communicate in-process via the channels.
+/// ```
+///
+pub fn get_packet_channels(
+    capacity: usize,
+    source_ip_v4: Ipv4Addr,
+    source_ip_v6: Ipv6Addr,
+) -> (TunChannelTx, TunChannelRx, PacketChannelUdp) {
+    let (udp_tx, tun_rx) = mpsc::channel(capacity);
+    let (tun_tx_v4, udp_rx_v4) = mpsc::channel(capacity);
+    let (tun_tx_v6, udp_rx_v6) = mpsc::channel(capacity);
+    let tun_tx = TunChannelTx {
+        tun_tx_v4,
+        tun_tx_v6,
+
+        fragments_v4: Ipv4Fragments::default(),
+    };
+    let tun_rx = TunChannelRx { tun_rx };
+    let udp_channel_factory = PacketChannelUdp {
+        source_ip_v4,
+        source_ip_v6,
+        udp_tx,
+        udp_rx_v4: Arc::new(Mutex::new(Some(udp_rx_v4))),
+        udp_rx_v6: Arc::new(Mutex::new(Some(udp_rx_v6))),
+    };
+    (tun_tx, tun_rx, udp_channel_factory)
+}
+
+impl IpSend for TunChannelTx {
+    async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         let ip_packet = match packet.try_into_ipvx() {
             Ok(p) => p,
             Err(e) => {
@@ -95,20 +171,29 @@ impl IpSend for PacketChannel {
         };
 
         match ip_packet {
-            Either::Left(ipv4) => match ipv4.try_into_udp() {
-                Ok(udp_packet) => {
-                    self.inner
-                        .tun_tx_v4
-                        .send(udp_packet)
-                        .await
-                        .expect("receiver exists");
+            Either::Left(ipv4) => {
+                let ipv4 = if ipv4.header.fragment_offset() == 0 && !ipv4.header.more_fragments() {
+                    ipv4
+                } else if let Some(ipv4) = self.fragments_v4.assemble_ipv4_fragment(ipv4) {
+                    ipv4
+                } else {
+                    // No complete IPv4 packet was reassembled, nothing to do
+                    return Ok(());
+                };
+
+                match ipv4.try_into_udp() {
+                    Ok(udp_packet) => {
+                        self.tun_tx_v4
+                            .send(udp_packet)
+                            .await
+                            .expect("receiver exists");
+                    }
+                    Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
                 }
-                Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
-            },
+            }
             Either::Right(ipv6) => match ipv6.try_into_udp() {
                 Ok(udp_packet) => {
-                    self.inner
-                        .tun_tx_v6
+                    self.tun_tx_v6
                         .send(udp_packet)
                         .await
                         .expect("receiver exists");
@@ -121,52 +206,54 @@ impl IpSend for PacketChannel {
     }
 }
 
-impl IpRecv for PacketChannel {
+impl IpRecv for TunChannelRx {
     async fn recv<'a>(
         &'a mut self,
         _pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a> {
-        let mut tun_rx = self
-            .inner
-            .tun_rx
-            .try_lock()
-            .expect("multiple concurrent calls to recv");
-        let packet = tun_rx.recv().await.expect("sender exists");
+        let Some(packet) = self.tun_rx.recv().await else {
+            log::trace!("tun_rx sender dropped and no more packet can be received");
+            let () = std::future::pending().await;
+            unreachable!();
+        };
         Ok(iter::once(packet))
     }
 }
 
-impl UdpTransportFactory for PacketChannel {
-    type Send = Arc<UdpChannel>;
-    type Recv = Arc<UdpChannel>;
+impl UdpTransportFactory for PacketChannelUdp {
+    type Send = UdpChannelTx;
+    type RecvV4 = UdpChannelV4Rx;
+    type RecvV6 = UdpChannelV6Rx;
 
     async fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> io::Result<((Self::Send, Self::Recv), (Self::Send, Self::Recv))> {
+    ) -> io::Result<((Self::Send, Self::RecvV4), (Self::Send, Self::RecvV6))> {
         let connection_id = rand_core::OsRng.next_u32().max(1);
         let source_port = match params.port {
-            0 => rand_u16().max(1),
+            0 => rand::random_range(1u16..u16::MAX),
             p => p,
         };
 
-        let channel_v4 = Arc::new(UdpChannel {
-            ip_version: IpVersion::V4,
+        let channel_tx = UdpChannelTx {
+            source_ip_v4: self.source_ip_v4,
+            source_ip_v6: self.source_ip_v6,
             source_port,
             connection_id,
-            inner: self.inner.clone(),
-        });
+            udp_tx: self.udp_tx.clone(),
+        };
 
-        let channel_v6 = Arc::new(UdpChannel {
-            ip_version: IpVersion::V6,
-            source_port,
-            connection_id,
-            inner: self.inner.clone(),
-        });
-
+        let channel_rx_v4 = UdpChannelV4Rx {
+            return_udp_rx_v4: self.udp_rx_v4.clone(),
+            udp_rx_v4: self.udp_rx_v4.clone().lock().await.take(),
+        };
+        let channel_rx_v6 = UdpChannelV6Rx {
+            return_udp_rx_v6: self.udp_rx_v6.clone(),
+            udp_rx_v6: self.udp_rx_v6.clone().lock().await.take(),
+        };
         Ok((
-            (channel_v4.clone(), channel_v4),
-            (channel_v6.clone(), channel_v6),
+            (channel_tx.clone(), channel_rx_v4),
+            (channel_tx, channel_rx_v6),
         ))
     }
 }
@@ -174,10 +261,11 @@ impl UdpTransportFactory for PacketChannel {
 const UDP_HEADER_LEN: usize = 8;
 const IPV4_HEADER_LEN: usize = 20;
 const IPV6_HEADER_LEN: usize = 40;
+const IPV4_MAX_LEN: usize = 65535;
 
-impl UdpTransport for Arc<UdpChannel> {}
+impl UdpTransport for UdpChannelTx {}
 
-impl UdpSend for Arc<UdpChannel> {
+impl UdpSend for UdpChannelTx {
     type SendManyBuf = ();
 
     async fn send_to(&self, udp_payload: Packet, destination: SocketAddr) -> io::Result<()> {
@@ -186,11 +274,10 @@ impl UdpSend for Arc<UdpChannel> {
 
         match destination {
             SocketAddr::V4(dest) => {
-                self.inner
-                    .udp_tx
+                self.udp_tx
                     .send(
                         create_ipv4_payload(
-                            self.inner.source_ip_v4,
+                            self.source_ip_v4,
                             self.source_port,
                             *dest.ip(),
                             dest.port(),
@@ -202,11 +289,10 @@ impl UdpSend for Arc<UdpChannel> {
                     .expect("receiver exists");
             }
             SocketAddr::V6(dest) => {
-                self.inner
-                    .udp_tx
+                self.udp_tx
                     .send(
                         create_ipv6_payload(
-                            &self.inner.source_ip_v6,
+                            &self.source_ip_v6,
                             self.source_port,
                             dest.ip(),
                             dest.port(),
@@ -223,54 +309,53 @@ impl UdpSend for Arc<UdpChannel> {
         Ok(())
     }
 }
-
-impl UdpRecv for Arc<UdpChannel> {
+impl UdpRecv for UdpChannelV4Rx {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        match self.ip_version {
-            IpVersion::V4 => {
-                let mut udp_rx = self
-                    .inner
-                    .udp_rx_v4
-                    .try_lock()
-                    .expect("multiple concurrent calls to recv_from");
+        let ipv4 = self
+            .udp_rx_v4
+            .as_mut()
+            .expect("UdpChannelV4Rx holds sender for its entire lifetime")
+            .recv()
+            .await
+            .expect("sender exists");
 
-                let ipv4 = udp_rx.recv().await.expect("sender exists");
+        let source_addr = ipv4.header.source();
 
-                let source_addr = ipv4.header.source();
+        let udp = ipv4.into_payload();
+        let source_port = udp.header.source_port.get();
 
-                let udp = ipv4.into_payload();
-                let source_port = udp.header.source_port.get();
+        // Packet with IP and UDP headers shed.
+        let inner_packet = udp.into_payload();
+        let socket_addr = SocketAddr::from((source_addr, source_port));
 
-                // Packet with IP and UDP headers shed.
-                let inner_packet = udp.into_payload();
-                let socket_addr = SocketAddr::from((source_addr, source_port));
+        Ok((inner_packet, socket_addr))
+    }
+}
 
-                Ok((inner_packet, socket_addr))
-            }
+impl UdpRecv for UdpChannelV6Rx {
+    type RecvManyBuf = ();
 
-            IpVersion::V6 => {
-                let mut udp_rx = self
-                    .inner
-                    .udp_rx_v6
-                    .try_lock()
-                    .expect("multiple concurrent calls to recv_from");
+    async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
+        let ipv6 = self
+            .udp_rx_v6
+            .as_mut()
+            .expect("UdpChannelV4Rx holds sender for its entire lifetime")
+            .recv()
+            .await
+            .expect("sender exists");
 
-                let ipv6 = udp_rx.recv().await.expect("sender exists");
+        let source_addr = ipv6.header.source();
 
-                let source_addr = ipv6.header.source();
+        let udp = ipv6.into_payload();
+        let source_port = udp.header.source_port.get();
 
-                let udp = ipv6.into_payload();
-                let source_port = udp.header.source_port.get();
+        // Packet with IP and UDP headers shed.
+        let inner_packet = udp.into_payload();
+        let socket_addr = SocketAddr::from((source_addr, source_port));
 
-                // Packet with IP and UDP headers shed.
-                let inner_packet = udp.into_payload();
-                let socket_addr = SocketAddr::from((source_addr, source_port));
-
-                Ok((inner_packet, socket_addr))
-            }
-        }
+        Ok((inner_packet, socket_addr))
     }
 }
 
@@ -364,6 +449,410 @@ async fn create_ipv6_payload(
         .expect("packet is valid")
 }
 
-fn rand_u16() -> u16 {
-    u16::try_from(rand_core::OsRng.next_u32().overflowing_shr(16).0).unwrap()
+mod fragmentation {
+    use zerocopy::{FromBytes, FromZeros};
+
+    use crate::{
+        packet::Udp,
+        udp::channel::{IPV4_HEADER_LEN, IPV4_MAX_LEN},
+    };
+    use std::{collections::VecDeque, net::Ipv4Addr};
+
+    use crate::packet::{Ipv4, Packet};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    struct FragmentId {
+        identification: u16,
+        source_ip: Ipv4Addr,
+        destination_ip: Ipv4Addr,
+    }
+
+    // TODO: Switch to a total memory limit
+    /// The maximum number of unique IPv4 fragments that can be concurrently assembled.
+    /// When this limit is reached, the fragments belonging to the older packet is dropped
+    /// to make space.
+    ///
+    /// The sum of all fragments for a given packet cannot exceed the maximum IPv4 length,
+    /// which is 65535 bytes. In total, this means that the maximum size that can be
+    /// buffered is 64 * 65535 = 4194304 bytes, or 4 MiB.
+    const MAX_CONCURRENT_FRAGS: usize = 64;
+
+    #[derive(Debug)]
+    pub struct Ipv4Fragments {
+        fragments: VecDeque<(FragmentId, Vec<Packet<Ipv4>>)>,
+    }
+
+    impl Default for Ipv4Fragments {
+        fn default() -> Self {
+            Self {
+                fragments: VecDeque::with_capacity(MAX_CONCURRENT_FRAGS),
+            }
+        }
+    }
+
+    impl Ipv4Fragments {
+        /// Return the number of unique packets that are currently being assembled.
+        pub fn incomplete_packet_count(&self) -> usize {
+            self.fragments.len()
+        }
+
+        pub fn assemble_ipv4_fragment(
+            &mut self,
+            ipv4_packet: Packet<Ipv4>,
+        ) -> Option<Packet<Ipv4>> {
+            let fragment_map = &mut self.fragments;
+            let header = ipv4_packet.header;
+            let fragment_offset = header.fragment_offset();
+            let more_fragments = header.more_fragments();
+            debug_assert!(more_fragments || fragment_offset != 0);
+
+            // All fragments except the last must have a length that is a multiple of 8
+            // bytes, and the last fragment must not exceed the maximum IPv4 length.
+            let fragment_len = ipv4_packet.payload.len();
+            if (more_fragments && fragment_len % 8 != 0)
+                || fragment_len + fragment_offset as usize * 8 > IPV4_MAX_LEN
+            {
+                log::trace!(
+                    "Invalid fragment size: {fragment_len} or fragment offset: {fragment_offset}, dropping"
+                );
+                return None;
+            }
+
+            let id = FragmentId {
+                identification: ipv4_packet.header.identification.get(),
+                source_ip: ipv4_packet.header.source(),
+                destination_ip: ipv4_packet.header.destination(),
+            };
+
+            let Some(frag_pos) = fragment_map.iter_mut().position(|(id2, _)| id2 == &id) else {
+                if fragment_map.len() >= MAX_CONCURRENT_FRAGS {
+                    fragment_map.pop_front();
+                    log::trace!(
+                        "Fragment map at full capacity {MAX_CONCURRENT_FRAGS}, dropping oldest fragment for ID {id:?} to make space"
+                    );
+                    // TODO: send "Fragment Reassembly Timeout" ICMP message, per RFC792
+                }
+                // Since this was the first fragment, we don't check if the packet
+                // can be reassembled yet.
+                fragment_map.push_back((id, vec![ipv4_packet]));
+                return None;
+            };
+            let (_, fragments) = fragment_map.get_mut(frag_pos).unwrap();
+
+            // Check if the fragment with the same offset already exists.
+            let Err(i) =
+                fragments.binary_search_by_key(&fragment_offset, |f| f.header.fragment_offset())
+            else {
+                log::trace!(
+                    "Fragment with offset {fragment_offset} already existed for for ID {id:?} and was dropped"
+                );
+                return None;
+            };
+            if let Some(prev_i) = i.checked_sub(1)
+                && fragments[prev_i].header.fragment_offset()
+                    + (fragments[prev_i].payload.len() / 8) as u16
+                    > fragment_offset
+            {
+                log::debug!(
+                    "Fragment with offset {fragment_offset} overlaps with existing fragment with offset {} and length {} for ID {id:?}, dropping",
+                    fragments[i].header.fragment_offset(),
+                    fragments[i].payload.len()
+                );
+                return None;
+            }
+            fragments.insert(i, ipv4_packet);
+
+            // Check that we have the first and last fragment
+            if fragments.last().unwrap().header.more_fragments()
+                || fragments.first().unwrap().header.fragment_offset() != 0
+            {
+                return None;
+            }
+
+            // Check if the IP packet can be reassembled.
+            // The fragments must be consecutive, i.e. each fragment must begin where the previous one ended.
+            // Note that fragment offset is given in units of 8 bytes.
+            let fragment_offsets = fragments.iter().map(|f| f.header.fragment_offset());
+            let fragment_ends = fragments
+                .iter()
+                .map(|f| f.header.fragment_offset() + (f.payload.len() / 8) as u16);
+            if !fragment_offsets
+                .skip(1)
+                .eq(fragment_ends.take(fragments.len() - 1))
+            {
+                return None;
+            }
+            let len = fragments.last().unwrap().header.fragment_offset() as usize * 8
+                + fragments.last().unwrap().payload.len()
+                + IPV4_HEADER_LEN;
+            let (_, packet_fragments) = fragment_map.remove(frag_pos).unwrap();
+            // To potentially avoid allocating a new packet, we will use the first fragment
+            // and extend it with the payloads of the other fragments.
+            let mut remaining_fragments = packet_fragments.into_iter();
+            let first_packet = remaining_fragments.next().unwrap();
+
+            let mut bytes = first_packet.into_bytes();
+            let additional_bytes_needed = len.saturating_sub(bytes.buf_mut().len());
+            bytes.buf_mut().reserve(additional_bytes_needed);
+            for frag in remaining_fragments {
+                bytes.buf_mut().extend_from_slice(&frag.payload);
+            }
+
+            // The header of the first packet is updated to reflect that the packet is no
+            // longer fragmented.
+            {
+                let ip = Ipv4::<Udp>::mut_from_bytes(&mut bytes).expect("valid IP packet buffer");
+                ip.header.total_len = (len as u16).into();
+
+                // This set `more_fragments`, `dont_fragment`, and `fragment_offset` to zero.
+                ip.header.flags_and_fragment_offset.zero();
+
+                // We do not need to recompute the checksum, because the checksum is
+                // only read by the `ExitDevice` and discarded
+                ip.header.header_checksum.zero();
+            }
+
+            // NOTE: We could change the `tun_tx_vx` channels to take a tuple of source ip,
+            // destination ip, and `Packet<Udp>`, instead of `Packet<Ipv4<Udp>>`, to avoid
+            // having to reconstruct the IP head and validate the IP packet with
+            // `try_into_ipvx`
+            Some(
+                bytes
+                    .try_into_ipvx()
+                    .expect("Previously valid Ipv4 packet should still be valid")
+                    .unwrap_left(),
+            )
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+        use crate::packet::{IpNextProtocol, Ipv4FlagsFragmentOffset, Ipv4Header};
+        use crate::udp::channel::{IPV4_HEADER_LEN, UDP_HEADER_LEN};
+        use bytes::BytesMut;
+        use rand::rng;
+        use rand::seq::SliceRandom;
+        use std::collections::HashMap;
+        use std::net::Ipv4Addr;
+        use zerocopy::IntoBytes;
+
+        fn make_ip_fragment(
+            identification: u16,
+            source_ip: Ipv4Addr,
+            destination_ip: Ipv4Addr,
+            offset: u16,
+            more_fragments: bool,
+            payload: &[u8],
+        ) -> Packet<Ipv4> {
+            // Build a minimal UDP payload
+            let total_len = IPV4_HEADER_LEN + payload.len();
+            let mut buf = BytesMut::zeroed(total_len);
+            let ipv4 = Ipv4::<[u8]>::mut_from_bytes(&mut buf).unwrap();
+            ipv4.header = Ipv4Header::new_for_length(
+                source_ip,
+                destination_ip,
+                IpNextProtocol::Udp,
+                payload.len() as u16,
+            );
+            ipv4.header.identification = identification.into();
+            let mut flags = Ipv4FlagsFragmentOffset::new();
+            flags.set_more_fragments(more_fragments);
+            flags.set_fragment_offset(offset);
+            ipv4.header.flags_and_fragment_offset = flags;
+            ipv4.payload.copy_from_slice(payload);
+
+            Packet::from_bytes(buf)
+                .try_into_ipvx()
+                .unwrap()
+                .unwrap_left()
+        }
+
+        fn make_udp_bytes(payload: &[u8]) -> BytesMut {
+            let len = UDP_HEADER_LEN + payload.len();
+            let mut buf = BytesMut::zeroed(len);
+            let udp = Udp::<[u8]>::mut_from_bytes(&mut buf).unwrap();
+            udp.header.source_port = 1234u16.into();
+            udp.header.destination_port = 5678u16.into();
+            udp.header.length = (len as u16).into();
+            udp.header.checksum = 0.into();
+            assert_eq!(udp.payload.len(), payload.len());
+            udp.payload.copy_from_slice(payload);
+            buf
+        }
+
+        #[test]
+        fn test_ipv4_defragmentation() {
+            let mut fragments = Ipv4Fragments::default();
+            let src1 = Ipv4Addr::new(10, 0, 0, 1);
+            let dst1 = Ipv4Addr::new(10, 0, 0, 2);
+            let src2 = Ipv4Addr::new(10, 0, 0, 3);
+            let dst2 = Ipv4Addr::new(10, 0, 0, 4);
+            let id1 = 100;
+            let id2 = 200;
+            // Two packets
+            let payload1 = make_udp_bytes(b"ABCDEFGHIJKLMN");
+            let payload2 = make_udp_bytes(b"MY SLIGHTLY LONGER PACKET");
+
+            // Split each into 3 fragments
+            let mut all_frags = vec![
+                (
+                    id1,
+                    make_ip_fragment(id1, src1, dst1, 0, true, &payload1[0..8]),
+                ),
+                (
+                    id1,
+                    make_ip_fragment(id1, src1, dst1, 1, true, &payload1[8..16]),
+                ),
+                (
+                    id1,
+                    make_ip_fragment(id1, src1, dst1, 2, false, &payload1[16..]),
+                ),
+                (
+                    id2,
+                    make_ip_fragment(id2, src2, dst2, 0, true, &payload2[0..16]),
+                ),
+                (
+                    id2,
+                    make_ip_fragment(id2, src2, dst2, 2, true, &payload2[16..24]),
+                ),
+                (
+                    id2,
+                    make_ip_fragment(id2, src2, dst2, 3, true, &payload2[24..32]),
+                ),
+                (
+                    id2,
+                    make_ip_fragment(id2, src2, dst2, 4, false, &payload2[32..]),
+                ),
+            ];
+            all_frags.shuffle(&mut rng());
+            let mut seen = HashMap::new();
+            for (id, frag) in all_frags {
+                let res = fragments.assemble_ipv4_fragment(frag.clone());
+                let count = seen.entry(id).or_insert(0);
+                *count += 1;
+                if let Some(ip_packet) = res {
+                    let udp_packet = ip_packet.try_into_udp().unwrap();
+                    log::debug!(
+                        "Reassembled UDP payload (ascii): {:?}",
+                        String::from_utf8_lossy(&udp_packet.payload.payload)
+                    );
+
+                    if id == id1 {
+                        assert_eq!(*count, 3, "Should reassemble on last fragment");
+                        assert_eq!(udp_packet.payload.as_bytes(), &payload1[..]);
+                    } else {
+                        assert_eq!(*count, 4, "Should reassemble on last fragment");
+                        assert_eq!(udp_packet.payload.as_bytes(), &payload2[..]);
+                    };
+                    assert_eq!(udp_packet.header.fragment_offset(), 0);
+                    assert!(!udp_packet.header.more_fragments());
+                    assert_eq!(
+                        udp_packet.header.source(),
+                        if id == id1 { src1 } else { src2 }
+                    );
+                    assert_eq!(
+                        udp_packet.header.destination(),
+                        if id == id1 { dst1 } else { dst2 }
+                    );
+                }
+
+                // Last fragment for this id
+            }
+
+            assert_eq!(
+                fragments.incomplete_packet_count(),
+                0,
+                "All fragments should be processed"
+            );
+        }
+
+        #[test]
+        fn test_ipv4_defragmentation_single_packet() {
+            let mut fragments = Ipv4Fragments::default();
+            let src = Ipv4Addr::new(192, 168, 1, 1);
+            let dst = Ipv4Addr::new(192, 168, 1, 2);
+            let id = 42;
+            let payload = make_udp_bytes(b"HELLOFRAGMENTS");
+            // Split into 3 fragments
+            let mut frags = vec![
+                make_ip_fragment(id, src, dst, 0, true, &payload[0..8]),
+                make_ip_fragment(id, src, dst, 1, true, &payload[8..16]),
+                make_ip_fragment(id, src, dst, 2, false, &payload[16..]),
+            ];
+            frags.shuffle(&mut rng());
+            let mut count = 0;
+            for frag in frags {
+                let res = fragments.assemble_ipv4_fragment(frag.clone());
+                count += 1;
+                if let Some(ip_packet) = res {
+                    let udp_packet = ip_packet.try_into_udp().unwrap();
+                    log::debug!(
+                        "Reassembled UDP payload (ascii): {:?}",
+                        String::from_utf8_lossy(&udp_packet.payload.payload)
+                    );
+                    assert_eq!(count, 3, "Should reassemble on last fragment");
+                    assert_eq!(udp_packet.payload.as_bytes(), &payload[..]);
+                    assert_eq!(udp_packet.header.fragment_offset(), 0);
+                    assert!(!udp_packet.header.more_fragments());
+                    assert_eq!(udp_packet.header.source(), src);
+                    assert_eq!(udp_packet.header.destination(), dst);
+                } else {
+                    assert!(count < 3, "Should not reassemble until last fragment");
+                }
+            }
+            assert_eq!(
+                fragments.incomplete_packet_count(),
+                0,
+                "All fragments should be processed"
+            );
+        }
+
+        #[test]
+        fn test_fragment_eviction_max_concurrent_frags() {
+            let mut fragments = Ipv4Fragments::default();
+            let src = Ipv4Addr::new(1, 2, 3, 4);
+            let dst = Ipv4Addr::new(5, 6, 7, 8);
+            let payload = make_udp_bytes(b"0123456789");
+
+            let id = 1000;
+            // Each packet will be split into 2 fragments
+            let old_frag_first_half = make_ip_fragment(id, src, dst, 0, true, &payload[0..8]);
+            let old_frag_second_half = make_ip_fragment(id, src, dst, 1, false, &payload[8..]);
+            // Only insert the first fragment for now
+            assert!(
+                fragments
+                    .assemble_ipv4_fragment(old_frag_first_half)
+                    .is_none()
+            );
+
+            let mut second_halves = Vec::new();
+            for i in 0..super::MAX_CONCURRENT_FRAGS {
+                let id = 1000 + i as u16;
+                // Each packet will be split into 2 fragments
+                let frag1 = make_ip_fragment(id, src, dst, 0, true, &payload[0..8]);
+                let frag2 = make_ip_fragment(id, src, dst, 1, false, &payload[8..]);
+                // Only insert the first fragment for now
+                assert!(fragments.assemble_ipv4_fragment(frag1).is_none());
+                second_halves.push(frag2);
+            }
+            for second_half in second_halves {
+                // Insert the second fragment for all but the oldest
+                let res = fragments.assemble_ipv4_fragment(second_half);
+                assert!(res.is_some(), "Should reassemble remaining fragments");
+            }
+            assert!(
+                fragments
+                    .assemble_ipv4_fragment(old_frag_second_half)
+                    .is_none(),
+                "Should not reassemble oldest fragment, as first half should have been discarded"
+            );
+
+            assert_eq!(
+                fragments.incomplete_packet_count(),
+                1,
+                "Only second half of the first packet should be left"
+            );
+        }
+    }
 }

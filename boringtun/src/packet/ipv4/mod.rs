@@ -148,6 +148,8 @@ impl Ipv4Header {
         self.flags_and_fragment_offset.more_fragments()
     }
 
+    /// Offset of IP fragment payload relative to the start of payload of the original packet.
+    /// Note that the value returned is in units of 8 bytes.
     pub const fn fragment_offset(&self) -> u16 {
         self.flags_and_fragment_offset.fragment_offset()
     }

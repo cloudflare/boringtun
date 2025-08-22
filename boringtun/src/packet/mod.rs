@@ -233,10 +233,22 @@ impl Packet<Ip> {
 }
 
 impl Packet<Ipv4> {
-    /// Check if the IP payload is valid UDP.
+    /// Attempts to convert this IPv4 packet into a UDP packet.
+    ///
+    /// Returns [`TryIntoUdpResult::Udp`] if the packet is a valid, non-fragmented IPv4 UDP packet
+    /// with no options (IHL == 5). Returns [`TryIntoUdpResult::NotUdp`] if the packet is a fragment
+    /// of a UDP packet.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the IHL is invalid or if UDP validation fails.
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
         let ip = self.deref();
 
+        // We validate the IHL here, instead of in the `try_into_ipvx` method,
+        // because there we can still parse the part of the Ipv4 header that is always present
+        // and ignore the options. To parse the UDP packet, we must know that the IHL is 5,
+        // otherwise it will not start at the right offset.
         match ip.header.ihl() {
             5 => {}
             6.. => {
@@ -247,6 +259,10 @@ impl Packet<Ipv4> {
                 return Err(eyre!("IP header: {:?}", ip.header))
                     .wrap_err(eyre!("Bad IHL value: {ihl}"));
             }
+        }
+
+        if ip.header.fragment_offset() != 0 || ip.header.more_fragments() {
+            eyre::bail!("IPv4 packet is a fragment: {:?}", ip.header);
         }
 
         validate_udp(ip.header.next_protocol(), &ip.payload)
@@ -342,17 +358,19 @@ where
     }
 }
 
-/*
-// Don't use `derive`, because that would require `Kind` to be `Clone`.
-impl<Kind> Clone for Packet<Kind> {
+// This clone implementation is only for tests, as the clone will cause an allocation and will not return the buffer to the pool.
+#[cfg(test)]
+impl<Kind: ?Sized> Clone for Packet<Kind> {
     fn clone(&self) -> Self {
         Self {
-            buf: self.buf.clone(),
+            inner: PacketInner {
+                buf: self.inner.buf.clone(),
+                _return_to_pool: None, // Clone does not return to pool
+            },
             _kind: PhantomData,
         }
     }
 }
- */
 
 impl<Kind: Debug> Debug for Packet<Kind>
 where

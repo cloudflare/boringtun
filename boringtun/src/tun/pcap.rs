@@ -76,7 +76,7 @@ impl<R: IpRecv> IpRecv for PcapSniffer<R> {
 }
 
 impl<S: IpSend> IpSend for PcapSniffer<S> {
-    async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
+    async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         if let Ok(mut write) = self.writer.writer.lock() {
             let packet = packet.as_bytes();
             let timestamp = Instant::now().duration_since(self.epoch);
