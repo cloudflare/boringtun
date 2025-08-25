@@ -522,11 +522,7 @@ mod fragmentation {
                 return None;
             }
 
-            let id = FragmentId {
-                identification: ipv4_packet.header.identification.get(),
-                source_ip: ipv4_packet.header.source(),
-                destination_ip: ipv4_packet.header.destination(),
-            };
+            let id = get_frag_id(&ipv4_packet);
 
             let Some(frag_pos) = fragment_map.iter_mut().position(|(id2, _)| id2 == &id) else {
                 if fragment_map.len() >= MAX_CONCURRENT_FRAGS {
@@ -555,18 +551,30 @@ mod fragmentation {
                 );
                 return None;
             };
+
+            // Check if the new fragment overlaps with existing fragments.
+            // Note that the fragments are sorted by fragment_offset, so we only need to check
+            // the previous and next fragments.
             if let Some(prev_i) = i.checked_sub(1)
-                && fragments[prev_i].header.fragment_offset()
-                    + (fragments[prev_i].payload.len() / 8) as u16
-                    > fragment_offset
+                && let prev_frag_offset = &fragments[prev_i].header.fragment_offset()
+                && let prev_frag_len = &fragments[prev_i].payload.len()
+                && prev_frag_offset + (prev_frag_len / 8) as u16 > fragment_offset
             {
                 log::trace!(
-                    "Fragment with offset {fragment_offset} overlaps with existing fragment with offset {} and length {} for ID {id:?}, dropping",
-                    fragments[i].header.fragment_offset(),
-                    fragments[i].payload.len()
+                    "Fragment with offset {fragment_offset} overlaps with existing fragment with offset {prev_frag_offset} and length {prev_frag_len} for ID {id:?}, dropping",
                 );
                 return None;
             }
+            if let Some(next_frag) = fragments.get(i)
+                && let next_frag_offset = next_frag.header.fragment_offset()
+                && fragment_offset + (fragment_len / 8) as u16 > next_frag_offset
+            {
+                log::trace!(
+                    "Fragment with offset {fragment_offset} and length {fragment_len} overlaps with existing fragment with offset {next_frag_offset} for ID {id:?}, dropping",
+                );
+                return None;
+            }
+
             fragments.insert(i, ipv4_packet);
 
             let [first, .., last] = &fragments[..] else {
@@ -634,6 +642,14 @@ mod fragmentation {
                     .expect("Previously valid Ipv4 packet should still be valid")
                     .unwrap_left(),
             )
+        }
+    }
+
+    fn get_frag_id(ipv4_packet: &Packet<Ipv4>) -> FragmentId {
+        FragmentId {
+            identification: ipv4_packet.header.identification.get(),
+            source_ip: ipv4_packet.header.source(),
+            destination_ip: ipv4_packet.header.destination(),
         }
     }
 
@@ -865,6 +881,55 @@ mod fragmentation {
                 1,
                 "Only second half of the first packet should be left"
             );
+        }
+
+        #[test]
+        /// Test that overlapping fragments are detected and dropped.
+        fn test_fragmentation_overlap() {
+            let src = Ipv4Addr::new(192, 168, 1, 1);
+            let dst = Ipv4Addr::new(192, 168, 1, 2);
+            let id = 42;
+            let payload = make_udp_bytes(b"HELLOFRAGMENTS");
+            // Create two overlapping fragments
+            // Note that the `fragmentation_offset` is in units of 8 bytes and should be `2`
+            // for the second fragment to not overlap with the first.
+            let frag1 = make_ip_fragment(id, src, dst, 0, true, &payload[0..16]);
+            let frag2 = make_ip_fragment(id, src, dst, 1, false, &payload[16..]);
+            let id = get_frag_id(&frag1);
+            let frag_is_buffered = |fragments: &Ipv4Fragments, frag: &Packet<Ipv4>| {
+                fragments
+                    .fragments
+                    .iter()
+                    .find(|(id2, _)| id2 == &id)
+                    .expect("Fragment ID should exist")
+                    .1
+                    .iter()
+                    .any(|f| f.as_bytes() == frag.as_bytes())
+            };
+
+            // Assert that after insert both fragments, no packet is reassembled
+            {
+                let mut fragments = Ipv4Fragments::default();
+                fragments.assemble_ipv4_fragment(frag1.clone());
+                assert!(frag_is_buffered(&fragments, &frag1));
+                fragments.assemble_ipv4_fragment(frag2.clone());
+                assert!(
+                    !frag_is_buffered(&fragments, &frag2),
+                    "Second fragment should be dropped because it overlaps with the first"
+                );
+            }
+
+            // Repeat in reverse order
+            {
+                let mut fragments = Ipv4Fragments::default();
+                fragments.assemble_ipv4_fragment(frag2.clone());
+                assert!(frag_is_buffered(&fragments, &frag2));
+                fragments.assemble_ipv4_fragment(frag1.clone());
+                assert!(
+                    !frag_is_buffered(&fragments, &frag1),
+                    "First fragment should be dropped because it overlaps with the second"
+                );
+            }
         }
     }
 }
