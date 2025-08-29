@@ -4,7 +4,7 @@ use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, W
 
 use core::net::IpAddr;
 use core::sync::atomic::{AtomicU64, Ordering};
-use std::convert::TryFrom;
+use core::convert::TryFrom;
 
 use crate::sleepyinstant::Instant;
 
@@ -18,6 +18,8 @@ use embedded_time::Clock;
 use lock_api::Mutex;
 #[cfg(feature = "std")]
 use parking_lot::RawMutex;
+#[cfg(feature = "ariel-os")]
+use ariel_os_lock::RawMutex;
 use rand_core::{OsRng, RngCore};
 use ring::constant_time::verify_slices_are_equal;
 
