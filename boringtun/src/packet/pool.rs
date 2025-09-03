@@ -38,7 +38,7 @@ impl<const N: usize> PacketBufPool<N> {
     /// Get a new [Packet] from the pool.
     ///
     /// This will try to re-use an already allocated packet if possible, or allocate one otherwise.
-    pub fn get(&mut self) -> Packet<[u8]> {
+    pub fn get(&self) -> Packet<[u8]> {
         while let Some(mut pointer_to_start_of_allocation) =
             { self.queue.lock().unwrap().pop_front() }
         {
