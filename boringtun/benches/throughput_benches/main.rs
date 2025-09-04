@@ -1,5 +1,5 @@
 use boringtun::packet::{IpNextProtocol, Ipv4, Ipv4Header, Packet};
-use boringtun::udp::channel::Ipv4Fragments;
+use boringtun::tun::channel::Ipv4Fragments;
 use bytes::BytesMut;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rand::rngs::StdRng;

@@ -3,9 +3,13 @@ use std::future::Future;
 use std::io;
 
 pub mod buffer;
+pub mod channel;
 
 #[cfg(feature = "pcap")]
 pub mod pcap;
+
+#[cfg(feature = "tun")]
+pub mod tun_async_device;
 
 /// A type that let's you send an IP packet.
 ///
@@ -28,33 +32,4 @@ pub trait IpRecv: Send + Sync + 'static {
         &'a mut self,
         pool: &mut PacketBufPool,
     ) -> impl Future<Output = io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a>> + Send;
-}
-
-/// Implementations of [IpSend] and [IpRecv] for the [::tun] crate.
-#[cfg(feature = "tun")]
-mod tun_async_device {
-    use super::*;
-    use std::{iter, sync::Arc};
-
-    impl IpSend for Arc<::tun::AsyncDevice> {
-        async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
-            ::tun::AsyncDevice::send(self, &packet.into_bytes()).await?;
-            Ok(())
-        }
-    }
-
-    impl IpRecv for Arc<::tun::AsyncDevice> {
-        async fn recv<'a>(
-            &'a mut self,
-            pool: &mut PacketBufPool,
-        ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
-            let mut packet = pool.get();
-            let n = ::tun::AsyncDevice::recv(self.as_ref(), &mut packet).await?;
-            packet.truncate(n);
-            match packet.try_into_ip() {
-                Ok(packet) => Ok(iter::once(packet)),
-                Err(e) => Err(io::Error::other(e.to_string())),
-            }
-        }
-    }
 }

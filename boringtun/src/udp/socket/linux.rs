@@ -87,7 +87,7 @@ mod gro {
 
     use super::MAX_PACKET_COUNT;
     use crate::packet::{Packet, PacketBufPool};
-    use crate::udp::{UdpRecv, UdpSocket, UdpTransport};
+    use crate::udp::{UdpRecv, UdpTransport, socket::UdpSocket};
     use bytes::BytesMut;
     use nix::cmsg_space;
     use nix::sys::socket::{

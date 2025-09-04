@@ -31,8 +31,8 @@ use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::{IpRecv, IpSend};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{
-    UdpRecv, UdpSend, UdpSocketFactory, UdpTransport, UdpTransportFactory,
-    UdpTransportFactoryParams,
+    UdpRecv, UdpSend, UdpTransport, UdpTransportFactory, UdpTransportFactoryParams,
+    socket::UdpSocketFactory,
 };
 use crate::x25519;
 use allowed_ips::AllowedIps;
@@ -40,8 +40,6 @@ use peer::{AllowedIP, Peer};
 use rand_core::{OsRng, RngCore};
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
-
-const MAX_UDP_SIZE: usize = (1 << 16) - 1;
 
 /// Maximum number of packet buffers that each channel may contain
 const MAX_PACKET_BUFS: usize = 4000;
@@ -160,7 +158,7 @@ pub(crate) struct Connection<T: DeviceTransports> {
     /// The task that reads IPv6 traffic from the UDP socket.
     incoming_ipv6: Task,
 
-    /// The task tha handles keepalives/heartbeats/etc.
+    /// The task that handles keepalives/heartbeats/etc.
     timers: Task,
 
     /// The task that reads traffic from the TUN device.

@@ -155,6 +155,11 @@ impl Ipv4Header {
     }
 }
 
+impl Ipv4 {
+    /// Maximum possible length of an IPv4 packet.
+    pub const MAX_LEN: usize = 65535;
+}
+
 impl Debug for Ipv4Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Ipv4Header")

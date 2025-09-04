@@ -8,7 +8,7 @@
 mod unix {
     use boringtun::device::drop_privileges::drop_privileges;
     use boringtun::device::{DeviceConfig, DeviceHandle};
-    use boringtun::udp::UdpSocketFactory;
+    use boringtun::udp::socket::UdpSocketFactory;
     use clap::{Arg, Command};
     use daemonize::Daemonize;
     use std::fs::File;
