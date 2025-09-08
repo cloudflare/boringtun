@@ -279,6 +279,7 @@ impl Tunn {
         datagram: &[u8],
         dst: &'a mut [u8],
     ) -> TunnResult<'a> {
+        // NOTE: can we split this to a separate fn?
         if datagram.is_empty() {
             // Indicates a repeated call
             return self.send_queued_packet(dst);

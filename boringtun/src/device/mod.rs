@@ -4,6 +4,7 @@
 pub mod allowed_ips;
 
 pub mod api;
+pub mod daita;
 #[cfg(unix)]
 pub mod drop_privileges;
 #[cfg(test)]
@@ -656,6 +657,7 @@ impl<T: DeviceTransports> Device<T> {
             let Some(peer) = peer else {
                 continue;
             };
+            // TODO: DAITA tunnel_received here (possibly only for Packet::PacketData)
             let mut peer = peer.lock().await;
             match peer
                 .tunnel
@@ -692,7 +694,9 @@ impl<T: DeviceTransports> Device<T> {
                         }
                     }
                 }
+                // TODO: Handle DAITA IP packet, then padding_received
                 TunnResult::WriteToTunnelV4(packet, addr) => {
+                    // TODO: DAITA normal_received here
                     let len = packet.len();
                     dst_buf.truncate(len); // hacky but works
                     let Ok(dst_buf) = dst_buf.try_into_ip() else {
@@ -707,6 +711,7 @@ impl<T: DeviceTransports> Device<T> {
                     }
                 }
                 TunnResult::WriteToTunnelV6(packet, addr) => {
+                    // TODO: DAITA normal_received here
                     let len = packet.len();
                     dst_buf.truncate(len); // hacky but works
                     let Ok(dst_buf) = dst_buf.try_into_ip() else {
@@ -729,8 +734,8 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
-        mut tun_rx: impl IpRecv,
-        udp4: impl UdpSend,
+        mut tun_rx: impl IpRecv, // TODO: DaitaIpRecv
+        udp4: impl UdpSend,      // TODO: DaitaUdpSend
         udp6: impl UdpSend,
         mut packet_pool: PacketBufPool,
     ) {
@@ -758,6 +763,14 @@ impl<T: DeviceTransports> Device<T> {
                     None => continue,
                 };
 
+                // TODO: daita padding packet will not have a dst_addr, make a trait for types that can lookup a peer?
+                // implement for pub key, addr and peer idx
+                // Send the packet along with the peer identifier for encapsulation
+
+                // TODO: DAITA normal_sent here
+                // TODO: Padd to constant packet size here
+                // Add counter for normal packets being processed, such that padding packets can be replaced by them
+
                 let mut dst_buf = packet_pool.get();
                 match peer
                     .tunnel
@@ -768,6 +781,10 @@ impl<T: DeviceTransports> Device<T> {
                         log::error!("Encapsulate error={e:?}: {e:?}");
                     }
                     TunnResult::WriteToNetwork(packet) => {
+                        // NOTE: Should encapsulate take a writer instead, to avoid this truncation step?
+                        // TODO: blocking should be imeplemented after encryption.
+                        // Blocking could be implemented using a UdpSend
+                        // TODO: DAITA tunnel_sent here?
                         let len = packet.len();
                         dst_buf.truncate(len);
                         let endpoint_addr = peer.endpoint().addr;
