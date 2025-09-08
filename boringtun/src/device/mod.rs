@@ -31,8 +31,7 @@ use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::{IpRecv, IpSend};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{
-    UdpRecv, UdpSend, UdpTransport, UdpTransportFactory, UdpTransportFactoryParams,
-    socket::UdpSocketFactory,
+    UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams, socket::UdpSocketFactory,
 };
 use crate::x25519;
 use allowed_ips::AllowedIps;

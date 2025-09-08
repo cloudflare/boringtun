@@ -1,4 +1,4 @@
-use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrStorage};
+use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrStorage, setsockopt, sockopt};
 use std::{
     io::{self, IoSlice},
     net::SocketAddr,
@@ -6,7 +6,10 @@ use std::{
 };
 use tokio::io::Interest;
 
-use crate::{packet::Packet, udp::UdpSend};
+use crate::{
+    packet::Packet,
+    udp::{UdpSend, socket::UdpSocket},
+};
 
 /// Max number of packets/messages for sendmmsg/recvmmsg
 const MAX_PACKET_COUNT: usize = 100;
@@ -75,6 +78,27 @@ impl UdpSend for super::UdpSocket {
     fn max_number_of_packets_to_send(&self) -> usize {
         MAX_PACKET_COUNT
     }
+
+    fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
+        UdpSocket::local_addr(self).map(Some)
+    }
+
+    fn set_fwmark(&self, mark: u32) -> io::Result<()> {
+        setsockopt(&self.inner, sockopt::Mark, &mark)?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn enable_udp_gro(&self) -> io::Result<()> {
+        // TODO: missing constants on Android
+        use std::os::fd::AsFd;
+        nix::sys::socket::setsockopt(
+            &self.inner.as_fd(),
+            nix::sys::socket::sockopt::UdpGroSegment,
+            &true,
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -87,12 +111,10 @@ mod gro {
 
     use super::MAX_PACKET_COUNT;
     use crate::packet::{Packet, PacketBufPool};
-    use crate::udp::{UdpRecv, UdpTransport, socket::UdpSocket};
+    use crate::udp::{UdpRecv, socket::UdpSocket};
     use bytes::BytesMut;
     use nix::cmsg_space;
-    use nix::sys::socket::{
-        ControlMessageOwned, MsgFlags, MultiHeaders, SockaddrIn, setsockopt, sockopt,
-    };
+    use nix::sys::socket::{ControlMessageOwned, MsgFlags, MultiHeaders, SockaddrIn};
     use std::io::{self, IoSliceMut};
     use std::net::SocketAddr;
     use std::os::fd::AsRawFd;
@@ -215,28 +237,6 @@ mod gro {
                 })
                 .await?;
 
-            Ok(())
-        }
-    }
-
-    impl UdpTransport for UdpSocket {
-        fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
-            UdpSocket::local_addr(self).map(Some)
-        }
-
-        fn set_fwmark(&self, mark: u32) -> io::Result<()> {
-            setsockopt(&self.inner, sockopt::Mark, &mark)?;
-            Ok(())
-        }
-
-        fn enable_udp_gro(&self) -> io::Result<()> {
-            // TODO: missing constants on Android
-            use std::os::fd::AsFd;
-            nix::sys::socket::setsockopt(
-                &self.inner.as_fd(),
-                nix::sys::socket::sockopt::UdpGroSegment,
-                &true,
-            )?;
             Ok(())
         }
     }

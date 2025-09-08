@@ -19,7 +19,7 @@ use crate::{
         UdpHeader,
     },
     tun::channel::{Ipv4Fragments, TunChannelRx, TunChannelTx},
-    udp::{UdpRecv, UdpSend, UdpTransport, UdpTransportFactory},
+    udp::{UdpRecv, UdpSend, UdpTransportFactory},
 };
 
 use super::UdpTransportFactoryParams;
@@ -161,8 +161,6 @@ impl UdpTransportFactory for UdpChannelFactory {
         ))
     }
 }
-
-impl UdpTransport for UdpChannelTx {}
 
 impl UdpSend for UdpChannelTx {
     type SendManyBuf = ();

@@ -19,13 +19,13 @@ pub mod socket;
 ///
 /// See [UdpTransport].
 pub trait UdpTransportFactory: Send + Sync + 'static {
-    type Send: UdpSend + UdpTransport + 'static;
+    type Send: UdpSend + 'static;
     type RecvV4: UdpRecv + 'static;
     type RecvV6: UdpRecv + 'static;
 
     /// Bind sockets for sending and receiving UDP.
     ///
-    /// Returns two pairs of [UdpTransport]s, one for IPv4 and one for IPv6.
+    /// Returns two pairs of UdpSend/Recvs, one for IPv4 and one for IPv6.
     #[allow(clippy::type_complexity)]
     fn bind(
         &mut self,
@@ -42,33 +42,6 @@ pub struct UdpTransportFactoryParams {
 
     #[cfg(target_os = "linux")]
     pub fwmark: Option<u32>,
-}
-
-/// An abstraction of a UDP socket.
-///
-/// This allows us to, for example, swap out UDP sockets with a channel.
-pub trait UdpTransport: Send + Sync + Clone {
-    // --- Optional Methods ---
-
-    /// Get the port in use, if any.
-    ///
-    /// This is applicable to UDP sockets, i.e. [tokio::net::UdpSocket].
-    fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
-        Ok(None)
-    }
-
-    /// Set `fwmark`.
-    ///
-    /// This is applicable to UDP sockets, i.e. [tokio::net::UdpSocket].
-    #[cfg(target_os = "linux")]
-    fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
-        Ok(())
-    }
-
-    /// Enable UDP GRO, if available
-    fn enable_udp_gro(&self) -> io::Result<()> {
-        Ok(())
-    }
 }
 
 /// An abstraction of `recv_from` for a UDP socket.
@@ -124,7 +97,7 @@ pub trait UdpRecv: Send + Sync {
 /// An abstraction of `send_to` for a UDP socket.
 ///
 /// This allows us to, for example, swap out UDP sockets with a channel.
-pub trait UdpSend: Send + Sync {
+pub trait UdpSend: Send + Sync + Clone {
     type SendManyBuf: Default + Send + Sync;
 
     /// Send a single UDP packet to `destination`.
@@ -150,6 +123,28 @@ pub trait UdpSend: Send + Sync {
         packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> impl Future<Output = io::Result<()>> + Send {
         generic_send_many_to(self, packets)
+    }
+
+    // --- Optional Methods ---
+
+    /// Get the port in use, if any.
+    ///
+    /// This is applicable to UDP sockets, i.e. [tokio::net::UdpSocket].
+    fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
+        Ok(None)
+    }
+
+    /// Set `fwmark`.
+    ///
+    /// This is applicable to UDP sockets, i.e. [tokio::net::UdpSocket].
+    #[cfg(target_os = "linux")]
+    fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
+        Ok(())
+    }
+
+    /// Enable UDP GRO, if available
+    fn enable_udp_gro(&self) -> io::Result<()> {
+        Ok(())
     }
 }
 
