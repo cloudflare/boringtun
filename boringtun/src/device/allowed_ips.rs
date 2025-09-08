@@ -56,7 +56,7 @@ impl<D> AllowedIps<D> {
         self.ips.retain(|_, v| !predicate(v));
     }
 
-    pub fn iter(&self) -> Iter<D> {
+    pub fn iter(&'_ self) -> Iter<'_, D> {
         Iter(
             self.ips
                 .iter()

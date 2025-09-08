@@ -8,7 +8,7 @@
 mod unix {
     use boringtun::device::drop_privileges::drop_privileges;
     use boringtun::device::{DeviceConfig, DeviceHandle};
-    use boringtun::udp::UdpSocketFactory;
+    use boringtun::udp::socket::UdpSocketFactory;
     use clap::{Arg, Command};
     use daemonize::Daemonize;
     use std::fs::File;
@@ -148,13 +148,12 @@ mod unix {
                 }
             };
 
-        if !matches.is_present("disable-drop-privileges") {
-            if let Err(e) = drop_privileges() {
+        if !matches.is_present("disable-drop-privileges")
+            && let Err(e) = drop_privileges() {
                 log::error!("Failed to drop privileges: {e:?}");
                 sock1.send(&[0]).unwrap();
                 exit(1);
             }
-        }
 
         // Notify parent that tunnel initialization succeeded
         sock1.send(&[1]).unwrap();

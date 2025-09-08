@@ -71,6 +71,7 @@ impl Future for Task {
 }
 
 impl Task {
+    #[cfg(feature = "device")]
     pub async fn stop(mut self) {
         if let Some(handle) = self.handle.take() {
             handle.abort();
