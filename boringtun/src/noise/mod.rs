@@ -125,7 +125,7 @@ pub enum Packet<'a> {
 
 impl Tunn {
     #[inline(always)]
-    pub fn parse_incoming_packet(src: &[u8]) -> Result<Packet, WireGuardError> {
+    pub fn parse_incoming_packet(src: &'_ [u8]) -> Result<Packet<'_>, WireGuardError> {
         if src.len() < 4 {
             return Err(WireGuardError::InvalidPacket);
         }

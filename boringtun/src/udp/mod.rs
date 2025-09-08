@@ -148,7 +148,7 @@ pub trait UdpSend: Send + Sync + Clone {
     }
 }
 
-async fn generic_send_many_to<U: UdpSend + ?Sized>(
+async fn generic_send_many_to<U: UdpSend>(
     transport: &U,
     packets: &mut Vec<(Packet, SocketAddr)>,
 ) -> io::Result<()> {

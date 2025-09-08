@@ -92,12 +92,12 @@ impl ApiClient {
 
             for line in r.lines() {
                 let Ok(line) = line else {
-                    if !lines.is_empty() {
-                        if let Err(e) = make_request(&lines) {
-                            log::error!("Failed to handle UAPI request: {e:#}");
-                            return;
-                        };
-                    }
+                    if !lines.is_empty()
+                        && let Err(e) = make_request(&lines)
+                    {
+                        log::error!("Failed to handle UAPI request: {e:#}");
+                        return;
+                    };
                     return;
                 };
 
@@ -346,11 +346,11 @@ async fn on_api_set(
         peers,
     } = set;
 
-    if let Some(protocol_version) = protocol_version {
-        if protocol_version != "1" {
-            log::warn!("Invalid API protocol version: {protocol_version}");
-            return (SetResponse { errno: EINVAL }, Reconfigure::No);
-        }
+    if let Some(protocol_version) = protocol_version
+        && protocol_version != "1"
+    {
+        log::warn!("Invalid API protocol version: {protocol_version}");
+        return (SetResponse { errno: EINVAL }, Reconfigure::No);
     }
 
     let mut reconfigure: Reconfigure = Reconfigure::No;

@@ -23,6 +23,7 @@ mod task;
 #[cfg(not(feature = "mock-instant"))]
 pub(crate) mod sleepyinstant;
 
+#[cfg(any(feature = "ffi-bindings", feature = "device"))]
 pub(crate) mod serialization;
 
 /// Re-export of the x25519 types
