@@ -7,7 +7,7 @@
 #[cfg(unix)]
 mod unix {
     use boringtun::device::drop_privileges::drop_privileges;
-    use boringtun::device::{DeviceConfig, DeviceHandle};
+    use boringtun::device::{DefaultDeviceTransports, DeviceConfig, DeviceHandle};
     use boringtun::udp::socket::UdpSocketFactory;
     use clap::{Arg, Command};
     use daemonize::Daemonize;
@@ -137,7 +137,7 @@ mod unix {
 
         let config = DeviceConfig { api: Some(api) };
 
-        let _device_handle =
+        let _device_handle: DeviceHandle<DefaultDeviceTransports> =
             match DeviceHandle::from_tun_name(UdpSocketFactory, tun_name, config).await {
                 Ok(d) => d,
                 Err(e) => {

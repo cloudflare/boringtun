@@ -241,12 +241,14 @@ impl<T: DeviceTransports> Connection<T> {
 }
 
 #[cfg(feature = "tun")]
-impl DeviceHandle<DefaultDeviceTransports> {
+impl<T: DeviceTransports<IpRecv = Arc<tun::AsyncDevice>, IpSend = Arc<tun::AsyncDevice>>>
+    DeviceHandle<T>
+{
     pub async fn from_tun_name(
-        udp_factory: UdpSocketFactory,
+        udp_factory: T::UdpTransportFactory,
         tun_name: &str,
         config: DeviceConfig,
-    ) -> Result<DeviceHandle<DefaultDeviceTransports>, Error> {
+    ) -> Result<DeviceHandle<T>, Error> {
         let mut tun_config = tun::Configuration::default();
         tun_config.tun_name(tun_name);
         #[cfg(target_os = "macos")]
