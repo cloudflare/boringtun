@@ -199,6 +199,7 @@ impl Packet<Ip> {
                     .map_err(|e| eyre!("Bad IPv4 packet: {e:?}"))?;
 
                 let ip_len = usize::from(ipv4.header.total_len.get());
+                // TODO: make sure this check doesn't trigger on constant packet size
                 if ip_len != buf_len {
                     bail!("IPv4 `total_len` did not match packet length: {ip_len} != {buf_len}");
                 }
@@ -214,6 +215,7 @@ impl Packet<Ip> {
                     .map_err(|e| eyre!("Bad IPv6 packet: {e:?}"))?;
 
                 let payload_len = usize::from(ipv6.header.payload_length.get());
+                // TODO: make sure this check doesn't trigger on constant packet size
                 if payload_len != ipv6.payload.len() {
                     bail!(
                         "IPv6 `payload_len` did not match packet length: {payload_len} != {}",

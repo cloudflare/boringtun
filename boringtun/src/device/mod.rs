@@ -167,7 +167,7 @@ pub(crate) struct Connection<T: DeviceTransports> {
 
 impl<T: DeviceTransports> Connection<T> {
     pub async fn set_up(device: Arc<RwLock<Device<T>>>) -> Result<Self, Error> {
-        let pool = PacketBufPool::new(MAX_PACKET_BUFS);
+        let pool = PacketBufPool::new(MAX_PACKET_BUFS); // TODO: Make pool accessible from the app repo? Attach it to the device?
 
         let mut device_guard = device.write().await;
         let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device_guard.open_listen_socket().await?;
