@@ -2,15 +2,17 @@ use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_2
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
+use core::convert::TryFrom;
 use core::net::IpAddr;
 use core::sync::atomic::{AtomicU64, Ordering};
-use core::convert::TryFrom;
 
 use crate::sleepyinstant::Instant;
 
 use crate::sleepyinstant::ClockImpl;
 use aead::generic_array::GenericArray;
 use aead::{AeadInPlace, KeyInit};
+#[cfg(feature = "ariel-os")]
+use ariel_os_lock::RawMutex;
 use chacha20poly1305::{Key, XChaCha20Poly1305};
 use embedded_time::duration::Seconds;
 use embedded_time::fixed_point::FixedPoint;
@@ -18,8 +20,6 @@ use embedded_time::Clock;
 use lock_api::Mutex;
 #[cfg(feature = "std")]
 use parking_lot::RawMutex;
-#[cfg(feature = "ariel-os")]
-use ariel_os_lock::RawMutex;
 use rand_core::{OsRng, RngCore};
 use ring::constant_time::verify_slices_are_equal;
 

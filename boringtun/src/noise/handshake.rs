@@ -7,6 +7,7 @@ use crate::noise::session::Session;
 use crate::sleepyinstant::{ClockImpl, Instant};
 use crate::x25519;
 use aead::{Aead, Payload};
+use alloc::borrow::ToOwned;
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
@@ -889,6 +890,7 @@ mod tests {
 
     use super::*;
     use alloc::vec;
+    use std::eprintln;
 
     #[test]
     fn chacha20_seal_rfc7530_test_vector() {

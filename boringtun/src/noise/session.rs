@@ -3,12 +3,12 @@
 
 use super::PacketData;
 use crate::noise::errors::WireGuardError;
+#[cfg(feature = "ariel-os")]
+use ariel_os_lock::RawMutex;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use lock_api::Mutex;
 #[cfg(feature = "std")]
 use parking_lot::RawMutex;
-#[cfg(feature = "ariel-os")]
-use ariel_os_lock::RawMutex;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 
 pub struct Session {

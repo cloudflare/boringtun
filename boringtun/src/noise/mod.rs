@@ -17,6 +17,7 @@ use crate::x25519;
 use crate::sleepyinstant::ClockImpl;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use embedded_time::duration::Generic;
