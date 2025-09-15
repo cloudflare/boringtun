@@ -9,8 +9,8 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use crate::sleepyinstant::Instant;
 
 use crate::sleepyinstant::ClockImpl;
-use aead::generic_array::GenericArray;
-use aead::{AeadInPlace, KeyInit};
+use aead::array::Array;
+use aead::{AeadInOut, KeyInit};
 #[cfg(feature = "ariel-os")]
 use ariel_os_lock::RawMutex;
 use chacha20poly1305::{Key, XChaCha20Poly1305};
@@ -20,7 +20,7 @@ use embedded_time::Clock;
 use lock_api::Mutex;
 #[cfg(feature = "std")]
 use parking_lot::RawMutex;
-use rand_core::{OsRng, RngCore};
+use rand_core::{OsRng, TryRngCore};
 use ring::constant_time::verify_slices_are_equal;
 
 const COOKIE_REFRESH: Seconds = Seconds(128); // Use 128 and not 120 so the compiler can optimize out the division
@@ -60,7 +60,7 @@ pub struct RateLimiter {
 impl RateLimiter {
     pub fn new(public_key: &crate::x25519::PublicKey, limit: u64) -> Self {
         let mut secret_key = [0u8; 16];
-        OsRng.fill_bytes(&mut secret_key);
+        OsRng.try_fill_bytes(&mut secret_key).unwrap();
         RateLimiter {
             nonce_key: Self::rand_bytes(),
             secret_key,
@@ -76,7 +76,7 @@ impl RateLimiter {
 
     fn rand_bytes() -> [u8; 32] {
         let mut key = [0u8; 32];
-        OsRng.fill_bytes(&mut key);
+        OsRng.try_fill_bytes(&mut key).unwrap();
         key
     }
 
@@ -151,11 +151,11 @@ impl RateLimiter {
 
         let cipher = XChaCha20Poly1305::new(&self.cookie_key);
 
-        let iv = GenericArray::from_slice(nonce);
+        let iv = Array::from_slice(nonce);
 
         encrypted_cookie[..16].copy_from_slice(&cookie);
         let tag = cipher
-            .encrypt_in_place_detached(iv, mac1, &mut encrypted_cookie[..16])
+            .encrypt_inout_detached(&iv, mac1, (&mut encrypted_cookie[..16]).into())
             .map_err(|_| WireGuardError::DestinationBufferTooSmall)?;
 
         encrypted_cookie[16..].copy_from_slice(&tag);

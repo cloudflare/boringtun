@@ -44,7 +44,7 @@ use allowed_ips::AllowedIps;
 use parking_lot::Mutex;
 use peer::{AllowedIP, Peer};
 use poll::{EventPoll, EventRef, WaitResult};
-use rand_core::{OsRng, RngCore};
+use rand_core::{OsRng, TryRngCore};
 use socket2::{Domain, Protocol, Type};
 use tun::TunSocket;
 
@@ -852,7 +852,7 @@ impl IndexLfsr {
     fn random_index() -> u32 {
         const LFSR_MAX: u32 = 0xffffff; // 24-bit seed
         loop {
-            let i = OsRng.next_u32() & LFSR_MAX;
+            let i = OsRng.try_next_u32().unwrap() & LFSR_MAX;
             if i > 0 {
                 // LFSR seed must be non-zero
                 return i;
