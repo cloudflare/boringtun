@@ -24,7 +24,7 @@ ffi-bindings = ["std", "tracing-subscriber"]
 
 [dependencies]
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
-hex = { version = "0.4", features = ["alloc"] }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
 untrusted = "0.9.0"
 libc = { version = "0.2", default-features = false }
 parking_lot = { version = "0.12.4", optional = true }
