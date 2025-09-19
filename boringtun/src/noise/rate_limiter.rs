@@ -5,7 +5,7 @@ use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, W
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::Instant;
@@ -41,29 +41,29 @@ pub struct RateLimiter {
     secret_key: [u8; 16],
     start_time: Instant,
     /// A single 64 bit counter (should suffice for many years)
-    nonce_ctr: AtomicU64,
+    nonce_ctr: AtomicUsize,
     mac1_key: [u8; 32],
     cookie_key: Key,
-    limit: u64,
+    limit: usize,
     /// The counter since last reset
-    count: AtomicU64,
+    count: AtomicUsize,
     /// The time last reset was performed on this rate limiter
     last_reset: Mutex<Instant>,
 }
 
 impl RateLimiter {
-    pub fn new(public_key: &crate::x25519::PublicKey, limit: u64) -> Self {
+    pub fn new(public_key: &crate::x25519::PublicKey, limit: usize) -> Self {
         let mut secret_key = [0u8; 16];
         OsRng.fill_bytes(&mut secret_key);
         RateLimiter {
             nonce_key: Self::rand_bytes(),
             secret_key,
             start_time: Instant::now(),
-            nonce_ctr: AtomicU64::new(0),
+            nonce_ctr: AtomicUsize::new(0),
             mac1_key: b2s_hash(LABEL_MAC1, public_key.as_bytes()),
             cookie_key: b2s_hash(LABEL_COOKIE, public_key.as_bytes()).into(),
             limit,
-            count: AtomicU64::new(0),
+            count: AtomicUsize::new(0),
             last_reset: Mutex::new(Instant::now()),
         }
     }

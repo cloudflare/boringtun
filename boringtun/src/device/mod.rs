@@ -50,7 +50,7 @@ use tun::TunSocket;
 
 use dev_lock::{Lock, LockReadGuard};
 
-const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
+const HANDSHAKE_RATE_LIMIT: usize = 100; // The number of handshakes per second we can tolerate before using cookies
 
 const MAX_UDP_SIZE: usize = (1 << 16) - 1;
 const MAX_ITR: usize = 100; // Number of packets to handle per handler call
