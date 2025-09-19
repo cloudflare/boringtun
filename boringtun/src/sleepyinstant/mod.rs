@@ -14,6 +14,9 @@ pub use inner::UnixClock as ClockImpl;
 #[cfg(unix)]
 use unix as inner;
 
+#[cfg(feature = "ariel-os")]
+pub use embassy_embedded_time::EmbassyClock as ClockImpl;
+
 /// A measurement of a monotonically nondecreasing clock.
 /// Opaque and useful only with [`Duration`].
 ///
