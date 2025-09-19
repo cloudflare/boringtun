@@ -14,10 +14,10 @@ documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
 edition = "2018"
 
 [features]
-default = [ "std" ]
-alloc = [ ]
-std = [ "alloc", "dep:parking_lot", "dep:std-embedded-time" ]
-ariel-os = [ "dep:ariel-os-lock", "dep:embassy-embedded-time" ]
+default = ["std"]
+alloc = []
+std = ["alloc", "dep:parking_lot", "dep:std-embedded-time"]
+ariel-os = ["dep:ariel-os-lock", "dep:embassy-embedded-time", "ring/less-safe-getrandom-custom-or-rdrand"]
 device = ["std", "socket2", "thiserror"]
 jni-bindings = ["std", "ffi-bindings", "jni"]
 ffi-bindings = ["std", "tracing-subscriber"]
