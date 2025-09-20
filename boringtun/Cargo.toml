@@ -17,7 +17,7 @@ edition = "2018"
 default = ["std"]
 alloc = []
 std = ["alloc", "dep:parking_lot", "dep:std-embedded-time"]
-ariel-os = ["dep:ariel-os-lock", "dep:embassy-embedded-time", "ring/less-safe-getrandom-custom-or-rdrand"]
+ariel-os = ["dep:ariel-os-lock", "dep:embassy-embedded-time"]
 device = ["std", "socket2", "thiserror"]
 jni-bindings = ["std", "ffi-bindings", "jni"]
 ffi-bindings = ["std", "tracing-subscriber"]
@@ -49,8 +49,8 @@ jni = { version = "0.19.0", optional = true }
 socket2 = { version = "0.4.7", features = ["all"], optional = true }
 thiserror = { version = "1", optional = true }
 embedded-time = { git = "https://github.com/FluenTech/embedded-time.git", branch = "release/v0.13.0" }
-std-embedded-time =  { git = "https://github.com/SimonIT/std-embedded-time.git", branch = "release/v0.13.0", optional = true }
-embassy-embedded-time = { git = "https://github.com/SimonIT/embassy-embedded-time.git", branch = "release/v0.13.0",  optional = true }
+std-embedded-time = { git = "https://github.com/SimonIT/std-embedded-time.git", branch = "release/v0.13.0", optional = true }
+embassy-embedded-time = { git = "https://github.com/SimonIT/embassy-embedded-time.git", branch = "release/v0.13.0", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.25", default-features = false, features = [
@@ -64,7 +64,7 @@ tracing-subscriber = "0.3"
 criterion = { version = "0.3.5", features = ["html_reports"] }
 
 [lib]
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [[bench]]
 name = "crypto_benches"
