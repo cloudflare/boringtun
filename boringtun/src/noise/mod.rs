@@ -14,14 +14,12 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::x25519;
 
-use crate::sleepyinstant::ClockImpl;
+use crate::sleepyinstant::ClockDuration;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use embedded_time::duration::Generic;
-use embedded_time::Clock;
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
@@ -577,15 +575,7 @@ impl Tunn {
     /// * Time since last handshake in seconds
     /// * Data bytes sent
     /// * Data bytes received
-    pub fn stats(
-        &self,
-    ) -> (
-        Option<Generic<<ClockImpl as Clock>::T>>,
-        usize,
-        usize,
-        f32,
-        Option<u32>,
-    ) {
+    pub fn stats(&self) -> (Option<ClockDuration>, usize, usize, f32, Option<u32>) {
         let time = self.time_since_last_handshake();
         let tx_bytes = self.tx_bytes;
         let rx_bytes = self.rx_bytes;

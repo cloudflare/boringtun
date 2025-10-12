@@ -395,11 +395,7 @@ pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<RawMutex, Tunn>) -
     let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt) = tunnel.stats();
     stats {
         time_since_last_handshake: time
-            .map(|t| {
-                Seconds::<<ClockImpl as Clock>::T>::try_from(t)
-                    .unwrap()
-                    .integer() as i64
-            })
+            .map(|t| Seconds::<ClockUnit>::try_from(t).unwrap().integer() as i64)
             .unwrap_or(-1),
         tx_bytes,
         rx_bytes,

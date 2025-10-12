@@ -1,14 +1,12 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use embedded_time::duration::Generic;
 use parking_lot::RwLock;
 use socket2::{Domain, Protocol, Type};
 
 use crate::device::{AllowedIps, Error};
 use crate::noise::{Tunn, TunnResult};
-use crate::sleepyinstant::ClockImpl;
-use embedded_time::Clock;
+use crate::sleepyinstant::ClockDuration;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
 
@@ -154,7 +152,7 @@ impl Peer {
         self.allowed_ips.iter().map(|(_, ip, cidr)| (ip, cidr))
     }
 
-    pub fn time_since_last_handshake(&self) -> Option<Generic<<ClockImpl as Clock>::T>> {
+    pub fn time_since_last_handshake(&self) -> Option<ClockDuration> {
         self.tunnel.time_since_last_handshake()
     }
 

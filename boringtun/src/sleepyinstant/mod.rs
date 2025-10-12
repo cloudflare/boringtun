@@ -43,6 +43,12 @@ pub struct Instant {
     t: embedded_time::Instant<ClockImpl>,
 }
 
+/// The underlying unit of time for the clock.
+pub type ClockUnit = <ClockImpl as Clock>::T;
+
+/// A span of time between two instants of the clock.
+pub type ClockDuration = Generic<ClockUnit>;
+
 impl Instant {
     /// Returns an instant corresponding to "now".
     pub fn now() -> Self {
@@ -57,12 +63,12 @@ impl Instant {
     /// # Panics
     ///
     /// panics when `earlier` was later than `self`.
-    pub fn duration_since(&self, earlier: Instant) -> Generic<<ClockImpl as Clock>::T> {
+    pub fn duration_since(&self, earlier: Instant) -> ClockDuration {
         self.t.checked_duration_since(&earlier.t).unwrap()
     }
 
     /// Returns the amount of time elapsed since this instant was created.
-    pub fn elapsed(&self) -> Generic<<ClockImpl as Clock>::T> {
+    pub fn elapsed(&self) -> ClockDuration {
         Self::now().duration_since(*self)
     }
 }

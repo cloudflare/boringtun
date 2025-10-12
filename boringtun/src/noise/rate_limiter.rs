@@ -6,9 +6,8 @@ use core::convert::TryFrom;
 use core::net::IpAddr;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::sleepyinstant::Instant;
+use crate::sleepyinstant::{ClockUnit, Instant};
 
-use crate::sleepyinstant::ClockImpl;
 use aead::array::Array;
 use aead::{AeadInOut, KeyInit};
 #[cfg(feature = "ariel-os")]
@@ -16,7 +15,6 @@ use ariel_os_lock::RawMutex;
 use chacha20poly1305::{Key, XChaCha20Poly1305};
 use embedded_time::duration::Seconds;
 use embedded_time::fixed_point::FixedPoint;
-use embedded_time::Clock;
 use lock_api::Mutex;
 #[cfg(feature = "std")]
 use parking_lot::RawMutex;
@@ -102,11 +100,9 @@ impl RateLimiter {
 
         // The current cookie for a given IP is the MAC(responder.changing_secret_every_two_minutes, initiator.ip_address)
         // First we derive the secret from the current time, the value of cur_counter would change with time.
-        let cur_counter = Seconds::<<ClockImpl as Clock>::T>::try_from(
-            Instant::now().duration_since(self.start_time),
-        )
-        .unwrap()
-            / COOKIE_REFRESH.integer() as <ClockImpl as Clock>::T;
+        let cur_counter =
+            Seconds::<ClockUnit>::try_from(Instant::now().duration_since(self.start_time)).unwrap()
+                / COOKIE_REFRESH.integer() as ClockUnit;
 
         // Next we derive the cookie
         b2s_keyed_mac_16_2(

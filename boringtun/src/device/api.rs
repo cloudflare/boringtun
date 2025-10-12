@@ -6,10 +6,9 @@ use super::drop_privileges::get_saved_ids;
 use super::{AllowedIP, Device, Error, SocketAddr};
 use crate::device::Action;
 use crate::serialization::KeyBytes;
-use crate::sleepyinstant::ClockImpl;
+use crate::sleepyinstant::ClockUnit;
 use crate::x25519;
 use embedded_time::duration::{Nanoseconds, Seconds};
-use embedded_time::Clock;
 use hex::encode as encode_hex;
 use libc::*;
 use std::convert::TryFrom;
@@ -193,10 +192,9 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
         }
 
         if let Some(time) = p.time_since_last_handshake() {
-            let secs = Seconds::<<ClockImpl as Clock>::T>::try_from(time).unwrap();
+            let secs = Seconds::<ClockUnit>::try_from(time).unwrap();
             writeln!(writer, "last_handshake_time_sec={secs}");
-            let sub =
-                Nanoseconds::<<ClockImpl as Clock>::T>::try_from(time).unwrap() % Seconds(1u32);
+            let sub = Nanoseconds::<ClockUnit>::try_from(time).unwrap() % Seconds(1u32);
             writeln!(writer, "last_handshake_time_nsec={sub}");
         }
 

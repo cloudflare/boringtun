@@ -4,7 +4,7 @@
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
-use crate::sleepyinstant::{ClockImpl, Instant};
+use crate::sleepyinstant::{ClockDuration, ClockImpl, ClockUnit, Instant};
 use crate::x25519;
 use aead::{Aead, Payload};
 use alloc::borrow::ToOwned;
@@ -14,7 +14,7 @@ use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
 use core::convert::TryFrom;
 use core::convert::TryInto;
-use embedded_time::duration::{Generic, Milliseconds, Nanoseconds, Seconds};
+use embedded_time::duration::{Milliseconds, Nanoseconds, Seconds};
 use embedded_time::fixed_point::FixedPoint;
 use embedded_time::Clock;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
@@ -168,7 +168,7 @@ struct Tai64N {
 #[derive(Debug)]
 /// This struct computes a [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp from current system time
 struct TimeStamper {
-    duration_at_start: Generic<<ClockImpl as Clock>::T>,
+    duration_at_start: ClockDuration,
     instant_at_start: Instant,
 }
 
@@ -189,9 +189,9 @@ impl TimeStamper {
         const TAI64_BASE: u64 = (1u64 << 62) + 37;
         let mut ext_stamp = [0u8; 12];
         let stamp = Instant::now().duration_since(self.instant_at_start) + self.duration_at_start;
-        let secs = Seconds::<<ClockImpl as Clock>::T>::try_from(stamp).unwrap();
+        let secs = Seconds::<ClockUnit>::try_from(stamp).unwrap();
         ext_stamp[0..8].copy_from_slice(&(secs.integer() + TAI64_BASE).to_be_bytes());
-        let sub = Nanoseconds::<<ClockImpl as Clock>::T>::try_from(stamp).unwrap() % Seconds(1u32);
+        let sub = Nanoseconds::<ClockUnit>::try_from(stamp).unwrap() % Seconds(1u32);
         ext_stamp[8..12].copy_from_slice(&(sub.integer() as u32).to_be_bytes());
         ext_stamp
     }

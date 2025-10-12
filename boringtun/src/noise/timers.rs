@@ -3,12 +3,11 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
-use crate::sleepyinstant::ClockImpl;
 use crate::sleepyinstant::Instant;
+use crate::sleepyinstant::{ClockDuration, ClockUnit};
 use core::mem;
 use core::ops::{Index, IndexMut};
-use embedded_time::duration::{Generic, Seconds};
-use embedded_time::Clock;
+use embedded_time::duration::Seconds;
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
@@ -50,8 +49,8 @@ pub struct Timers {
     is_initiator: bool,
     /// Start time of the tunnel
     time_started: Instant,
-    timers: [Generic<<ClockImpl as Clock>::T>; TimerName::Top as usize],
-    pub(super) session_timers: [Generic<<ClockImpl as Clock>::T>; super::N_SESSIONS],
+    timers: [ClockDuration; TimerName::Top as usize],
+    pub(super) session_timers: [ClockDuration; super::N_SESSIONS],
     /// Did we receive data without sending anything back?
     want_keepalive: bool,
     /// Did we send data without hearing back?
@@ -92,14 +91,14 @@ impl Timers {
 }
 
 impl Index<TimerName> for Timers {
-    type Output = Generic<<ClockImpl as Clock>::T>;
-    fn index(&self, index: TimerName) -> &Generic<<ClockImpl as Clock>::T> {
+    type Output = ClockDuration;
+    fn index(&self, index: TimerName) -> &ClockDuration {
         &self.timers[index as usize]
     }
 }
 
 impl IndexMut<TimerName> for Timers {
-    fn index_mut(&mut self, index: TimerName) -> &mut Generic<<ClockImpl as Clock>::T> {
+    fn index_mut(&mut self, index: TimerName) -> &mut ClockDuration {
         &mut self.timers[index as usize]
     }
 }
@@ -145,7 +144,7 @@ impl Tunn {
         self.timers.clear();
     }
 
-    fn update_session_timers(&mut self, time_now: Generic<<ClockImpl as Clock>::T>) {
+    fn update_session_timers(&mut self, time_now: ClockDuration) {
         let timers = &mut self.timers;
 
         for (i, t) in timers.session_timers.iter_mut().enumerate() {
@@ -286,7 +285,7 @@ impl Tunn {
                     // Persistent KEEPALIVE
                     if persistent_keepalive > 0
                         && (now - self.timers[TimePersistentKeepalive]
-                            >= Seconds::<<ClockImpl as Clock>::T>(persistent_keepalive as _))
+                            >= Seconds::<ClockUnit>(persistent_keepalive as _))
                     {
                         tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
@@ -307,7 +306,7 @@ impl Tunn {
         TunnResult::Done
     }
 
-    pub fn time_since_last_handshake(&self) -> Option<Generic<<ClockImpl as Clock>::T>> {
+    pub fn time_since_last_handshake(&self) -> Option<ClockDuration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
             let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
