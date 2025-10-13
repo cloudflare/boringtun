@@ -4,7 +4,7 @@
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
-use crate::sleepyinstant::{ClockDuration, ClockImpl, ClockUnit, Instant};
+use crate::sleepyinstant::{ClockDuration, ClockUnit, Instant, BORING_CLOCK};
 use crate::x25519;
 use aead::{Aead, Payload};
 use alloc::borrow::ToOwned;
@@ -176,10 +176,7 @@ impl TimeStamper {
     /// Create a new TimeStamper
     pub fn new() -> TimeStamper {
         TimeStamper {
-            duration_at_start: ClockImpl::default()
-                .try_now()
-                .unwrap()
-                .duration_since_epoch(),
+            duration_at_start: BORING_CLOCK.try_now().unwrap().duration_since_epoch(),
             instant_at_start: Instant::now(),
         }
     }

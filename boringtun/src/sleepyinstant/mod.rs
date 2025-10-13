@@ -5,17 +5,18 @@
 use embedded_time::duration::Generic;
 use embedded_time::Clock;
 #[cfg(windows)]
-pub use std_embedded_time::StandardClock as ClockImpl;
+use std_embedded_time::StandardClock as ClockImpl;
 
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
-pub use inner::UnixClock as ClockImpl;
+use inner::UnixClock as ClockImpl;
 #[cfg(unix)]
 use unix as inner;
 
 #[cfg(feature = "ariel-os")]
-pub use embassy_embedded_time::EmbassyClock as ClockImpl;
+use embassy_embedded_time::EmbassyClock as ClockImpl;
+use once_cell::sync::Lazy;
 
 /// A measurement of a monotonically nondecreasing clock.
 /// Opaque and useful only with [`Duration`].
@@ -38,6 +39,7 @@ pub use embassy_embedded_time::EmbassyClock as ClockImpl;
 /// The size of an `Instant` struct may vary depending on the target operating
 /// system.
 ///
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Copy, Debug)]
 pub struct Instant {
     t: embedded_time::Instant<ClockImpl>,
@@ -49,11 +51,14 @@ pub type ClockUnit = <ClockImpl as Clock>::T;
 /// A span of time between two instants of the clock.
 pub type ClockDuration = Generic<ClockUnit>;
 
+/// A global clock instance
+pub static BORING_CLOCK: Lazy<ClockImpl> = Lazy::new(|| ClockImpl::default());
+
 impl Instant {
     /// Returns an instant corresponding to "now".
     pub fn now() -> Self {
         Self {
-            t: ClockImpl::default().try_now().unwrap(),
+            t: BORING_CLOCK.try_now().unwrap(),
         }
     }
 
