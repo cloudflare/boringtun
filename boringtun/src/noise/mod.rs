@@ -42,6 +42,7 @@ const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
 const N_SESSIONS: usize = 8;
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug)]
 pub enum TunnResult<'a> {
     Done,

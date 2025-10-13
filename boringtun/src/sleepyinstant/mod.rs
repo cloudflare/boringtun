@@ -52,7 +52,7 @@ pub type ClockUnit = <ClockImpl as Clock>::T;
 pub type ClockDuration = Generic<ClockUnit>;
 
 /// A global clock instance
-pub static BORING_CLOCK: Lazy<ClockImpl> = Lazy::new(|| ClockImpl::default());
+pub static BORING_CLOCK: Lazy<ClockImpl> = Lazy::new(ClockImpl::default);
 
 impl Instant {
     /// Returns an instant corresponding to "now".
