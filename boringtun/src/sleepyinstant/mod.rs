@@ -4,14 +4,14 @@
 
 use embedded_time::duration::Generic;
 use embedded_time::Clock;
-#[cfg(windows)]
+#[cfg(all(windows, not(feature = "ariel-os")))]
 use std_embedded_time::StandardClock as ClockImpl;
 
-#[cfg(unix)]
+#[cfg(all(unix, not(feature = "ariel-os")))]
 mod unix;
-#[cfg(unix)]
+#[cfg(all(unix, not(feature = "ariel-os")))]
 use inner::UnixClock as ClockImpl;
-#[cfg(unix)]
+#[cfg(all(unix, not(feature = "ariel-os")))]
 use unix as inner;
 
 #[cfg(feature = "ariel-os")]

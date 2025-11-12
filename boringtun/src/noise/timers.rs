@@ -43,6 +43,7 @@ pub enum TimerName {
 
 use self::TimerName::*;
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug)]
 pub struct Timers {
     /// Is the owner of the timer the initiator or the responder for the last handshake?
