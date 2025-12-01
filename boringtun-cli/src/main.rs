@@ -4,7 +4,9 @@
 use boringtun::device::drop_privileges::drop_privileges;
 use boringtun::device::{DeviceConfig, DeviceHandle};
 use clap::{Arg, Command};
-use daemonize::Daemonize;
+use nix::unistd::{fork, ForkResult, chdir};
+use std::env;
+use std::process;
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
 use std::process::exit;
@@ -114,23 +116,30 @@ fn main() {
             .with_ansi(false)
             .init();
 
-        let daemonize = Daemonize::new()
-            .working_directory("/tmp")
-            .exit_action(move || {
+        // Manual daemonization using nix
+        match unsafe { fork() } {
+            Ok(ForkResult::Parent { .. }) => {
+                // Parent process - wait for child to signal success
                 let mut b = [0u8; 1];
                 if sock2.recv(&mut b).is_ok() && b[0] == 1 {
                     println!("BoringTun started successfully");
+                    process::exit(0);
                 } else {
                     eprintln!("BoringTun failed to start");
-                    exit(1);
-                };
-            });
-
-        match daemonize.start() {
-            Ok(_) => tracing::info!("BoringTun started successfully"),
+                    process::exit(1);
+                }
+            }
+            Ok(ForkResult::Child) => {
+                // Child process - continue execution
+                if let Err(e) = chdir("/tmp") {
+                    tracing::error!("Failed to change directory: {:?}", e);
+                    process::exit(1);
+                }
+                tracing::info!("BoringTun started successfully");
+            }
             Err(e) => {
-                tracing::error!(error = ?e);
-                exit(1);
+                tracing::error!("Fork failed: {:?}", e);
+                process::exit(1);
             }
         }
     } else {
