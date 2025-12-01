@@ -10,18 +10,18 @@ use std::os::unix::net::UnixDatagram;
 use std::process::exit;
 use tracing::Level;
 
-fn check_tun_name(_v: String) -> Result<(), String> {
+fn check_tun_name(_v: &str) -> Result<String, String> {
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     {
-        if boringtun::device::tun::parse_utun_name(&_v).is_ok() {
-            Ok(())
+        if boringtun::device::tun::parse_utun_name(_v).is_ok() {
+            Ok(_v.to_string())
         } else {
             Err("Tunnel name must have the format 'utun[0-9]+', use 'utun' for automatic assignment".to_owned())
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Ok(())
+        Ok(_v.to_string())
     }
 }
 
@@ -32,26 +32,23 @@ fn main() {
         .args(&[
             Arg::new("INTERFACE_NAME")
                 .required(true)
-                .takes_value(true)
-                .validator(|tunname| check_tun_name(tunname.to_string()))
                 .help("The name of the created interface"),
             Arg::new("foreground")
                 .long("foreground")
                 .short('f')
                 .help("Run and log in the foreground"),
             Arg::new("threads")
-                .takes_value(true)
+                .value_parser(clap::value_parser!(usize))
                 .long("threads")
                 .short('t')
                 .env("WG_THREADS")
                 .help("Number of OS threads to use")
                 .default_value("4"),
             Arg::new("verbosity")
-                .takes_value(true)
+                .value_parser(["error", "info", "debug", "trace"])
                 .long("verbosity")
                 .short('v')
                 .env("WG_LOG_LEVEL")
-                .possible_values(["error", "info", "debug", "trace"])
                 .help("Log verbosity")
                 .default_value("error"),
             Arg::new("uapi-fd")
@@ -65,7 +62,6 @@ fn main() {
                 .help("File descriptor for an already-existing TUN device")
                 .default_value("-1"),
             Arg::new("log")
-                .takes_value(true)
                 .long("log")
                 .short('l')
                 .env("WG_LOG_FILE")
@@ -85,16 +81,16 @@ fn main() {
         ])
         .get_matches();
 
-    let background = !matches.is_present("foreground");
+    let background = !matches.get_flag("foreground");
     #[cfg(target_os = "linux")]
     let uapi_fd: i32 = matches.value_of_t("uapi-fd").unwrap_or_else(|e| e.exit());
-    let tun_fd: isize = matches.value_of_t("tun-fd").unwrap_or_else(|e| e.exit());
-    let mut tun_name = matches.value_of("INTERFACE_NAME").unwrap();
+    let tun_fd: isize = matches.get_one::<String>("tun-fd").unwrap().parse().unwrap();
+    let mut tun_name = matches.get_one::<String>("INTERFACE_NAME").unwrap();
     if tun_fd >= 0 {
-        tun_name = matches.value_of("tun-fd").unwrap();
+        tun_name = matches.get_one::<String>("tun-fd").unwrap();
     }
-    let n_threads: usize = matches.value_of_t("threads").unwrap_or_else(|e| e.exit());
-    let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
+    let n_threads: usize = *matches.get_one::<usize>("threads").unwrap();
+    let log_level: Level = matches.get_one::<String>("verbosity").unwrap().parse().unwrap();
 
     // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
@@ -103,7 +99,7 @@ fn main() {
     let _guard;
 
     if background {
-        let log = matches.value_of("log").unwrap();
+        let log = matches.get_one::<String>("log").unwrap();
 
         let log_file =
             File::create(log).unwrap_or_else(|_| panic!("Could not create log file {}", log));
@@ -148,7 +144,7 @@ fn main() {
         n_threads,
         #[cfg(target_os = "linux")]
         uapi_fd,
-        use_connected_socket: !matches.is_present("disable-connected-udp"),
+        use_connected_socket: !matches.get_flag("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),
     };
@@ -163,7 +159,7 @@ fn main() {
         }
     };
 
-    if !matches.is_present("disable-drop-privileges") {
+    if !matches.get_flag("disable-drop-privileges") {
         if let Err(e) = drop_privileges() {
             tracing::error!(message = "Failed to drop privileges", error = ?e);
             sock1.send(&[0]).unwrap();
