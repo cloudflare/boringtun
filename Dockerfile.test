@@ -1,45 +1,52 @@
-# Dockerfile for running boringtun tests in isolated environment
-FROM rust:1.75-bullseye
+# Dockerfile for BoringTun test execution with coverage
+FROM rust:latest
 
-# Install system dependencies for networking and TUN interfaces
+# Install required dependencies for TUN interface, networking, and coverage tools
 RUN apt-get update && apt-get install -y \
+    sudo \
     iproute2 \
     iptables \
-    sudo \
-    docker.io \
     net-tools \
-    iputils-ping \
+    curl \
+    build-essential \
+    llvm \
+    bc \
+    docker.io \
+    wireguard-tools \
+    nginx \
+    kmod \
     && rm -rf /var/lib/apt/lists/*
 
-# Create TUN device support
-RUN mkdir -p /dev/net \
-    && mknod /dev/net/tun c 10 200 \
-    && chmod 666 /dev/net/tun
+# Install cargo-llvm-cov for coverage analysis - use compatible version
+RUN cargo install cargo-llvm-cov --version 0.6.15
 
-# Create test user with sudo privileges
-RUN useradd -m -s /bin/bash testuser \
-    && echo 'testuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+# Create a user with sudo privileges for testing
+RUN useradd -m -s /bin/bash testuser && \
+    echo "testuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Set working directory
-WORKDIR /workspace
+# Create WireGuard run directory and set permissions
+RUN mkdir -p /var/run/wireguard && \
+    chmod 755 /var/run/wireguard
 
-# Copy source code
+# Enable IP forwarding for routing tests
+RUN echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf && \
+    echo "net.ipv6.conf.all.forwarding=1" >> /etc/sysctl.conf
+
+# Set up working directory
+WORKDIR /app
+
+# Copy the project
 COPY . .
 
-# Change ownership to test user
-RUN chown -R testuser:testuser /workspace
+# Change ownership to testuser
+RUN chown -R testuser:testuser /app
 
-# Switch to test user
+# Fix cargo permissions and install llvm tools as root first
+RUN rustup component add llvm-tools-preview && \
+    chmod -R 777 /usr/local/cargo
+
+# Switch to testuser
 USER testuser
 
-# Set up Rust environment for test user
-ENV PATH="/home/testuser/.cargo/bin:${PATH}"
-RUN rustup default stable
-
-# Build dependencies first (for caching)
-RUN cargo fetch
-
-WORKDIR /workspace
-
-# Default command to run tests
-CMD ["cargo", "test", "--verbose"]
+# Set entrypoint to run tests
+ENTRYPOINT ["/bin/bash", "/app/run-tests.sh"]
