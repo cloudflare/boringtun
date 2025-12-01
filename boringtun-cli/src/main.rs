@@ -57,7 +57,8 @@ fn main() {
                 .long("uapi-fd")
                 .env("WG_UAPI_FD")
                 .help("File descriptor for the user API")
-                .default_value("-1"),
+                .default_value("-1")
+                .value_parser(clap::value_parser!(i32)),
             Arg::new("tun-fd")
                 .long("tun-fd")
                 .env("WG_TUN_FD")
@@ -85,7 +86,7 @@ fn main() {
 
     let background = !matches.get_flag("foreground");
     #[cfg(target_os = "linux")]
-    let uapi_fd: i32 = matches.value_of_t("uapi-fd").unwrap_or_else(|e| e.exit());
+    let uapi_fd: i32 = *matches.get_one::<i32>("uapi-fd").unwrap();
     let tun_fd: isize = matches.get_one::<String>("tun-fd").unwrap().parse().unwrap();
     let mut tun_name = matches.get_one::<String>("INTERFACE_NAME").unwrap();
     if tun_fd >= 0 {
@@ -155,7 +156,7 @@ fn main() {
         uapi_fd,
         use_connected_socket: !matches.get_flag("disable-connected-udp"),
         #[cfg(target_os = "linux")]
-        use_multi_queue: !matches.is_present("disable-multi-queue"),
+        use_multi_queue: !matches.get_flag("disable-multi-queue"),
     };
 
     let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config) {
