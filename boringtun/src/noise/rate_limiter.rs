@@ -191,3 +191,239 @@ impl RateLimiter {
         Ok(packet)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::thread;
+    use std::time::Duration;
+
+    fn dummy_public_key() -> crate::x25519::PublicKey {
+        crate::x25519::PublicKey::from([42u8; 32])
+    }
+
+    #[test]
+    fn test_rate_limiter_creation() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 100);
+        
+        assert_eq!(rate_limiter.limit, 100);
+        assert_eq!(rate_limiter.count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_under_load_detection() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 5);
+        
+        // Should not be under load initially
+        assert!(!rate_limiter.is_under_load()); // count: 1
+        assert!(!rate_limiter.is_under_load()); // count: 2
+        assert!(!rate_limiter.is_under_load()); // count: 3
+        assert!(!rate_limiter.is_under_load()); // count: 4
+        assert!(!rate_limiter.is_under_load()); // count: 5
+        
+        // Should be under load now
+        assert!(rate_limiter.is_under_load()); // count: 6
+        assert!(rate_limiter.is_under_load()); // count: 7
+    }
+
+    #[test]
+    fn test_reset_count() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 3);
+        
+        // Fill up the counter
+        assert!(!rate_limiter.is_under_load()); // count: 1
+        assert!(!rate_limiter.is_under_load()); // count: 2  
+        assert!(!rate_limiter.is_under_load()); // count: 3
+        assert!(rate_limiter.is_under_load());  // count: 4 (over limit)
+        
+        // Reset should clear the counter
+        rate_limiter.reset_count();
+        
+        // Should not be under load immediately after reset
+        assert!(!rate_limiter.is_under_load()); // count: 1
+    }
+
+    #[test]
+    fn test_reset_count_timing() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 1);
+        
+        // Force to be under load
+        assert!(!rate_limiter.is_under_load()); // count: 1
+        assert!(rate_limiter.is_under_load());  // count: 2
+        
+        // Reset immediately (should not reset due to timing)
+        rate_limiter.reset_count();
+        assert!(rate_limiter.is_under_load());  // Still under load
+        
+        // Manually set last reset time to past  
+        // Note: We can't subtract Duration from sleepyinstant::Instant
+        // So we'll simulate the timing condition differently
+        thread::sleep(Duration::from_millis(50));
+        
+        // Now reset should work
+        rate_limiter.reset_count();
+        assert!(!rate_limiter.is_under_load()); // Should reset
+    }
+
+    #[test]
+    fn test_current_cookie_ipv4() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 100);
+        
+        let addr_v4 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let cookie1 = rate_limiter.current_cookie(addr_v4);
+        let cookie2 = rate_limiter.current_cookie(addr_v4);
+        
+        // Same IP should produce same cookie (within same time window)
+        assert_eq!(cookie1, cookie2);
+        assert_eq!(cookie1.len(), COOKIE_SIZE);
+    }
+
+    #[test]
+    fn test_current_cookie_ipv6() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 100);
+        
+        let addr_v6 = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let cookie1 = rate_limiter.current_cookie(addr_v6);
+        let cookie2 = rate_limiter.current_cookie(addr_v6);
+        
+        // Same IP should produce same cookie (within same time window)
+        assert_eq!(cookie1, cookie2);
+        assert_eq!(cookie1.len(), COOKIE_SIZE);
+    }
+
+    #[test]
+    fn test_current_cookie_different_ips() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 100);
+        
+        let addr_v4_1 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let addr_v4_2 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2));
+        
+        let cookie1 = rate_limiter.current_cookie(addr_v4_1);
+        let cookie2 = rate_limiter.current_cookie(addr_v4_2);
+        
+        // Different IPs should produce different cookies
+        assert_ne!(cookie1, cookie2);
+    }
+
+    #[test]
+    fn test_nonce_generation() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 100);
+        
+        let nonce1 = rate_limiter.nonce();
+        let nonce2 = rate_limiter.nonce();
+        
+        // Each nonce should be different (counter-based)
+        assert_ne!(nonce1, nonce2);
+        assert_eq!(nonce1.len(), COOKIE_NONCE_SIZE);
+        assert_eq!(nonce2.len(), COOKIE_NONCE_SIZE);
+    }
+
+    #[test]
+    fn test_nonce_counter_increment() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 100);
+        
+        let initial_counter = rate_limiter.nonce_ctr.load(Ordering::Relaxed);
+        let _ = rate_limiter.nonce(); // Should increment counter
+        let after_counter = rate_limiter.nonce_ctr.load(Ordering::Relaxed);
+        
+        assert_eq!(after_counter, initial_counter + 1);
+    }
+
+    #[test]
+    fn test_format_cookie_reply() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 100);
+        
+        let cookie = [42u8; 16];
+        let mac1 = [0x12u8; 16];
+        let sender_idx = 0x12345678;
+        let mut buffer = [0u8; 64]; // Larger than COOKIE_REPLY_SZ
+        
+        let result = rate_limiter.format_cookie_reply(sender_idx, cookie, &mac1, &mut buffer);
+        assert!(result.is_ok());
+        
+        let packet = result.unwrap();
+        assert_eq!(packet.len(), super::super::COOKIE_REPLY_SZ);
+        
+        // Check message type (should be 3 for cookie reply)
+        let message_type = u32::from_le_bytes([packet[0], packet[1], packet[2], packet[3]]);
+        assert_eq!(message_type, super::super::COOKIE_REPLY);
+    }
+
+    #[test]
+    fn test_format_cookie_reply_buffer_too_small() {
+        let public_key = dummy_public_key();
+        let rate_limiter = RateLimiter::new(&public_key, 100);
+        
+        let cookie = [42u8; 16];
+        let mac1 = [0x12u8; 16];
+        let sender_idx = 0x12345678;
+        let mut small_buffer = [0u8; 10]; // Too small
+        
+        let result = rate_limiter.format_cookie_reply(sender_idx, cookie, &mac1, &mut small_buffer);
+        assert!(matches!(result, Err(WireGuardError::DestinationBufferTooSmall)));
+    }
+
+    #[test]
+    fn test_rand_bytes_generation() {
+        let bytes1 = RateLimiter::rand_bytes();
+        let bytes2 = RateLimiter::rand_bytes();
+        
+        // Random bytes should be different
+        assert_ne!(bytes1, bytes2);
+        assert_eq!(bytes1.len(), 32);
+        assert_eq!(bytes2.len(), 32);
+    }
+
+    #[test]
+    fn test_concurrent_access() {
+        let public_key = dummy_public_key();
+        let rate_limiter = std::sync::Arc::new(RateLimiter::new(&public_key, 10));
+        
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let limiter = std::sync::Arc::clone(&rate_limiter);
+                thread::spawn(move || {
+                    for _ in 0..5 {
+                        let _ = limiter.is_under_load();
+                        let _ = limiter.nonce();
+                        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+                        let _ = limiter.current_cookie(addr);
+                    }
+                })
+            })
+            .collect();
+        
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        
+        // Should have processed all requests without panic
+        assert!(rate_limiter.count.load(Ordering::SeqCst) >= 20);
+    }
+
+    #[test]
+    fn test_mac1_key_generation() {
+        let public_key = dummy_public_key();
+        let rate_limiter1 = RateLimiter::new(&public_key, 100);
+        let rate_limiter2 = RateLimiter::new(&public_key, 100);
+        
+        // Same public key should produce same mac1_key
+        assert_eq!(rate_limiter1.mac1_key, rate_limiter2.mac1_key);
+        
+        // Different public key should produce different mac1_key
+        let different_key = crate::x25519::PublicKey::from([99u8; 32]);
+        let rate_limiter3 = RateLimiter::new(&different_key, 100);
+        assert_ne!(rate_limiter1.mac1_key, rate_limiter3.mac1_key);
+    }
+}
