@@ -1,0 +1,45 @@
+# Dockerfile for running boringtun tests in isolated environment
+FROM rust:1.75-bullseye
+
+# Install system dependencies for networking and TUN interfaces
+RUN apt-get update && apt-get install -y \
+    iproute2 \
+    iptables \
+    sudo \
+    docker.io \
+    net-tools \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create TUN device support
+RUN mkdir -p /dev/net \
+    && mknod /dev/net/tun c 10 200 \
+    && chmod 666 /dev/net/tun
+
+# Create test user with sudo privileges
+RUN useradd -m -s /bin/bash testuser \
+    && echo 'testuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy source code
+COPY . .
+
+# Change ownership to test user
+RUN chown -R testuser:testuser /workspace
+
+# Switch to test user
+USER testuser
+
+# Set up Rust environment for test user
+ENV PATH="/home/testuser/.cargo/bin:${PATH}"
+RUN rustup default stable
+
+# Build dependencies first (for caching)
+RUN cargo fetch
+
+WORKDIR /workspace
+
+# Default command to run tests
+CMD ["cargo", "test", "--verbose"]
