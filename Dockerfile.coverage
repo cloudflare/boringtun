@@ -1,0 +1,35 @@
+# Docker file for running test coverage analysis with llvm-cov
+FROM rust:1.81-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    iproute2 \
+    iptables \
+    sudo \
+    net-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create TUN device support
+RUN mkdir -p /dev/net \
+    && mknod /dev/net/tun c 10 200 \
+    && chmod 666 /dev/net/tun
+
+# Install llvm-tools and cargo-llvm-cov
+RUN rustup component add llvm-tools-preview \
+    && cargo install cargo-llvm-cov --version 0.6.15
+
+# Create test user
+RUN useradd -m -s /bin/bash testuser \
+    && echo 'testuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+
+# Set working directory and copy source
+WORKDIR /workspace
+COPY . .
+RUN chown -R testuser:testuser /workspace
+
+# Switch to test user
+USER testuser
+ENV PATH="/home/testuser/.cargo/bin:${PATH}"
+
+# Generate coverage report
+CMD ["cargo", "llvm-cov", "--workspace", "--html", "--output-dir", "coverage-html"]
