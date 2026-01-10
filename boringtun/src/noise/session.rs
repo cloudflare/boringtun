@@ -3,9 +3,13 @@
 
 use super::PacketData;
 use crate::noise::errors::WireGuardError;
-use parking_lot::Mutex;
+#[cfg(feature = "ariel-os")]
+use ariel_os_lock::RawMutex;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use lock_api::Mutex;
+#[cfg(feature = "std")]
+use parking_lot::RawMutex;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct Session {
     pub(crate) receiving_index: u32,
@@ -13,11 +17,11 @@ pub struct Session {
     receiver: LessSafeKey,
     sender: LessSafeKey,
     sending_key_counter: AtomicUsize,
-    receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
+    receiving_key_counter: Mutex<RawMutex, ReceivingKeyCounterValidator>,
 }
 
-impl std::fmt::Debug for Session {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Debug for Session {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(
             f,
             "Session: {}<- ->{}",

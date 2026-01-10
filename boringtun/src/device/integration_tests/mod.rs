@@ -87,7 +87,7 @@ mod tests {
         /// Create a new peer with a given endpoint and a list of allowed IPs
         fn new(endpoint: SocketAddr, allowed_ips: Vec<AllowedIp>) -> Peer {
             Peer {
-                key: StaticSecret::random_from_rng(OsRng),
+                key: StaticSecret::random(),
                 endpoint,
                 allowed_ips,
                 container_name: None,
@@ -476,7 +476,7 @@ mod tests {
     /// Test if wireguard starts and creates a unix socket that we can use to set settings
     fn test_wireguard_set() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let private_key = StaticSecret::random();
         let own_public_key = PublicKey::from(&private_key);
 
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
@@ -494,7 +494,7 @@ mod tests {
             )
         );
 
-        let peer_key = StaticSecret::random_from_rng(OsRng);
+        let peer_key = StaticSecret::random();
         let peer_pub_key = PublicKey::from(&peer_key);
         let endpoint = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(172, 0, 0, 1)), 50001);
         let allowed_ips = [
@@ -543,7 +543,7 @@ mod tests {
     #[ignore]
     fn test_wg_start_ipv4_non_connected() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let private_key = StaticSecret::random();
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
@@ -590,7 +590,7 @@ mod tests {
     #[ignore]
     fn test_wg_start_ipv4() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let private_key = StaticSecret::random();
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
@@ -626,7 +626,7 @@ mod tests {
     /// Test if wireguard can handle simple ipv6 connections
     fn test_wg_start_ipv6() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let private_key = StaticSecret::random();
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
@@ -662,7 +662,7 @@ mod tests {
     #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
     fn test_wg_start_ipv6_endpoint() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let private_key = StaticSecret::random();
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
@@ -701,7 +701,7 @@ mod tests {
     #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
     fn test_wg_start_ipv6_endpoint_not_connected() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let private_key = StaticSecret::random();
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
@@ -750,7 +750,7 @@ mod tests {
     #[ignore]
     fn test_wg_concurrent() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let private_key = StaticSecret::random();
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
@@ -801,7 +801,7 @@ mod tests {
     #[ignore]
     fn test_wg_concurrent_v6() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let private_key = StaticSecret::random();
         let public_key = PublicKey::from(&private_key);
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();

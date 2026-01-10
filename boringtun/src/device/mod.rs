@@ -44,7 +44,7 @@ use allowed_ips::AllowedIps;
 use parking_lot::Mutex;
 use peer::{AllowedIP, Peer};
 use poll::{EventPoll, EventRef, WaitResult};
-use rand_core::{OsRng, RngCore};
+use rand_core::{OsRng, TryRngCore};
 use socket2::{Domain, Protocol, Type};
 use tun::TunSocket;
 
@@ -316,7 +316,7 @@ impl Device {
         }
 
         // Update an existing peer
-        if self.peers.get(&pub_key).is_some() {
+        if self.peers.contains_key(&pub_key) {
             // We already have a peer, we need to merge the existing config into the newly created one
             panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
         }
@@ -726,7 +726,7 @@ impl Device {
                         &mut t.dst_buf[..],
                     ) {
                         TunnResult::Done => {}
-                        TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
+                        TunnResult::Err(e) => eprintln!("Decapsulate error {e:?}"),
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
                             let _: Result<_, _> = udp.send(packet);
@@ -787,11 +787,11 @@ impl Device {
                             if ek == io::ErrorKind::Interrupted || ek == io::ErrorKind::WouldBlock {
                                 break;
                             }
-                            eprintln!("Fatal read error on tun interface: {:?}", e);
+                            eprintln!("Fatal read error on tun interface: {e:?}");
                             return Action::Exit;
                         }
                         Err(e) => {
-                            eprintln!("Unexpected error on tun interface: {:?}", e);
+                            eprintln!("Unexpected error on tun interface: {e:?}");
                             return Action::Exit;
                         }
                     };
@@ -852,7 +852,7 @@ impl IndexLfsr {
     fn random_index() -> u32 {
         const LFSR_MAX: u32 = 0xffffff; // 24-bit seed
         loop {
-            let i = OsRng.next_u32() & LFSR_MAX;
+            let i = OsRng.try_next_u32().unwrap() & LFSR_MAX;
             if i > 0 {
                 // LFSR seed must be non-zero
                 return i;

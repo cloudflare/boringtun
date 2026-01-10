@@ -14,37 +14,46 @@ documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
 edition = "2018"
 
 [features]
-default = []
-device = ["socket2", "thiserror"]
-jni-bindings = ["ffi-bindings", "jni"]
-ffi-bindings = ["tracing-subscriber"]
-# mocks std::time::Instant with mock_instant
-mock-instant = ["mock_instant"]
+default = ["std"]
+alloc = []
+std = ["alloc", "dep:parking_lot", "dep:std-embedded-time", "once_cell/std"]
+ariel-os = ["dep:ariel-os-lock", "dep:embassy-embedded-time", "once_cell/critical-section"]
+device = ["std", "socket2", "thiserror"]
+jni-bindings = ["std", "ffi-bindings", "jni"]
+ffi-bindings = ["std", "tracing-subscriber"]
+defmt = ["dep:defmt", "embedded-time/defmt", "embassy-embedded-time/defmt"]
 
 [dependencies]
-base64 = "0.13"
-hex = "0.4"
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
 untrusted = "0.9.0"
-libc = "0.2"
-parking_lot = "0.12"
-tracing = "0.1.40"
+libc = { version = "0.2", default-features = false }
+parking_lot = { version = "0.12.4", optional = true }
+ariel-os-lock = { git = "https://github.com/SimonIT/ariel-os-lock", optional = true }
+lock_api = "0.4.13"
+once_cell = { version = "1.19.0", default-features = false }
+tracing = { version = "0.1.40", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["fmt"], optional = true }
-ip_network = "0.4.1"
-ip_network_table = "0.2.0"
-ring = "0.17"
-x25519-dalek = { version = "2.0.1", features = [
+ip_network = { version = "0.4.1", default-features = false }
+ip_network_table = { version = "0.2.0", default-features = false }
+ring = { version = "0.17.14", default-features = false }
+x25519-dalek = { version = "3.0.0-pre.1", features = [
     "reusable_secrets",
     "static_secrets",
+    "os_rng"
 ] }
-rand_core = { version = "0.6.4", features = ["getrandom"] }
-chacha20poly1305 = "0.10.0-pre.1"
-aead = "0.5.0-pre.2"
-blake2 = "0.10"
-hmac = "0.12"
+rand_core = { version = "0.9.3", features = ["os_rng"] }
+chacha20poly1305 = "0.11.0-rc.1"
+aead = "0.6.0-rc.2"
+blake2 = "0.11.0-rc.2"
+hmac = "0.13.0-rc.1"
 jni = { version = "0.19.0", optional = true }
-mock_instant = { version = "0.3", optional = true }
 socket2 = { version = "0.4.7", features = ["all"], optional = true }
 thiserror = { version = "1", optional = true }
+embedded-time = { git = "https://github.com/SimonIT/embedded-time.git", branch = "update-defmt" }
+std-embedded-time = { git = "https://github.com/SimonIT/std-embedded-time.git", branch = "release/v0.13.0", optional = true }
+embassy-embedded-time = { git = "https://github.com/SimonIT/embassy-embedded-time.git", branch = "release/v0.13.0", optional = true }
+defmt = { version = "1.0.1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.25", default-features = false, features = [
@@ -58,7 +67,7 @@ tracing-subscriber = "0.3"
 criterion = { version = "0.3.5", features = ["html_reports"] }
 
 [lib]
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [[bench]]
 name = "crypto_benches"

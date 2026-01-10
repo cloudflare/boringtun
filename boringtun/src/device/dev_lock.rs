@@ -26,7 +26,7 @@ impl<T> Lock<T> {
 impl<T: ?Sized> Lock<T> {
     /// Acquire a read lock
     pub fn read(&self) -> LockReadGuard<T> {
-        let (ref lock, ref cvar) = &self.wants_write;
+        let (lock, cvar) = &self.wants_write;
         let mut wants_write = lock.lock();
         while *wants_write {
             // We have a writer and we want to wait for it to go away
@@ -64,7 +64,7 @@ impl<'a, T: ?Sized> LockReadGuard<'a, T> {
     ) -> Option<U> {
         // First tell everyone that we want to write now, this will prevent any new reader from starting until we are done.
         {
-            let &(ref lock, cvar) = &self.wants_write;
+            let &(lock, cvar) = &self.wants_write;
             let mut wants_write = lock.lock();
 
             RwLockReadGuard::unlocked(&mut self.inner, move || {
@@ -90,7 +90,7 @@ impl<'a, T: ?Sized> LockReadGuard<'a, T> {
         }));
 
         // Finally signal other threads
-        let (ref lock, ref cvar) = &self.wants_write;
+        let (lock, cvar) = &self.wants_write;
         let mut wants_write = lock.lock();
         *wants_write = false;
         cvar.notify_all();
