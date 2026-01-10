@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
-const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
+const PEER_HANDSHAKE_RATE_LIMIT: usize = 10;
 
 const IPV4_MIN_HEADER_SIZE: usize = 20;
 const IPV4_LEN_OFF: usize = 2;
