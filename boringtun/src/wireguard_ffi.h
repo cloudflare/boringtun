@@ -7,6 +7,7 @@
 #include <stdbool.h>
 
 struct wireguard_tunnel; // This corresponds to the Rust type
+struct wireguard_rate_limiter; // This corresponds to the Rust type
 
 enum
 {
@@ -26,6 +27,12 @@ struct wireguard_result
 {
     enum result_type op;
     size_t size;
+};
+
+struct wireguard_verify_result
+{
+    wireguard_result result;
+    int32_t idx; // idx (-1 if not available)
 };
 
 struct stats
@@ -104,3 +111,21 @@ struct wireguard_result wireguard_force_handshake(const struct wireguard_tunnel 
                                                   uint32_t dst_size);
 
 struct stats wireguard_stats(const struct wireguard_tunnel *tunnel);
+
+// Allocate a rate limiter
+struct wireguard_rate_limiter *new_rate_limiter(const char *server_static_public,
+                                                uint64_t limit);
+
+// Deallocate the rate limiter
+void rate_limiter_free(struct wireguard_rate_limiter *);
+
+// Verify a packet.
+// May produce a packet to request a cookie from the peer
+struct wireguard_verify_result wireguard_verify_packet(const struct wireguard_rate_limiter *rate_limiter,
+                                                       const uint8_t *src,
+                                                       uint32_t src_size,
+                                                       uint8_t *dst,
+                                                       uint32_t dst_size);
+
+// Reset the wireguard rate limiter
+void wireguard_reset_count(struct wireguard_rate_limiter *);
