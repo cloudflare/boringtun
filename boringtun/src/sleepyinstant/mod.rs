@@ -34,7 +34,7 @@ use unix as inner;
 /// The size of an `Instant` struct may vary depending on the target operating
 /// system.
 ///
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct Instant {
     t: inner::Instant,
 }
@@ -49,10 +49,6 @@ impl Instant {
 
     /// Returns the amount of time elapsed from another instant to this one,
     /// or zero duration if that instant is later than this one.
-    ///
-    /// # Panics
-    ///
-    /// panics when `earlier` was later than `self`.
     pub fn duration_since(&self, earlier: Instant) -> Duration {
         self.t.duration_since(earlier.t)
     }
@@ -60,6 +56,12 @@ impl Instant {
     /// Returns the amount of time elapsed since this instant was created.
     pub fn elapsed(&self) -> Duration {
         Self::now().duration_since(*self)
+    }
+}
+
+impl Default for Instant {
+    fn default() -> Self {
+        Self::now()
     }
 }
 
@@ -73,5 +75,12 @@ mod tests {
         let start = Instant::now();
         std::thread::sleep(sleep_time);
         assert!(start.elapsed() >= sleep_time);
+    }
+
+    #[test]
+    fn duration_since_returns_zero_if_earlier_is_later() {
+        let start = Instant::now();
+        std::thread::sleep(Duration::from_millis(10));
+        assert_eq!(start.duration_since(Instant::now()), Duration::ZERO);
     }
 }
