@@ -7,12 +7,7 @@ use std::mem;
 use std::ops::{Index, IndexMut};
 
 use std::time::Duration;
-
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
-
-#[cfg(not(feature = "mock-instant"))]
-use crate::sleepyinstant::Instant;
+use std::time::Instant;
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
@@ -63,19 +58,23 @@ pub struct Timers {
     persistent_keepalive: usize,
     /// Should this timer call reset rr function (if not a shared rr instance)
     pub(super) should_reset_rr: bool,
+
+    /// The "current" time, i.e. when the user last called `update_timers`.
+    pub(super) now: Instant,
 }
 
 impl Timers {
-    pub(super) fn new(persistent_keepalive: Option<u16>, reset_rr: bool) -> Timers {
+    pub(super) fn new(persistent_keepalive: Option<u16>, reset_rr: bool, now: Instant) -> Timers {
         Timers {
             is_initiator: false,
-            time_started: Instant::now(),
+            time_started: now,
             timers: Default::default(),
             session_timers: Default::default(),
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
+            now,
         }
     }
 
@@ -86,7 +85,7 @@ impl Timers {
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     pub(super) fn clear(&mut self) {
-        let now = Instant::now().duration_since(self.time_started);
+        let now = self.now.duration_since(self.time_started);
         for t in &mut self.timers[..] {
             *t = now;
         }
@@ -165,14 +164,14 @@ impl Tunn {
         }
     }
 
-    pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
+    pub fn update_timers<'a>(&mut self, now: Instant, dst: &'a mut [u8]) -> TunnResult<'a> {
         let mut handshake_initiation_required = false;
         let mut keepalive_required = false;
 
-        let time = Instant::now();
+        let time = now;
 
         if self.timers.should_reset_rr {
-            self.rate_limiter.reset_count();
+            self.rate_limiter.reset_count(now);
         }
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded
@@ -305,7 +304,7 @@ impl Tunn {
         }
 
         if keepalive_required {
-            return self.encapsulate(&[], dst);
+            return self.encapsulate(&[], dst, time);
         }
 
         TunnResult::Done
@@ -314,7 +313,7 @@ impl Tunn {
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
-            let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
+            let duration_since_tun_start = self.timers.now.duration_since(self.timers.time_started);
             let duration_since_session_established = self.timers[TimeSessionEstablished];
 
             Some(duration_since_tun_start - duration_since_session_established)
