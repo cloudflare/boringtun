@@ -4,7 +4,7 @@
 use boringtun::device::drop_privileges::drop_privileges;
 use boringtun::device::{DeviceConfig, DeviceHandle};
 use clap::{Arg, Command};
-use daemonize::Daemonize;
+use daemonize::{Daemonize, Outcome};
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
 use std::process::exit;
@@ -118,23 +118,27 @@ fn main() {
             .with_ansi(false)
             .init();
 
-        let daemonize = Daemonize::new()
-            .working_directory("/tmp")
-            .exit_action(move || {
+        let daemonize = Daemonize::new().working_directory("/tmp");
+
+        match daemonize.execute() {
+            Outcome::Parent(Ok(_)) => {
+                // In parent process, child forked ok
                 let mut b = [0u8; 1];
                 if sock2.recv(&mut b).is_ok() && b[0] == 1 {
                     println!("BoringTun started successfully");
+                    exit(0);
                 } else {
                     eprintln!("BoringTun failed to start");
                     exit(1);
-                };
-            });
-
-        match daemonize.start() {
-            Ok(_) => tracing::info!("BoringTun started successfully"),
-            Err(e) => {
-                tracing::error!(error = ?e);
+                }
+            }
+            Outcome::Parent(Err(e)) => {
+                eprintln!("BoringTun failed to start - Fork error: {}", e);
                 exit(1);
+            }
+            Outcome::Child(_) => {
+                // In child process, we'll continue below with code that is common with foreground exec
+                tracing::info!("BoringTun started");
             }
         }
     } else {
