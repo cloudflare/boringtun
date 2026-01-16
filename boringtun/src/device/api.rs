@@ -210,7 +210,11 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
             let mut cmd = String::new();
 
             while reader.read_line(&mut cmd).is_ok() {
-                cmd.pop(); // remove newline if any
+                if let Some(end) = cmd.pop() {
+                    if end != '\n' {
+                        return EPROTO;
+                    }
+                } // remove newline if any
                 if cmd.is_empty() {
                     return 0; // Done
                 }
