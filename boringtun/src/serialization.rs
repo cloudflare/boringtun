@@ -1,6 +1,6 @@
 pub(crate) struct KeyBytes(pub [u8; 32]);
 
-impl std::str::FromStr for KeyBytes {
+impl core::str::FromStr for KeyBytes {
     type Err = &'static str;
 
     /// Can parse a secret key from a hex or base64 encoded string.

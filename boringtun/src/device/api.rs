@@ -6,9 +6,12 @@ use super::drop_privileges::get_saved_ids;
 use super::{AllowedIP, Device, Error, SocketAddr};
 use crate::device::Action;
 use crate::serialization::KeyBytes;
+use crate::sleepyinstant::ClockUnit;
 use crate::x25519;
+use embedded_time::duration::{Nanoseconds, Seconds};
 use hex::encode as encode_hex;
 use libc::*;
+use std::convert::TryFrom;
 use std::fs::{create_dir, remove_file};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -69,7 +72,7 @@ impl Device {
                         _ => EIO,
                     };
                     // The protocol requires to return an error code as the response, or zero on success
-                    writeln!(writer, "errno={}\n", status).ok();
+                    writeln!(writer, "errno={status}\n").ok();
                 }
                 Action::Continue // Indicates the worker thread should continue as normal
             }),
@@ -99,7 +102,7 @@ impl Device {
                         _ => EIO,
                     };
                     // The protocol requires to return an error code as the response, or zero on success
-                    writeln!(writer, "errno={}\n", status).ok();
+                    writeln!(writer, "errno={status}\n").ok();
                 } else {
                     // The remote side is likely closed; we should trigger an exit.
                     d.trigger_exit();
@@ -165,7 +168,7 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
     }
 
     if let Some(fwmark) = d.fwmark {
-        writeln!(writer, "fwmark={}", fwmark);
+        writeln!(writer, "fwmark={fwmark}");
     }
 
     for (k, p) in d.peers.iter() {
@@ -177,26 +180,28 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
         }
 
         if let Some(keepalive) = p.persistent_keepalive() {
-            writeln!(writer, "persistent_keepalive_interval={}", keepalive);
+            writeln!(writer, "persistent_keepalive_interval={keepalive}");
         }
 
         if let Some(ref addr) = p.endpoint().addr {
-            writeln!(writer, "endpoint={}", addr);
+            writeln!(writer, "endpoint={addr}");
         }
 
         for (ip, cidr) in p.allowed_ips() {
-            writeln!(writer, "allowed_ip={}/{}", ip, cidr);
+            writeln!(writer, "allowed_ip={ip}/{cidr}");
         }
 
         if let Some(time) = p.time_since_last_handshake() {
-            writeln!(writer, "last_handshake_time_sec={}", time.as_secs());
-            writeln!(writer, "last_handshake_time_nsec={}", time.subsec_nanos());
+            let secs = Seconds::<ClockUnit>::try_from(time).unwrap();
+            writeln!(writer, "last_handshake_time_sec={secs}");
+            let sub = Nanoseconds::<ClockUnit>::try_from(time).unwrap() % Seconds(1u32);
+            writeln!(writer, "last_handshake_time_nsec={sub}");
         }
 
         let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
 
-        writeln!(writer, "rx_bytes={}", rx_bytes);
-        writeln!(writer, "tx_bytes={}", tx_bytes);
+        writeln!(writer, "rx_bytes={rx_bytes}");
+        writeln!(writer, "tx_bytes={tx_bytes}");
     }
     0
 }
@@ -260,7 +265,7 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
                                     reader,
                                     device,
                                     x25519::PublicKey::from(key_bytes.0),
-                                )
+                                );
                             }
                             Err(_) => return EINVAL,
                         },

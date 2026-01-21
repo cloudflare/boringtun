@@ -301,7 +301,7 @@ impl<H: Sync + Send> EventPoll<H> {
         unsafe {
             write(
                 notification_event.trigger,
-                &(std::u64::MAX - 1).to_ne_bytes()[0] as *const u8 as _,
+                &(u64::MAX - 1).to_ne_bytes()[0] as *const u8 as _,
                 8,
             )
         };

@@ -1,17 +1,22 @@
 #![forbid(unsafe_code)]
 //! Attempts to provide the same functionality as std::time::Instant, except it
 //! uses a timer which accounts for time when the system is asleep
-use std::time::Duration;
 
-#[cfg(target_os = "windows")]
-mod windows;
-#[cfg(target_os = "windows")]
-use windows as inner;
+use embedded_time::duration::Generic;
+use embedded_time::Clock;
+#[cfg(all(windows, not(feature = "ariel-os")))]
+use std_embedded_time::StandardClock as ClockImpl;
 
-#[cfg(unix)]
+#[cfg(all(unix, not(feature = "ariel-os")))]
 mod unix;
-#[cfg(unix)]
+#[cfg(all(unix, not(feature = "ariel-os")))]
+use inner::UnixClock as ClockImpl;
+#[cfg(all(unix, not(feature = "ariel-os")))]
 use unix as inner;
+
+#[cfg(feature = "ariel-os")]
+use embassy_embedded_time::EmbassyClock as ClockImpl;
+use once_cell::sync::Lazy;
 
 /// A measurement of a monotonically nondecreasing clock.
 /// Opaque and useful only with [`Duration`].
@@ -34,16 +39,26 @@ use unix as inner;
 /// The size of an `Instant` struct may vary depending on the target operating
 /// system.
 ///
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Copy, Debug)]
 pub struct Instant {
-    t: inner::Instant,
+    t: embedded_time::Instant<ClockImpl>,
 }
+
+/// The underlying unit of time for the clock.
+pub type ClockUnit = <ClockImpl as Clock>::T;
+
+/// A span of time between two instants of the clock.
+pub type ClockDuration = Generic<ClockUnit>;
+
+/// A global clock instance
+pub static BORING_CLOCK: Lazy<ClockImpl> = Lazy::new(ClockImpl::default);
 
 impl Instant {
     /// Returns an instant corresponding to "now".
     pub fn now() -> Self {
         Self {
-            t: inner::Instant::now(),
+            t: BORING_CLOCK.try_now().unwrap(),
         }
     }
 
@@ -53,25 +68,29 @@ impl Instant {
     /// # Panics
     ///
     /// panics when `earlier` was later than `self`.
-    pub fn duration_since(&self, earlier: Instant) -> Duration {
-        self.t.duration_since(earlier.t)
+    pub fn duration_since(&self, earlier: Instant) -> ClockDuration {
+        self.t.checked_duration_since(&earlier.t).unwrap()
     }
 
     /// Returns the amount of time elapsed since this instant was created.
-    pub fn elapsed(&self) -> Duration {
+    pub fn elapsed(&self) -> ClockDuration {
         Self::now().duration_since(*self)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
+    use core::convert::TryInto;
+    use embedded_time::duration::Milliseconds;
 
     #[test]
     fn time_increments_after_sleep() {
-        let sleep_time = Duration::from_millis(10);
+        let sleep_time = Milliseconds(10u32);
         let start = Instant::now();
-        std::thread::sleep(sleep_time);
+        std::thread::sleep(sleep_time.try_into().unwrap());
         assert!(start.elapsed() >= sleep_time);
     }
 }

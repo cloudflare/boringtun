@@ -8,3 +8,6 @@ codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
 [profile.bench]
 lto = true        # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
+
+[patch.crates-io]
+ariel-os-threads = { git = "https://github.com/ariel-os/ariel-os.git", tag = "v0.2.1" }

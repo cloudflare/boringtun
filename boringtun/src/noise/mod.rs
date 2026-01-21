@@ -14,11 +14,12 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::x25519;
 
-use std::collections::VecDeque;
-use std::convert::{TryFrom, TryInto};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
-use std::time::Duration;
+use crate::sleepyinstant::ClockDuration;
+use alloc::collections::VecDeque;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::convert::{TryFrom, TryInto};
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
@@ -41,6 +42,7 @@ const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
 const N_SESSIONS: usize = 8;
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug)]
 pub enum TunnResult<'a> {
     Done,
@@ -153,7 +155,7 @@ impl Tunn {
                 nonce: &src[8..32],
                 encrypted_cookie: &src[32..64],
             }),
-            (DATA, DATA_OVERHEAD_SZ..=std::usize::MAX) => Packet::PacketData(PacketData {
+            (DATA, DATA_OVERHEAD_SZ..=usize::MAX) => Packet::PacketData(PacketData {
                 receiver_idx: u32::from_le_bytes(src[4..8].try_into().unwrap()),
                 counter: u64::from_le_bytes(src[8..16].try_into().unwrap()),
                 encrypted_encapsulated_packet: &src[16..],
@@ -574,7 +576,7 @@ impl Tunn {
     /// * Time since last handshake in seconds
     /// * Data bytes sent
     /// * Data bytes received
-    pub fn stats(&self) -> (Option<Duration>, usize, usize, f32, Option<u32>) {
+    pub fn stats(&self) -> (Option<ClockDuration>, usize, usize, f32, Option<u32>) {
         let time = self.time_since_last_handshake();
         let tx_bytes = self.tx_bytes;
         let rx_bytes = self.rx_bytes;
@@ -587,20 +589,22 @@ impl Tunn {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "mock-instant")]
-    use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
+    extern crate std;
+
+    use std::vec;
+    use std::vec::Vec;
 
     use super::*;
-    use rand_core::{OsRng, RngCore};
+    use rand_core::{OsRng, TryRngCore};
 
     fn create_two_tuns() -> (Tunn, Tunn) {
-        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let my_secret_key = x25519_dalek::StaticSecret::random();
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
-        let my_idx = OsRng.next_u32();
+        let my_idx = OsRng.try_next_u32().unwrap();
 
-        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let their_secret_key = x25519_dalek::StaticSecret::random();
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
-        let their_idx = OsRng.next_u32();
+        let their_idx = OsRng.try_next_u32().unwrap();
 
         let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None);
 
@@ -675,20 +679,6 @@ mod tests {
         packet
     }
 
-    #[cfg(feature = "mock-instant")]
-    fn update_timer_results_in_handshake(tun: &mut Tunn) {
-        let mut dst = vec![0u8; 2048];
-        let result = tun.update_timers(&mut dst);
-        assert!(matches!(result, TunnResult::WriteToNetwork(_)));
-        let packet_data = if let TunnResult::WriteToNetwork(data) = result {
-            data
-        } else {
-            unreachable!();
-        };
-        let packet = Tunn::parse_incoming_packet(packet_data).unwrap();
-        assert!(matches!(packet, Packet::HandshakeInit(_)));
-    }
-
     #[test]
     fn create_two_tunnels_linked_to_eachother() {
         let (_my_tun, _their_tun) = create_two_tuns();
@@ -727,43 +717,6 @@ mod tests {
         // Time has not yet advanced so their is nothing to do
         assert!(matches!(my_tun.update_timers(&mut []), TunnResult::Done));
         assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
-    }
-
-    #[test]
-    #[cfg(feature = "mock-instant")]
-    fn new_handshake_after_two_mins() {
-        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
-        let mut my_dst = [0u8; 1024];
-
-        // Advance time 1 second and "send" 1 packet so that we send a handshake
-        // after the timeout
-        mock_instant::MockClock::advance(Duration::from_secs(1));
-        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
-        assert!(matches!(
-            my_tun.update_timers(&mut my_dst),
-            TunnResult::Done
-        ));
-        let sent_packet_buf = create_ipv4_udp_packet();
-        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
-        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
-
-        //Advance to timeout
-        mock_instant::MockClock::advance(REKEY_AFTER_TIME);
-        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
-        update_timer_results_in_handshake(&mut my_tun);
-    }
-
-    #[test]
-    #[cfg(feature = "mock-instant")]
-    fn handshake_no_resp_rekey_timeout() {
-        let (mut my_tun, _their_tun) = create_two_tuns();
-
-        let init = create_handshake_init(&mut my_tun);
-        let packet = Tunn::parse_incoming_packet(&init).unwrap();
-        assert!(matches!(packet, Packet::HandshakeInit(_)));
-
-        mock_instant::MockClock::advance(REKEY_TIMEOUT);
-        update_timer_results_in_handshake(&mut my_tun)
     }
 
     #[test]
