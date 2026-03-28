@@ -18,7 +18,7 @@ const CLOCK_ID: ClockId = ClockId::CLOCK_MONOTONIC;
 )))]
 const CLOCK_ID: ClockId = ClockId::CLOCK_BOOTTIME;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub(crate) struct Instant {
     t: TimeSpec,
 }
