@@ -1,22 +1,22 @@
 [package]
-name = "boringtun-cli"
-description = "an implementation of the WireGuard® protocol designed for portability and speed"
-version = "0.7.0"
 authors = ["Noah Kennedy <nkennedy@cloudflare.com>", "Andy Grover <agrover@cloudflare.com>", "Jeff Hiner <jhiner@cloudflare.com>"]
-license = "BSD-3-Clause"
-readme = "../README.md"
-repository = "https://github.com/cloudflare/boringtun"
+description = "an implementation of the WireGuard® protocol designed for portability and speed"
 documentation = "https://docs.rs/boringtun/0.7.0/boringtun/"
 edition = "2021"
+license = "BSD-3-Clause"
+name = "boringtun-cli"
+readme = "../README.md"
+repository = "https://github.com/cloudflare/boringtun"
+version = "0.7.0"
 
 [dependencies]
+clap = {version = "4.6.0", features = ["env"]}
 daemonize = "0.4.1"
-clap = { version = "3.1.6", features = ["env"] }
 tracing = "0.1.40"
-tracing-subscriber = "0.3.9"
 tracing-appender = "0.2.1"
+tracing-subscriber = "0.3.9"
 
 [dependencies.boringtun]
-version = "0.7.0"
-path = "../boringtun"
 features = ["device"]
+path = "../boringtun"
+version = "0.7.0"
