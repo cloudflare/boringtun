@@ -1,0 +1,10 @@
+/target
+.env
+/wallet
+# Ignore secret/credential config files but allow templates
+/config/**/privatekey-*
+/config/**/presharedkey-*
+/config/**/*.local.*
+/config/**/*-credentials.*
+/config/**/secrets.*
+/config/wg_confs/*.conf

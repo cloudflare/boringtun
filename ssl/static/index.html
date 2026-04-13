@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSL Proxy — Heuristic Dashboard</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #0d1117;
+    --surface: #161b22;
+    --border:  #30363d;
+    --text:    #e6edf3;
+    --muted:   #8b949e;
+    --green:   #3fb950;
+    --yellow:  #d29922;
+    --red:     #f85149;
+    --blue:    #58a6ff;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: ui-monospace, monospace; font-size: 13px; }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  header h1 { font-size: 15px; font-weight: 600; }
+  #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  #conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 1px; background: var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .stat { background: var(--surface); padding: 14px 18px; }
+  .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .stat .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 1px; background: var(--border);
+    height: calc(100vh - 120px);
+  }
+
+  /* ── Heat map ── */
+  #heatmap-panel { background: var(--bg); overflow: hidden; display: flex; flex-direction: column; }
+  #heatmap-panel h2 { padding: 10px 16px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--surface); }
+  #heatmap { overflow-y: auto; flex: 1; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky; top: 0; background: var(--surface);
+    padding: 7px 12px; text-align: left; font-size: 11px;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .05em;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .15s; }
+  tbody tr:hover { background: var(--surface); }
+  tbody td { padding: 7px 12px; }
+
+  .verdict-badge {
+    display: inline-block; padding: 2px 7px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  }
+  .v-BLOCKED               { background: #21262d; color: var(--muted); }
+  .v-PERSISTENT_RECONNECT  { background: #2d2a1a; color: var(--yellow); }
+  .v-AGGRESSIVE_POLLING    { background: #2d1f1a; color: #f0883e; }
+  .v-HEURISTIC_FLAG_DATA_EXFIL { background: #2d1a1a; color: var(--red); }
+  .v-TARPIT                { background: #1a1a2d; color: var(--blue); }
+
+  .risk-bar-wrap { width: 80px; height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; }
+  .risk-bar { height: 100%; border-radius: 3px; transition: width .4s; }
+
+  /* ── Event feed ── */
+  #feed-panel { background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+  #feed-panel h2 { padding: 10px 16px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--surface); }
+  #feed { overflow-y: auto; flex: 1; padding: 8px 0; }
+
+  .event {
+    padding: 5px 14px; border-left: 3px solid transparent;
+    line-height: 1.5;
+  }
+  .event.block  { border-color: var(--red); }
+  .event.allow  { border-color: var(--green); }
+  .event.open   { border-color: var(--blue); }
+  .event.close  { border-color: var(--border); }
+
+  .event .ev-host { color: var(--text); }
+  .event .ev-meta { color: var(--muted); font-size: 11px; }
+  .event .ev-verdict { color: var(--red); font-size: 11px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div id="conn-dot"></div>
+  <h1>SSL Proxy — Heuristic Dashboard</h1>
+</header>
+
+<div class="grid">
+  <div class="stat"><div class="label">Active Tunnels</div><div class="value" id="s-active">—</div></div>
+  <div class="stat"><div class="label">Total Opened</div><div class="value" id="s-opened">—</div></div>
+  <div class="stat"><div class="label">Blocked</div><div class="value" id="s-blocked" style="color:var(--red)">—</div></div>
+  <div class="stat"><div class="label">Throughput ↑↓</div><div class="value" id="s-bw" style="color:var(--blue)">—</div></div>
+</div>
+
+<div class="panels">
+  <div id="heatmap-panel">
+    <h2>Host Velocity Heat Map — sorted by Risk Score</h2>
+    <div id="heatmap">
+      <table>
+        <thead>
+          <tr>
+            <th>Host</th>
+            <th>Attempts</th>
+            <th>Hz</th>
+            <th>Bytes Blocked</th>
+            <th>Risk Score</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody id="heatmap-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="feed-panel">
+    <h2>Live Event Feed</h2>
+    <div id="feed"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const dot = $('conn-dot');
+
+// ── Stats WebSocket ──────────────────────────────────────────────────────────
+let wsStats, wsStatsBackoff = 1000;
+
+let wsStatsReconnectScheduled = false;
+
+function scheduleStatsReconnect() {
+  if (wsStatsReconnectScheduled) return;
+  wsStatsReconnectScheduled = true;
+  dot.classList.remove('live');
+  setTimeout(() => { wsStatsReconnectScheduled = false; connectStatsWs(); }, wsStatsBackoff);
+  wsStatsBackoff = Math.min(wsStatsBackoff * 2, 30000);
+}
+
+function connectStatsWs() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  wsStats = new WebSocket(`${proto}//${location.host}/ws`);
+  wsStats.onopen = () => {
+    dot.classList.add('live');
+    wsStatsBackoff = 1000;
+  };
+  wsStats.onclose = scheduleStatsReconnect;
+  wsStats.onerror = scheduleStatsReconnect;
+  wsStats.onmessage = ({ data }) => {
+    let s;
+    try {
+      s = JSON.parse(data);
+    } catch {
+      console.warn('Invalid JSON in stats message:', data);
+      return;
+    }
+    $('s-active').textContent  = s.active_tunnels ?? '—';
+    $('s-opened').textContent  = s.tunnels_opened ?? '—';
+    $('s-blocked').textContent = s.blocked        ?? '—';
+    $('s-bw').textContent      = `${s.up_kBps ?? 0} / ${s.down_kBps ?? 0} kB/s`;
+  };
+}
+connectStatsWs();
+
+// ── Event WebSocket ──────────────────────────────────────────────────────────
+const MAX_EVENTS = 200;
+const feed = $('feed');
+let wsEventsBackoff = 1000;
+
+let wsEventsReconnectScheduled = false;
+
+function scheduleEventsReconnect() {
+  if (wsEventsReconnectScheduled) return;
+  wsEventsReconnectScheduled = true;
+  setTimeout(() => { wsEventsReconnectScheduled = false; connectEventsWs(); }, wsEventsBackoff);
+  wsEventsBackoff = Math.min(wsEventsBackoff * 2, 30000);
+}
+
+function connectEventsWs() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsEvents = new WebSocket(`${proto}//${location.host}/events`);
+  wsEvents.onclose = scheduleEventsReconnect;
+  wsEvents.onerror = scheduleEventsReconnect;
+  wsEvents.onopen = () => { wsEventsBackoff = 1000; };
+  wsEvents.onmessage = ({ data }) => {
+    let ev;
+    try {
+      ev = JSON.parse(data);
+    } catch {
+      console.warn('Invalid JSON in event message:', data);
+      return;
+    }
+    prependEvent(ev);
+    while (feed.children.length > MAX_EVENTS) feed.removeChild(feed.lastChild);
+  };
+}
+connectEventsWs();
+
+function prependEvent(ev) {
+  const type = ev.type ?? '';
+  const cls  = type === 'block' ? 'block'
+             : type === 'tunnel_open'  ? 'open'
+             : type === 'tunnel_close' ? 'close'
+             : 'allow';
+
+  const div = document.createElement('div');
+  div.className = `event ${cls}`;
+
+  const host = document.createElement('span');
+  host.className = 'ev-host';
+  host.textContent = ev.host ?? '?';
+  div.appendChild(host);
+
+  const typeSpan = document.createElement('span');
+  typeSpan.className = 'ev-meta';
+  typeSpan.textContent = ` [${type}]`;
+  div.appendChild(typeSpan);
+
+  if (ev.metrics?.attempt_count != null) {
+    const attempts = document.createElement('span');
+    attempts.className = 'ev-meta';
+    attempts.textContent = ` · attempt #${ev.metrics.attempt_count} · ${ev.metrics.frequency_hz} Hz`;
+    div.appendChild(attempts);
+  }
+
+  if (ev.fingerprint?.tls_ver) {
+    const fp = document.createElement('span');
+    fp.className = 'ev-meta';
+    fp.textContent = ` · ${ev.fingerprint.tls_ver}/${ev.fingerprint.alpn ?? '?'}`;
+    div.appendChild(fp);
+  }
+
+  if (ev.verdict) {
+    const verdict = document.createElement('span');
+    verdict.className = 'ev-verdict';
+    verdict.textContent = ` ▸ ${ev.verdict}`;
+    div.appendChild(verdict);
+  }
+
+  feed.prepend(div);
+}
+
+// ── Heat Map polling ─────────────────────────────────────────────────────────
+const MAX_RISK = 1_000_000; // cap for bar scaling
+
+function riskColor(verdict) {
+  switch (verdict) {
+    case 'HEURISTIC_FLAG_DATA_EXFIL': return 'var(--red)';
+    case 'AGGRESSIVE_POLLING':        return '#f0883e';
+    case 'PERSISTENT_RECONNECT':      return 'var(--yellow)';
+    default:                          return 'var(--muted)';
+  }
+}
+
+function fmtBytes(n) {
+  if (n >= 1_048_576) return (n / 1_048_576).toFixed(1) + ' MB';
+  if (n >= 1_024)     return (n / 1_024).toFixed(1) + ' KB';
+  return n + ' B';
+}
+
+let isRefreshing = false;
+async function refreshHeatmap() {
+  if (isRefreshing) return;
+  isRefreshing = true;
+  let rows;
+  try {
+    const res = await fetch('/hosts', { headers: { 'x-api-key': window.ADMIN_API_KEY ?? '' } });
+    if (!res.ok) {
+      console.warn('Heat map fetch failed:', res.status);
+      return;
+    }
+    rows = await res.json();
+  } catch (e) {
+    console.warn('Heat map refresh error:', e);
+    return;
+  } finally { isRefreshing = false; }
+
+  const tbody = $('heatmap-body');
+  const existing = new Map([...tbody.querySelectorAll('tr')].map(r => [r.dataset.host, r]));
+
+  rows.forEach(h => {
+    const pct = Math.min(100, (h.risk_score / MAX_RISK) * 100).toFixed(1);
+    const color = riskColor(h.verdict);
+
+    let tr = existing.get(h.host);
+    if (!tr) {
+      tr = document.createElement('tr');
+      tr.dataset.host = h.host;
+      tr.innerHTML = `
+        <td class="ev-host"></td>
+        <td></td><td></td><td></td>
+        <td><div class="risk-bar-wrap"><div class="risk-bar"></div></div></td>
+        <td></td>`;
+    }
+    const cells = tr.querySelectorAll('td');
+    cells[0].textContent = h.host;
+    cells[1].textContent = h.blocked_attempts;
+    cells[2].textContent = h.frequency_hz.toFixed(2);
+    cells[3].textContent = fmtBytes(h.blocked_bytes_approx);
+    const bar = cells[4].querySelector('.risk-bar');
+    bar.style.width = pct + '%';
+    bar.style.background = color;
+    const badge = document.createElement('span');
+    badge.className = `verdict-badge v-${CSS.escape(h.verdict)}`;
+    badge.textContent = h.verdict;
+    cells[5].replaceChildren(badge);
+    // Re-insert (or move) the row to maintain sort order from the server.
+    tbody.appendChild(tr);
+
+    existing.delete(h.host);
+  });
+
+  // Remove rows for hosts no longer present
+  existing.forEach(tr => tr.remove());
+}
+
+refreshHeatmap();
+setInterval(refreshHeatmap, 2000);
+</script>
+</body>
+</html>

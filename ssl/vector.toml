@@ -1,0 +1,51 @@
+# vector.toml — ssl-proxy audit pipeline
+# Run: LOG_FORMAT=json ./ssl-proxy | vector --config vector.toml
+
+[sources.proxy_stdout]
+type = "stdin"
+decoding.codec = "json"
+
+# Drop everything that isn't an audit event — keeps warehouse clean
+[transforms.audit_only]
+type   = "filter"
+inputs = ["proxy_stdout"]
+condition = '.target == "audit"'
+
+# Remap tracing's "timestamp" string → proper DateTime for ClickHouse
+[transforms.normalize]
+type   = "remap"
+inputs = ["audit_only"]
+source = '''
+.timestamp = parse_timestamp(.timestamp, format: "%+") ?? now()
+.event       = string(.event)       ?? ""
+.kind        = string(.kind)        ?? ""
+.host        = string(.host)        ?? ""
+.method      = string(.method)      ?? ""
+.uri         = string(.uri)         ?? ""
+.status      = to_int(.status)      ?? 0
+.bytes_up    = to_int(.bytes_up)    ?? 0
+.bytes_down  = to_int(.bytes_down)  ?? 0
+.duration_ms = to_int(.duration_ms) ?? 0
+.orig_dst    = string(.orig_dst)    ?? ""
+.error       = string(.error)       ?? ""
+.message     = string(.message)     ?? ""
+'''
+
+[sinks.clickhouse]
+type                = "clickhouse"
+inputs              = ["normalize"]
+endpoint            = "${CLICKHOUSE_URL}"   # e.g. http://localhost:8123
+database            = "ssl_proxy"
+table               = "proxy_events"
+skip_unknown_fields = true
+compression         = "gzip"
+
+  [sinks.clickhouse.auth]
+  strategy = "basic"
+  user     = "${CLICKHOUSE_USER}"
+  password = "${CLICKHOUSE_PASSWORD}"
+
+  # Batch inserts — ClickHouse performs best with bulk writes
+  [sinks.clickhouse.batch]
+  max_events   = 5000
+  timeout_secs = 5

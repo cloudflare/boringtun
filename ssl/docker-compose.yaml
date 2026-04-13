@@ -1,0 +1,53 @@
+services:
+  rust-proxy:
+    build:
+      context: .
+      args:
+        CARGO_FEATURES: oracle-db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    # NET_ADMIN and /dev/net/tun are required for WireGuard to create tun interfaces
+    # and manage routes. Risk: container compromise grants network admin. Mitigations:
+    # non-root user (proxyuser), capabilities limited to NET_ADMIN only, no --privileged.
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./config:/config
+      - ./wallet:/app/wallet
+    environment:
+      - WG_CONFIG_PATH=/config/wg_confs/wg0.conf
+      - WG_SUDO=1
+      - RUST_LOG=ssl_proxy=info
+      - TNS_ADMIN=/app/wallet
+      - ORACLE_CONN=mainerc_tp
+      - ORACLE_USER=USCIS_APP
+      - ORACLE_PASS_FILE=/run/secrets/oracle_password
+      - LD_LIBRARY_PATH=/app/lib
+    secrets:
+      - oracle_password
+    ports:
+      - "443:443/udp"
+      - "3000:3000"
+      - "3001:3001"
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+
+secrets:
+  oracle_password:
+    file: ./secrets/oracle_password.txt
