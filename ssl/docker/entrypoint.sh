@@ -7,7 +7,7 @@ COREDNS_CONFIG="${COREDNS_CONFIG:-/config/coredns/Corefile}"
 INTERFACE_NAME="$(basename "${WG_CONFIG_PATH%.conf}")"
 
 # Source the WireGuard setup script
-source ./wg_up.sh
+source /usr/local/bin/wg_up.sh
 
 cmd() {
     echo "[#] $*"
