@@ -6,7 +6,6 @@ WORKDIR /app
 COPY lib-linux /opt/instantclient
 COPY . ./
 RUN OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES" -p ssl-proxy
-RUN OCI_LIB_DIR=/opt/instantclient cargo build --release -p boringtun-cli
 
 # debian:bookworm-slim is required (not alpine) because Oracle Instant Client
 # depends on libaio1, which is glibc-only and unavailable on musl/alpine.
@@ -23,14 +22,12 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY --from=coredns /coredns /usr/local/bin/coredns
 COPY --from=builder /app/target/release/ssl-proxy .
-COPY --from=builder /app/target/release/boringtun-cli /usr/local/bin/boringtun-cli
 COPY static ./static
 COPY --from=builder /opt/instantclient /app/lib
 COPY wallet ./wallet
 COPY docker/entrypoint.sh /usr/local/bin/start-proxy-wg
 RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg \
  && groupadd -r proxyuser && useradd -r -g proxyuser proxyuser \
- && setcap cap_net_admin+eip /usr/local/bin/boringtun-cli \
  && setcap cap_net_admin+eip /usr/local/bin/coredns \
  && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg
 ENV LD_LIBRARY_PATH=/app/lib \
