@@ -28,7 +28,7 @@ services:
     environment:
       - WG_LOG_LEVEL=info
       - WG_THREADS=2
-    command: ["wg0", "-f"]
+    command: ["wg0", "-f", "--disable-drop-privileges"]
 
   ssl-proxy:
     build:
