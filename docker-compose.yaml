@@ -32,7 +32,8 @@ services:
 
   ssl-proxy:
     build:
-      context: ./ssl
+      context: .
+      dockerfile: ssl/Dockerfile
       args:
         CARGO_FEATURES: oracle-db
     restart: unless-stopped
