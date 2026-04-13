@@ -3,8 +3,11 @@ FROM coredns/coredns:1.12.3 AS coredns
 FROM rust:1.86-slim AS builder
 ARG CARGO_FEATURES="oracle-db"
 WORKDIR /app
-COPY lib-linux /opt/instantclient
-COPY . ./
+COPY ssl/lib-linux /opt/instantclient
+COPY boringtun ./boringtun
+COPY boringtun-cli ./boringtun-cli
+COPY ssl ./ssl
+COPY Cargo.toml ./
 RUN OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES" -p ssl-proxy -p boringtun-cli
 
 # debian:bookworm-slim is required (not alpine) because Oracle Instant Client
@@ -23,11 +26,11 @@ WORKDIR /app
 COPY --from=coredns /coredns /usr/local/bin/coredns
 COPY --from=builder /app/target/release/ssl-proxy .
 COPY --from=builder /app/target/release/boringtun-cli /usr/local/bin/
-COPY static ./static
+COPY ssl/static ./static
 COPY --from=builder /opt/instantclient /app/lib
-COPY wallet ./wallet
-COPY docker/wg_up.sh /usr/local/bin/wg_up.sh
-COPY docker/entrypoint.sh /usr/local/bin/start-proxy-wg
+COPY ssl/wallet ./wallet
+COPY ssl/docker/wg_up.sh /usr/local/bin/wg_up.sh
+COPY ssl/docker/entrypoint.sh /usr/local/bin/start-proxy-wg
 RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh /usr/local/bin/boringtun-cli \
  && groupadd -r proxyuser && useradd -r -g proxyuser proxyuser \
  && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh /usr/local/bin/boringtun-cli \
