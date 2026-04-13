@@ -28,7 +28,7 @@ services:
     environment:
       - WG_LOG_LEVEL=info
       - WG_THREADS=2
-    command: ["wg0", "-f", "/config/wg_confs/wg0.conf"]
+    command: ["wg0", "-f"]
 
   ssl-proxy:
     build:
