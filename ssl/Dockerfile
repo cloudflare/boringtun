@@ -30,7 +30,8 @@ COPY docker/entrypoint.sh /usr/local/bin/start-proxy-wg
 RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh \
  && groupadd -r proxyuser && useradd -r -g proxyuser proxyuser \
  && setcap cap_net_admin+eip /usr/local/bin/coredns \
- && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg
+ && setcap cap_net_admin+eip /app/ssl-proxy \
+ && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh
 ENV LD_LIBRARY_PATH=/app/lib \
     WG_CONFIG_PATH=/config/wg_confs/wg0.conf \
     WG_SUDO=1 \
@@ -38,5 +39,6 @@ ENV LD_LIBRARY_PATH=/app/lib \
 EXPOSE 3000/tcp 3001/tcp 443/udp
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
-USER proxyuser
+# Running as root temporarily until entrypoint can drop privileges after network setup
+# USER proxyuser
 ENTRYPOINT ["/usr/local/bin/start-proxy-wg"]
