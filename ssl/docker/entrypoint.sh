@@ -67,6 +67,23 @@ if [ ! -f "$COREDNS_CONFIG" ]; then
     exit 1
 fi
 
+# Validate boringtun-cli binary exists and is executable
+if [ ! -f /usr/local/bin/boringtun-cli ]; then
+    echo "ERROR: boringtun-cli not found at /usr/local/bin/boringtun-cli" >&2
+    exit 1
+fi
+if [ ! -x /usr/local/bin/boringtun-cli ]; then
+    echo "ERROR: boringtun-cli is not executable" >&2
+    ls -la /usr/local/bin/boringtun-cli >&2
+    exit 1
+fi
+# Check for missing dynamic libraries
+if ! ldd /usr/local/bin/boringtun-cli >/dev/null 2>&1; then
+    echo "ERROR: boringtun-cli has missing dynamic libraries:" >&2
+    ldd /usr/local/bin/boringtun-cli >&2
+    exit 1
+fi
+
 # Health check function for boringtun-cli
 health_check_boringtun() {
     while true; do

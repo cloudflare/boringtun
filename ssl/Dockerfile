@@ -28,12 +28,12 @@ COPY --from=builder /opt/instantclient /app/lib
 COPY wallet ./wallet
 COPY docker/wg_up.sh /usr/local/bin/wg_up.sh
 COPY docker/entrypoint.sh /usr/local/bin/start-proxy-wg
-RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh \
+RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh /usr/local/bin/boringtun-cli \
  && groupadd -r proxyuser && useradd -r -g proxyuser proxyuser \
+ && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh /usr/local/bin/boringtun-cli \
  && setcap cap_net_admin+eip /usr/local/bin/coredns \
-    && setcap cap_net_admin+eip /app/ssl-proxy \
-    && setcap cap_net_admin+eip /usr/local/bin/boringtun-cli \
- && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh
+ && setcap cap_net_admin+eip /app/ssl-proxy \
+ && setcap cap_net_admin+eip /usr/local/bin/boringtun-cli
 ENV LD_LIBRARY_PATH=/app/lib \
     WG_CONFIG_PATH=/config/wg_confs/wg0.conf \
     WG_SUDO=1 \
