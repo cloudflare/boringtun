@@ -1,9 +1,13 @@
-use axum::{body::Body, extract::State, http::{Request, Response, StatusCode}};
+use axum::{
+    body::Body,
+    extract::State,
+    http::{Request, Response, StatusCode},
+};
 use hyper_util::client::legacy::{connect::HttpConnector, Client};
-use std::time::Instant;
+use std::{sync::atomic::Ordering, time::Instant};
 use tracing::{error, info};
 
-use crate::{blocklist, state::SharedState};
+use crate::{blocklist, obfuscation, state::SharedState};
 
 pub type ProxyClient = Client<HttpConnector, Body>;
 
@@ -19,10 +23,16 @@ fn scrub_uri(uri: &axum::http::Uri) -> String {
 /// Epic 1.4 — extract path and query-parameter names only (no values).
 fn decompose_uri(uri: &axum::http::Uri) -> (String, Vec<String>) {
     let path = uri.path().to_string();
-    let keys = uri.query()
+    let keys = uri
+        .query()
         .unwrap_or("")
         .split('&')
-        .filter_map(|pair| pair.split('=').next().filter(|k| !k.is_empty()).map(str::to_string))
+        .filter_map(|pair| {
+            pair.split('=')
+                .next()
+                .filter(|k| !k.is_empty())
+                .map(str::to_string)
+        })
         .collect();
     (path, keys)
 }
@@ -50,16 +60,19 @@ fn emit_full(
         tracing::warn!(target: "audit", error = %e, "failed to send audit event to channel");
     }
     #[cfg(feature = "oracle-db")]
-    crate::db::insert_proxy_event(state.db.clone(), crate::db::ProxyEvent {
-        event_type: event.to_string(),
-        host: host.to_string(),
-        peer_ip,
-        bytes_up,
-        bytes_down,
-        status_code,
-        blocked,
-        raw_json: raw,
-    });
+    crate::db::insert_proxy_event(
+        state.db.clone(),
+        crate::db::ProxyEvent {
+            event_type: event.to_string(),
+            host: host.to_string(),
+            peer_ip,
+            bytes_up,
+            bytes_down,
+            status_code,
+            blocked,
+            raw_json: raw,
+        },
+    );
 }
 pub async fn handler(
     State(state): State<SharedState>,
@@ -68,14 +81,21 @@ pub async fn handler(
     let start = Instant::now();
 
     // Check blocklist using the host from the URI or Host header.
-    let hostname = req.uri().host()
+    let hostname = req
+        .uri()
+        .host()
         .or_else(|| req.headers().get("host").and_then(|v| v.to_str().ok()))
         .unwrap_or("");
     let hostname = if hostname.starts_with('[') {
-        hostname.trim_start_matches('[').split(']').next().unwrap_or("")
+        hostname
+            .trim_start_matches('[')
+            .split(']')
+            .next()
+            .unwrap_or("")
     } else {
         hostname.split(':').next().unwrap_or("")
-    }.to_string();
+    }
+    .to_string();
     if hostname.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -83,18 +103,25 @@ pub async fn handler(
         state.record_blocked();
         let scrubbed = scrub_uri(req.uri());
         // Epic 1.1 — Content-Length header value (no body buffering)
-        let req_content_length: Option<u64> = req.headers()
+        let req_content_length: Option<u64> = req
+            .headers()
             .get("content-length")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse().ok());
         // Epic 1.2a — interesting header inventory
-        let interesting = ["content-type", "user-agent", "x-client-data", "x-amz-target"];
-        let req_headers_present: Vec<String> = interesting.iter()
+        let interesting = [
+            "content-type",
+            "user-agent",
+            "x-client-data",
+            "x-amz-target",
+        ];
+        let req_headers_present: Vec<String> = interesting
+            .iter()
             .filter(|&&h| req.headers().contains_key(h))
             .map(|&h| h.to_string())
             .collect();
         // Epic 1.2b — auth/cookie presence flags (names only, zero value leakage)
-        let req_has_auth   = req.headers().contains_key("authorization");
+        let req_has_auth = req.headers().contains_key("authorization");
         let req_has_cookie = req.headers().contains_key("cookie");
         // Epic 1.4 — URI decomposition
         let (req_path, req_query_keys) = decompose_uri(req.uri());
@@ -107,24 +134,43 @@ pub async fn handler(
             duration_ms = start.elapsed().as_millis(),
             "blocked snitch (http)"
         );
-        emit_full(&state, "http_blocked", &hostname, None, 0, 0, None, true, serde_json::json!({
-            "method":              req.method().as_str(),
-            "uri":                 scrubbed,
-            "duration_ms":         start.elapsed().as_millis(),
-            "req_content_length_bytes": req_content_length,
-            "req_headers_present": req_headers_present,
-            "req_has_auth":        req_has_auth,
-            "req_has_cookie":      req_has_cookie,
-            "req_path":            req_path,
-            "req_query_keys":      req_query_keys,
-        }));
+        emit_full(
+            &state,
+            "http_blocked",
+            &hostname,
+            None,
+            0,
+            0,
+            None,
+            true,
+            serde_json::json!({
+                "method":              req.method().as_str(),
+                "uri":                 scrubbed,
+                "duration_ms":         start.elapsed().as_millis(),
+                "req_content_length_bytes": req_content_length,
+                "req_headers_present": req_headers_present,
+                "req_has_auth":        req_has_auth,
+                "req_has_cookie":      req_has_cookie,
+                "req_path":            req_path,
+                "req_query_keys":      req_query_keys,
+            }),
+        );
         return Err(StatusCode::FORBIDDEN);
     }
 
+    // Classify obfuscation profile after blocklist check
+    let profile = obfuscation::classify_obfuscation(&hostname);
+
     // Rewrite absolute URI to origin form and forward to the correct host.
     if req.uri().scheme().is_some() {
-        let host = req.uri().authority().map(|a| a.to_string()).unwrap_or_default();
-        let path_and_query = req.uri().path_and_query()
+        let host = req
+            .uri()
+            .authority()
+            .map(|a| a.to_string())
+            .unwrap_or_default();
+        let path_and_query = req
+            .uri()
+            .path_and_query()
             .map(|p| p.as_str())
             .unwrap_or("/");
         let new_uri = format!("http://{}{}", host, path_and_query);
@@ -142,8 +188,15 @@ pub async fn handler(
     req.headers_mut().remove("trailers");
     req.headers_mut().remove("transfer-encoding");
     req.headers_mut().remove("upgrade");
+
+    // Apply request header obfuscation for Fox profiles
+    if !matches!(profile, obfuscation::Profile::None) {
+        obfuscation::apply_request_headers(req.headers_mut(), &profile);
+        state.obfuscated_count.fetch_add(1, Ordering::Relaxed);
+    }
+
     match state.client.request(req).await {
-        Ok(res) => {
+        Ok(mut res) => {
             let status = res.status().as_u16();
             info!(
                 target: "audit",
@@ -155,12 +208,43 @@ pub async fn handler(
                 duration_ms = start.elapsed().as_millis(),
                 "proxy response received"
             );
-            emit_full(&state, "http_proxied", &hostname, None, 0, 0, Some(status), false, serde_json::json!({
-                "method": method.as_str(),
-                "uri":    scrubbed_uri,
-                "status": status,
-                "duration_ms": start.elapsed().as_millis(),
-            }));
+            // Apply response header obfuscation for Fox profiles
+            if !matches!(profile, obfuscation::Profile::None) {
+                obfuscation::apply_response_headers(res.headers_mut(), &profile);
+            }
+
+            // Emit obfuscated event if profile is not None
+            if !matches!(profile, obfuscation::Profile::None) {
+                info!(
+                    target: "audit",
+                    event = "http_obfuscated",
+                    host = %hostname,
+                    profile = profile.as_str(),
+                    method = %method,
+                    uri = %scrubbed_uri,
+                    status = status,
+                    duration_ms = start.elapsed().as_millis(),
+                    "http traffic obfuscated"
+                );
+            }
+
+            emit_full(
+                &state,
+                "http_proxied",
+                &hostname,
+                None,
+                0,
+                0,
+                Some(status),
+                false,
+                serde_json::json!({
+                    "method": method.as_str(),
+                    "uri":    scrubbed_uri,
+                    "status": status,
+                    "duration_ms": start.elapsed().as_millis(),
+                    "obfuscation_profile": profile.as_str(),
+                }),
+            );
             let mut res = res.map(Body::new);
             // Collect any header names listed in the Connection header value.
             let conn_headers: Vec<String> = res
@@ -173,9 +257,18 @@ pub async fn handler(
             for name in &conn_headers {
                 res.headers_mut().remove(name.as_str());
             }
-            for h in &["connection", "keep-alive", "proxy-authenticate",
-                       "proxy-authorization", "proxy-connection", "te",
-                       "trailer", "trailers", "transfer-encoding", "upgrade"] {
+            for h in &[
+                "connection",
+                "keep-alive",
+                "proxy-authenticate",
+                "proxy-authorization",
+                "proxy-connection",
+                "te",
+                "trailer",
+                "trailers",
+                "transfer-encoding",
+                "upgrade",
+            ] {
                 res.headers_mut().remove(*h);
             }
             Ok(res)
@@ -191,14 +284,24 @@ pub async fn handler(
                 error = %e,
                 "upstream request failed"
             );
-            emit_full(&state, "http_error", &hostname, None, 0, 0, None, false, serde_json::json!({
-                "method": method.as_str(),
-                "uri":    scrubbed_uri,
-                "error_kind": if e.is_connect() { "connect" }
-                              else if e.to_string().contains("timed out") { "timeout" }
-                              else { "other" },
-                "duration_ms": start.elapsed().as_millis(),
-            }));
+            emit_full(
+                &state,
+                "http_error",
+                &hostname,
+                None,
+                0,
+                0,
+                None,
+                false,
+                serde_json::json!({
+                    "method": method.as_str(),
+                    "uri":    scrubbed_uri,
+                    "error_kind": if e.is_connect() { "connect" }
+                                  else if e.to_string().contains("timed out") { "timeout" }
+                                  else { "other" },
+                    "duration_ms": start.elapsed().as_millis(),
+                }),
+            );
             Err(StatusCode::BAD_GATEWAY)
         }
     }

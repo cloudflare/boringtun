@@ -10,14 +10,15 @@ use tracing::{error, info, warn};
 const CHANNEL_CAP: usize = 4_096;
 
 pub struct ProxyEvent {
-    pub event_type:  String,
-    pub host:        String,
-    pub peer_ip:     Option<String>,
-    pub bytes_up:    u64,
-    pub bytes_down:  u64,
+    pub event_type: String,
+    pub host: String,
+    pub peer_ip: Option<String>,
+    pub bytes_up: u64,
+    pub bytes_down: u64,
     pub status_code: Option<u16>,
-    pub blocked:     bool,
-    pub raw_json:    String,
+    pub blocked: bool,
+    pub obfuscation_profile: Option<String>,
+    pub raw_json: String,
 }
 
 /// Cheap sender handle cloned into every request handler.
@@ -29,7 +30,10 @@ impl EventSender {
     /// channel is full — the hot path must never block.
     pub fn send(&self, ev: ProxyEvent) {
         if let Err(e) = self.0.try_send(ev) {
-            warn!(host = e.into_inner().host, "db: event channel full, dropping row");
+            warn!(
+                host = e.into_inner().host,
+                "db: event channel full, dropping row"
+            );
         }
     }
 }
@@ -48,12 +52,14 @@ pub fn spawn_writer(
         loop {
             // ── connect (blocking) ──────────────────────────────────────────
             let (cs, u, p) = (conn_str.clone(), user.clone(), pass.clone());
-            let conn_result = tokio::task::spawn_blocking(move || {
-                oracle::Connection::connect(&u, &p, &cs)
-            }).await;
+            let conn_result =
+                tokio::task::spawn_blocking(move || oracle::Connection::connect(&u, &p, &cs)).await;
 
             let conn = match conn_result {
-                Ok(Ok(c))  => { info!("db: writer connected"); c }
+                Ok(Ok(c)) => {
+                    info!("db: writer connected");
+                    c
+                }
                 Ok(Err(e)) => {
                     error!(%e, "db: connect failed, retrying in 2s");
                     tokio::select! {
@@ -94,9 +100,9 @@ pub fn spawn_writer(
                 let mut batch = vec![first];
                 while batch.len() < 64 {
                     match rx.try_recv() {
-                        Ok(ev)                              => batch.push(ev),
+                        Ok(ev) => batch.push(ev),
                         Err(mpsc::error::TryRecvError::Empty) => break,
-                        Err(_)                              => return,
+                        Err(_) => return,
                     }
                 }
 
@@ -104,10 +110,11 @@ pub fn spawn_writer(
                 let result = tokio::task::spawn_blocking(move || {
                     insert_batch(&conn, &batch)?;
                     Ok::<oracle::Connection, oracle::Error>(conn)
-                }).await;
+                })
+                .await;
 
                 match result {
-                    Ok(Ok(c))  => conn = c,
+                    Ok(Ok(c)) => conn = c,
                     Ok(Err(e)) => {
                         error!(%e, batch_size, "db: batch insert failed, reconnecting");
                         tokio::select! {
@@ -134,8 +141,8 @@ pub fn spawn_writer(
 
 fn insert_batch(conn: &oracle::Connection, batch: &[ProxyEvent]) -> Result<(), oracle::Error> {
     let sql = "INSERT INTO proxy_events \
-               (event_type, host, peer_ip, bytes_up, bytes_down, status_code, blocked, raw_json) \
-               VALUES (:1, :2, :3, :4, :5, :6, :7, :8)";
+               (event_type, host, peer_ip, bytes_up, bytes_down, status_code, blocked, obfuscation_profile, raw_json) \
+               VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9)";
     let mut stmt = conn.statement(sql).build()?;
     for ev in batch {
         let blocked_i: i32 = if ev.blocked { 1 } else { 0 };
@@ -147,6 +154,7 @@ fn insert_batch(conn: &oracle::Connection, batch: &[ProxyEvent]) -> Result<(), o
             &ev.bytes_down,
             &ev.status_code,
             &blocked_i,
+            &ev.obfuscation_profile,
             &ev.raw_json,
         ])?;
     }

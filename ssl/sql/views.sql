@@ -156,3 +156,21 @@ SELECT
 FROM shipper_heartbeats
 WHERE reported_at >= SYSTIMESTAMP - INTERVAL '1' HOUR
 GROUP BY agent_name, host_fqdn;
+
+-- ---------------------------------------------------------------------------
+-- V_FOX_TRAFFIC  — Obfuscated traffic aggregation for Grafana panels
+-- Aggregates events by host, hour and obfuscation profile
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW v_fox_traffic AS
+SELECT
+    TRUNC(event_time, 'HH24')                     AS hour,
+    host,
+    obfuscation_profile,
+    COUNT(*)                                      AS event_count,
+    SUM(bytes_up)                                 AS total_bytes_up,
+    SUM(bytes_down)                               AS total_bytes_down
+FROM proxy_events
+WHERE obfuscation_profile IS NOT NULL
+  AND event_time >= SYSTIMESTAMP - INTERVAL '7' DAY
+GROUP BY TRUNC(event_time, 'HH24'), host, obfuscation_profile
+ORDER BY hour DESC, event_count DESC;

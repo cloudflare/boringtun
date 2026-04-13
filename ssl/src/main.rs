@@ -1,11 +1,14 @@
 mod blocklist;
+mod config;
 mod dashboard;
 #[cfg(feature = "oracle-db")]
 mod db;
+mod obfuscation;
 mod proxy;
 mod state;
 mod tunnel;
 
+use axum::http::Method;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -14,8 +17,10 @@ use axum::{
     routing::{any, get},
     Router,
 };
-use axum::http::Method;
-use hickory_resolver::{config::{ResolverConfig, ResolverOpts}, TokioAsyncResolver};
+use hickory_resolver::{
+    config::{ResolverConfig, ResolverOpts},
+    TokioAsyncResolver,
+};
 use hyper::service::service_fn;
 use hyper_util::{
     client::legacy::{connect::HttpConnector, Client},
@@ -47,14 +52,6 @@ async fn main() {
         .add_directive("ssl_proxy=info".parse().unwrap())
         .add_directive("tower_http=info".parse().unwrap());
 
-    // LOG_FORMAT=json  →  newline-delimited JSON (pipe to Vector/Filebeat)
-    // anything else    →  human-readable (default for dev)
-    if std::env::var("LOG_FORMAT").as_deref() == Ok("json") {
-        tracing_subscriber::fmt().json().flatten_event(true).with_env_filter(filter).init();
-    } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
-    }
-
     let client = Client::builder(TokioExecutor::new()).build(HttpConnector::new());
 
     let mut opts = ResolverOpts::default();
@@ -66,67 +63,87 @@ async fn main() {
 
     let shutdown = CancellationToken::new();
 
+    let config = config::Config::from_env();
+
+    // LOG_FORMAT=json  →  newline-delimited JSON (pipe to Vector/Filebeat)
+    // anything else    →  human-readable (default for dev)
+    if config.log_format == "json" {
+        tracing_subscriber::fmt()
+            .json()
+            .flatten_event(true)
+            .with_env_filter(filter)
+            .init();
+    } else {
+        tracing_subscriber::fmt().with_env_filter(filter).init();
+    }
+
     let state = state::AppState::new(
-        client, resolver, stats_tx, events_tx,
-        #[cfg(feature = "oracle-db")] shutdown.clone(),
+        client,
+        resolver,
+        stats_tx,
+        events_tx,
+        config.wg_interface.clone(),
+        config.tarpit_max_connections,
+        config,
+        #[cfg(feature = "oracle-db")]
+        shutdown.clone(),
     );
+
+    // Semaphore to limit concurrent connections
+    let connection_semaphore =
+        std::sync::Arc::new(tokio::sync::Semaphore::new(config.max_connections));
 
     blocklist::spawn_refresh_task(state.clone(), shutdown.clone());
     dashboard::spawn_stats_poller(state.clone(), shutdown.clone());
 
-    let cors = match std::env::var("CORS_ALLOWED_ORIGINS") {
-        Ok(origins) => {
-            let parsed: Vec<axum::http::HeaderValue> = origins
-                .split(',')
-                .filter_map(|o| {
-                    let trimmed = o.trim();
-                    match trimmed.parse() {
-                        Ok(v) => Some(v),
-                        Err(e) => {
-                            warn!(origin = %trimmed, %e, "invalid CORS origin, skipping");
-                            None
-                        }
-                    }
-                })
-                .collect();
-            if parsed.is_empty() {
-                warn!("CORS_ALLOWED_ORIGINS set but no valid origins parsed — no origins allowed");
-            }
-            CorsLayer::new()
-                .allow_origin(parsed)
-                .allow_methods(tower_http::cors::Any)
-                .allow_headers(tower_http::cors::Any)
+    let cors = if !config.cors_allowed_origins.is_empty() {
+        let parsed: Vec<axum::http::HeaderValue> = config
+            .cors_allowed_origins
+            .iter()
+            .filter_map(|origin| match origin.parse() {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    warn!(origin = %origin, %e, "invalid CORS origin, skipping");
+                    None
+                }
+            })
+            .collect();
+        if parsed.is_empty() {
+            warn!("CORS_ALLOWED_ORIGINS set but no valid origins parsed — no origins allowed");
         }
-        Err(_) => {
-            if cfg!(debug_assertions) {
-                info!("CORS_ALLOWED_ORIGINS not set, using permissive CORS (dev mode)");
-                CorsLayer::permissive()
-            } else {
-                warn!("CORS_ALLOWED_ORIGINS not set in release build, defaulting to restrictive CORS");
-                CorsLayer::new()
-            }
+        CorsLayer::new()
+            .allow_origin(parsed)
+            .allow_methods(tower_http::cors::Any)
+            .allow_headers(tower_http::cors::Any)
+    } else {
+        if cfg!(debug_assertions) {
+            info!("CORS_ALLOWED_ORIGINS not set, using permissive CORS (dev mode)");
+            CorsLayer::permissive()
+        } else {
+            warn!("CORS_ALLOWED_ORIGINS not set in release build, defaulting to restrictive CORS");
+            CorsLayer::new()
         }
     };
-
-    let admin_api_key = std::env::var("ADMIN_API_KEY").unwrap_or_default();
     let admin_routes = Router::new()
         .route("/hosts", get(dashboard::hosts_snapshot))
         .route("/hosts/:hostname", get(dashboard::host_detail))
         .route("/stats/summary", get(dashboard::stats_summary))
-        .layer(middleware::from_fn(move |req: Request<Body>, next: Next| {
-            let key = admin_api_key.clone();
-            async move {
-                let provided = req
-                    .headers()
-                    .get("x-api-key")
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("");
-                if key.is_empty() || !constant_time_eq(provided, &key) {
-                    return StatusCode::UNAUTHORIZED.into_response();
+        .layer(middleware::from_fn(
+            move |req: Request<Body>, next: Next| {
+                let key = config.admin_api_key.clone();
+                async move {
+                    let provided = req
+                        .headers()
+                        .get("x-api-key")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if key.is_empty() || !constant_time_eq(provided, &key) {
+                        return StatusCode::UNAUTHORIZED.into_response();
+                    }
+                    next.run(req).await
                 }
-                next.run(req).await
-            }
-        }))
+            },
+        ))
         .with_state(state.clone());
 
     let router = Router::new()
@@ -143,22 +160,14 @@ async fn main() {
     #[cfg(feature = "oracle-db")]
     dashboard::spawn_oracle_flusher(state.clone(), shutdown.clone());
 
-    let proxy_port: u16 = std::env::var("PROXY_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(3000);
-    let tproxy_port: u16 = std::env::var("TPROXY_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(3001);
-    // WG_PORT is reserved for BoringTun — ssl-proxy never binds it, only logs it.
-    let wg_port: u16 = std::env::var("WG_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(51820);
-    info!(proxy_port, tproxy_port, wg_port, "port assignment");
+    info!(
+        proxy_port = config.proxy_port,
+        tproxy_port = config.tproxy_port,
+        wg_port = config.wg_port,
+        "port assignment"
+    );
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], proxy_port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], config.proxy_port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .unwrap_or_else(|e| {
@@ -168,7 +177,7 @@ async fn main() {
     info!(%addr, "proxy + dashboard active");
 
     // Transparent proxy listener — receives connections redirected by iptables REDIRECT
-    let tproxy_addr = SocketAddr::from(([0, 0, 0, 0], tproxy_port));
+    let tproxy_addr = SocketAddr::from(([0, 0, 0, 0], config.tproxy_port));
     let tproxy_listener = tokio::net::TcpListener::bind(tproxy_addr)
         .await
         .unwrap_or_else(|e| {
@@ -179,6 +188,7 @@ async fn main() {
 
     let tproxy_state = state.clone();
     let tproxy_shutdown = shutdown.clone();
+    let tproxy_connection_semaphore = connection_semaphore.clone();
     let tproxy_handle = tokio::spawn(async move {
         let mut tproxy_tasks: JoinSet<()> = JoinSet::new();
         loop {
@@ -187,8 +197,18 @@ async fn main() {
                 result = tproxy_listener.accept() => {
                     match result {
                         Ok((stream, _peer)) => {
+                            let permit = match tproxy_connection_semaphore.clone().try_acquire_owned() {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    warn!("max connections reached, dropping transparent connection");
+                                    continue;
+                                }
+                            };
                             let s = tproxy_state.clone();
-                            tproxy_tasks.spawn(tunnel::handle_transparent(stream, s));
+                            tproxy_tasks.spawn(async move {
+                                let _permit = permit; // hold until task completes
+                                tunnel::handle_transparent(stream, s).await;
+                            });
                         }
                         Err(e) => error!(%e, "tproxy accept failed"),
                     }
@@ -216,11 +236,20 @@ async fn main() {
                     }
                 };
 
+                let permit = match connection_semaphore.clone().try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        warn!("max connections reached, dropping connection");
+                        continue;
+                    }
+                };
+
                 let state = state.clone();
                 let router = router.clone();
                 let token = shutdown.clone();
 
                 tasks.spawn(async move {
+                    let _permit = permit; // hold until task completes
                     let svc = service_fn(move |req: Request<hyper::body::Incoming>| {
                         let state = state.clone();
                         let router = router.clone();
@@ -253,15 +282,10 @@ async fn main() {
     }
 
     info!("draining in-flight connections (5s timeout)");
-    let _ = tokio::time::timeout(
-        tokio::time::Duration::from_secs(5),
-        async { while tasks.join_next().await.is_some() {} },
-    )
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
+        while tasks.join_next().await.is_some() {}
+    })
     .await;
-    let _ = tokio::time::timeout(
-        tokio::time::Duration::from_secs(2),
-        tproxy_handle,
-    )
-    .await;
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(2), tproxy_handle).await;
     info!("shutdown complete");
 }

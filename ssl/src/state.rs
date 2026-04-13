@@ -1,3 +1,4 @@
+use dashmap::DashMap;
 use std::{
     collections::HashSet,
     sync::{
@@ -6,7 +7,6 @@ use std::{
     },
     time::Instant,
 };
-use dashmap::DashMap;
 use tokio::sync::{broadcast, RwLock};
 
 use crate::blocklist::SEED;
@@ -14,63 +14,154 @@ use crate::blocklist::SEED;
 /// Metadata cached from a DNS resolution (Epic 2.1).
 #[derive(Clone)]
 pub struct ResolvedMeta {
-    pub ip:          String,
+    pub ip: String,
     pub resolved_at: Instant,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hickory_resolver::TokioAsyncResolver;
+    use std::time::Duration;
+    use tokio::sync::broadcast;
+
+    async fn create_test_state() -> SharedState {
+        let (stats_tx, _) = broadcast::channel(16);
+        let (events_tx, _) = broadcast::channel(16);
+        let resolver = TokioAsyncResolver::tokio_from_system_conf().unwrap();
+
+        let mut config = crate::config::Config::default();
+        config.obfuscation_enabled = true;
+
+        AppState::new(
+            crate::proxy::ProxyClient::new(),
+            resolver,
+            stats_tx,
+            events_tx,
+            None,
+            64,
+            config,
+            #[cfg(feature = "oracle-db")]
+            tokio_util::sync::CancellationToken::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_record_host_block_verdict_transition() {
+        let state = create_test_state().await;
+        let host = "test.telemetry.host";
+
+        // First block
+        let verdict_change = state.record_host_block(host, 100, "telemetry");
+        assert!(verdict_change.is_none());
+        assert_eq!(state.host_stats.get(host).unwrap().verdict(), "BLOCKED");
+
+        // Simulate high frequency by manually modifying stats
+        {
+            let mut stats = state.host_stats.get_mut(host).unwrap();
+            stats.blocked_attempts = 100;
+            // Manually set first_seen to 10 seconds ago to get 10 Hz frequency
+            stats.first_seen = Instant::now() - Duration::from_secs(10);
+        }
+
+        // Next block should trigger verdict change
+        let verdict_change = state.record_host_block(host, 100, "telemetry");
+        assert!(verdict_change.is_some());
+        assert_eq!(verdict_change.unwrap(), ("BLOCKED", "TARPIT"));
+
+        // Increase frequency further to trigger TARPIT
+        {
+            let mut stats = state.host_stats.get_mut(host).unwrap();
+            stats.blocked_attempts = 100;
+            stats.first_seen = Instant::now() - Duration::from_secs(1); // 100 Hz
+        }
+
+        let verdict_change = state.record_host_block(host, 100, "telemetry");
+        assert!(verdict_change.is_some());
+        assert_eq!(verdict_change.unwrap(), ("AGGRESSIVE_POLLING", "TARPIT"));
+    }
+
+    #[tokio::test]
+    async fn test_evict_stale_hosts() {
+        let state = create_test_state().await;
+
+        // Add active host
+        state.record_host_block("active.host", 100, "test");
+
+        // Add stale host (manually set last_seen to old time)
+        state.record_host_block("stale.host", 100, "test");
+        {
+            let mut stats = state.host_stats.get_mut("stale.host").unwrap();
+            stats.last_seen = Instant::now() - Duration::from_secs(3600); // 1 hour old
+        }
+
+        assert_eq!(state.host_stats.len(), 2);
+
+        // Evict hosts older than 10 minutes
+        state.evict_stale_hosts(600);
+
+        // Only active host remains
+        assert_eq!(state.host_stats.len(), 1);
+        assert!(state.host_stats.contains_key("active.host"));
+        assert!(!state.host_stats.contains_key("stale.host"));
+    }
 }
 
 pub type SharedState = Arc<AppState>;
 
 /// Per-host heuristic counters — kept in RAM only, never written to disk.
 pub struct HostStats {
-    pub blocked_attempts:     u64,
+    pub blocked_attempts: u64,
     pub blocked_bytes_approx: u64,
-    pub first_seen:           Instant,
-    pub last_seen:            Instant,
-    pub tarpit_held_ms:       u64,
-    pub category:             &'static str,
+    pub first_seen: Instant,
+    pub last_seen: Instant,
+    pub tarpit_held_ms: u64,
+    pub category: &'static str,
     // Epic 3.2 — inter-arrival time
-    pub iat_ms:               Option<u64>,
+    pub iat_ms: Option<u64>,
     // Epic 3.3 — verdict transition
-    pub last_verdict:         &'static str,
+    pub last_verdict: &'static str,
     // Epic 3.4 — consecutive block streak
-    pub consecutive_blocks:   u32,
+    pub consecutive_blocks: u32,
     // Epic 4.1 — TLS fingerprint
-    pub tls_ver:              Option<String>,
-    pub alpn:                 Option<String>,
-    pub cipher_suites_count:  Option<u8>,
-    pub ja3_lite:             Option<String>,
+    pub tls_ver: Option<String>,
+    pub alpn: Option<String>,
+    pub cipher_suites_count: Option<u8>,
+    pub ja3_lite: Option<String>,
     // Epic 2.1 — last resolved IP
-    pub resolved_ip:          Option<String>,
+    pub resolved_ip: Option<String>,
     // Epic 2.2 — ASN enrichment
-    pub asn_org:              Option<String>,
+    pub asn_org: Option<String>,
 }
 
 impl HostStats {
     fn new(bytes: u64, category: &'static str) -> Self {
         let now = Instant::now();
         Self {
-            blocked_attempts:    1,
+            blocked_attempts: 1,
             blocked_bytes_approx: bytes,
-            first_seen:          now,
-            last_seen:           now,
-            tarpit_held_ms:      0,
+            first_seen: now,
+            last_seen: now,
+            tarpit_held_ms: 0,
             category,
-            iat_ms:              None,
-            last_verdict:        "BLOCKED",
-            consecutive_blocks:  1,
-            tls_ver:             None,
-            alpn:                None,
+            iat_ms: None,
+            last_verdict: "BLOCKED",
+            consecutive_blocks: 1,
+            tls_ver: None,
+            alpn: None,
             cipher_suites_count: None,
-            ja3_lite:            None,
-            resolved_ip:         None,
-            asn_org:             None,
+            ja3_lite: None,
+            resolved_ip: None,
+            asn_org: None,
         }
     }
 
     /// Attempts per second since first seen (frequency in Hz).
     pub fn frequency_hz(&self) -> f64 {
         let secs = self.first_seen.elapsed().as_secs_f64();
-        if secs < 0.001 { return 0.0; }
+        if secs < 0.001 {
+            return 0.0;
+        }
         self.blocked_attempts as f64 / secs
     }
 
@@ -83,10 +174,18 @@ impl HostStats {
     /// telemetry poller (the classic "retry storm" battery drain pattern).
     pub fn verdict(&self) -> &'static str {
         let hz = self.frequency_hz();
-        if hz > 8.0 && self.category == "telemetry" { return "TARPIT"; }
-        if hz > 1.0 { return "AGGRESSIVE_POLLING"; }
-        if self.risk_score() > 100_000.0 { return "HEURISTIC_FLAG_DATA_EXFIL"; }
-        if self.blocked_attempts > 10 { return "PERSISTENT_RECONNECT"; }
+        if hz > 8.0 && self.category == "telemetry" {
+            return "TARPIT";
+        }
+        if hz > 1.0 {
+            return "AGGRESSIVE_POLLING";
+        }
+        if self.risk_score() > 100_000.0 {
+            return "HEURISTIC_FLAG_DATA_EXFIL";
+        }
+        if self.blocked_attempts > 10 {
+            return "PERSISTENT_RECONNECT";
+        }
         "BLOCKED"
     }
 
@@ -101,20 +200,24 @@ impl HostStats {
 }
 
 pub struct AppState {
-    pub client:         crate::proxy::ProxyClient,
-    pub resolver:       hickory_resolver::TokioAsyncResolver,
-    pub stats_tx:       broadcast::Sender<String>,
-    pub events_tx:      broadcast::Sender<String>,
-    pub bytes_up:       AtomicU64,
-    pub bytes_down:     AtomicU64,
+    pub client: crate::proxy::ProxyClient,
+    pub resolver: hickory_resolver::TokioAsyncResolver,
+    pub stats_tx: broadcast::Sender<String>,
+    pub events_tx: broadcast::Sender<String>,
+    pub bytes_up: AtomicU64,
+    pub bytes_down: AtomicU64,
     pub active_tunnels: AtomicU64,
     pub tunnels_opened: AtomicU64,
-    pub blocked_count:  AtomicU64,
-    pub blocklist:      RwLock<HashSet<String>>,
-    pub host_stats:     DashMap<String, HostStats>,
-    pub tarpit_sem:     std::sync::Arc<tokio::sync::Semaphore>,
+    pub blocked_count: AtomicU64,
+    pub obfuscated_count: AtomicU64,
+    pub blocklist: RwLock<HashSet<String>>,
+    pub host_stats: DashMap<String, HostStats>,
+    pub tarpit_sem: std::sync::Arc<tokio::sync::Semaphore>,
     /// DNS resolution cache with 5-minute TTL (Epic 2.1).
-    pub dns_cache:      DashMap<String, ResolvedMeta>,
+    pub dns_cache: DashMap<String, ResolvedMeta>,
+    /// WireGuard TUN device name for diagnostics (optional).
+    pub wg_interface: Option<String>,
+    pub config: crate::config::Config,
     #[cfg(feature = "oracle-db")]
     pub db: std::sync::Arc<crate::db::EventSender>,
 }
@@ -125,14 +228,17 @@ impl AppState {
         resolver: hickory_resolver::TokioAsyncResolver,
         stats_tx: broadcast::Sender<String>,
         events_tx: broadcast::Sender<String>,
+        wg_interface: Option<String>,
+        max_tarpit: usize,
+        config: crate::config::Config,
         #[cfg(feature = "oracle-db")] shutdown: tokio_util::sync::CancellationToken,
     ) -> SharedState {
         let seed = SEED.iter().map(|s| s.to_string()).collect();
         #[cfg(feature = "oracle-db")]
         let db = {
-            let conn_str = std::env::var("ORACLE_CONN").unwrap_or_default();
-            let user     = std::env::var("ORACLE_USER").unwrap_or_default();
-            let pass     = std::env::var("ORACLE_PASS").unwrap_or_default();
+            let conn_str = config.oracle_conn.clone();
+            let user = config.oracle_user.clone();
+            let pass = std::fs::read_to_string(&config.oracle_pass_file).unwrap_or_default();
             if conn_str.is_empty() || user.is_empty() {
                 tracing::warn!(
                     "oracle-db feature enabled but ORACLE_CONN/ORACLE_USER not set; \
@@ -146,15 +252,18 @@ impl AppState {
             resolver,
             stats_tx,
             events_tx,
-            bytes_up:       AtomicU64::new(0),
-            bytes_down:     AtomicU64::new(0),
+            bytes_up: AtomicU64::new(0),
+            bytes_down: AtomicU64::new(0),
             active_tunnels: AtomicU64::new(0),
             tunnels_opened: AtomicU64::new(0),
-            blocked_count:  AtomicU64::new(0),
-            blocklist:      RwLock::new(seed),
-            host_stats:     DashMap::new(),
-            tarpit_sem:     crate::tunnel::tarpit_semaphore(),
-            dns_cache:      DashMap::new(),
+            blocked_count: AtomicU64::new(0),
+            obfuscated_count: AtomicU64::new(0),
+            blocklist: RwLock::new(seed),
+            host_stats: DashMap::new(),
+            tarpit_sem: crate::tunnel::tarpit_semaphore(max_tarpit),
+            dns_cache: DashMap::new(),
+            wg_interface,
+            config,
             #[cfg(feature = "oracle-db")]
             db,
         })
@@ -170,7 +279,10 @@ impl AppState {
         self.bytes_down.fetch_add(down, Ordering::Relaxed);
         self.active_tunnels
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                debug_assert!(v > 0, "record_tunnel_close called with active_tunnels already zero");
+                debug_assert!(
+                    v > 0,
+                    "record_tunnel_close called with active_tunnels already zero"
+                );
                 Some(v.saturating_sub(1))
             })
             .ok();
@@ -232,10 +344,10 @@ impl AppState {
         ja3_lite: Option<String>,
     ) {
         if let Some(mut s) = self.host_stats.get_mut(host) {
-            s.tls_ver             = tls_ver;
-            s.alpn                = alpn;
+            s.tls_ver = tls_ver;
+            s.alpn = alpn;
             s.cipher_suites_count = cipher_suites_count;
-            s.ja3_lite            = ja3_lite;
+            s.ja3_lite = ja3_lite;
         }
     }
 
@@ -243,7 +355,7 @@ impl AppState {
     pub fn record_resolved(&self, host: &str, ip: String, asn_org: Option<String>) {
         if let Some(mut s) = self.host_stats.get_mut(host) {
             s.resolved_ip = Some(ip);
-            s.asn_org     = asn_org;
+            s.asn_org = asn_org;
         }
     }
 
@@ -257,6 +369,7 @@ impl AppState {
     /// Drop hosts that haven't been seen in `ttl_secs` seconds.
     /// Called periodically by the stats poller — never from a request handler.
     pub fn evict_stale_hosts(&self, ttl_secs: u64) {
-        self.host_stats.retain(|_, v| v.last_seen.elapsed().as_secs() < ttl_secs);
+        self.host_stats
+            .retain(|_, v| v.last_seen.elapsed().as_secs() < ttl_secs);
     }
 }

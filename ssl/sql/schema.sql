@@ -14,6 +14,7 @@ CREATE TABLE proxy_events (
     bytes_down   NUMBER(20) DEFAULT 0,
     status_code  NUMBER(5),
     blocked      NUMBER(1)  DEFAULT 0 CHECK (blocked IN (0,1)),
+    obfuscation_profile VARCHAR2(32),
     raw_json     CLOB       CHECK (raw_json IS JSON)
 );
 

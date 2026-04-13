@@ -32,7 +32,7 @@
 
   .grid {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
     gap: 1px; background: var(--border);
     border-bottom: 1px solid var(--border);
   }
@@ -106,6 +106,7 @@
   <div class="stat"><div class="label">Active Tunnels</div><div class="value" id="s-active">—</div></div>
   <div class="stat"><div class="label">Total Opened</div><div class="value" id="s-opened">—</div></div>
   <div class="stat"><div class="label">Blocked</div><div class="value" id="s-blocked" style="color:var(--red)">—</div></div>
+  <div class="stat"><div class="label">Obfuscated</div><div class="value" id="s-obfuscated" style="color:var(--green)">—</div></div>
   <div class="stat"><div class="label">Throughput ↑↓</div><div class="value" id="s-bw" style="color:var(--blue)">—</div></div>
 </div>
 
@@ -172,6 +173,7 @@ function connectStatsWs() {
     $('s-active').textContent  = s.active_tunnels ?? '—';
     $('s-opened').textContent  = s.tunnels_opened ?? '—';
     $('s-blocked').textContent = s.blocked        ?? '—';
+    $('s-obfuscated').textContent = s.obfuscated  ?? '—';
     $('s-bw').textContent      = `${s.up_kBps ?? 0} / ${s.down_kBps ?? 0} kB/s`;
   };
 }

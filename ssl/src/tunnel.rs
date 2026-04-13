@@ -1,35 +1,105 @@
-use axum::{body::Body, http::{Request, Response, StatusCode}};
+use axum::{
+    body::Body,
+    http::{Request, Response, StatusCode},
+};
 use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
+use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info};
 
-use crate::{blocklist, state::SharedState};
+use crate::{blocklist, obfuscation, state::SharedState};
 
-/// Maximum concurrent tarpit connections. Beyond this, new TARPIT verdicts
-/// fall back to a fast drop so the semaphore never blocks the hot path.
-const MAX_TARPIT: usize = 64;
 /// Maximum time a single tarpit connection is held open.
 const MAX_TARPIT_MS: u64 = 5 * 60 * 1_000; // 5 minutes
 
 /// Process-wide semaphore — initialised once, shared via Arc in AppState.
-pub fn tarpit_semaphore() -> Arc<Semaphore> {
-    Arc::new(Semaphore::new(MAX_TARPIT))
+pub fn tarpit_semaphore(max_tarpit: usize) -> Arc<Semaphore> {
+    Arc::new(Semaphore::new(max_tarpit))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_tls_info_crafted_client_hello() {
+        // Crafted minimal TLS 1.2 Client Hello with:
+        // - SNI: example.com
+        // - ALPN: h2
+        // - 2 cipher suites
+        let client_hello: &[u8] = &[
+            0x16, // ContentType: Handshake
+            0x03, 0x03, // TLS 1.2
+            0x00, 0x5d, // Record length
+            0x01, // HandshakeType: ClientHello
+            0x00, 0x00, 0x59, // Handshake length
+            0x03, 0x03, // Client version TLS 1.2
+            // Random (32 bytes)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, // Session ID length
+            0x00, 0x04, // Cipher suites length (2 suites)
+            0x13, 0x01, // TLS_AES_256_GCM_SHA384
+            0x13, 0x02, // TLS_CHACHA20_POLY1305_SHA256
+            0x01, // Compression methods length
+            0x00, // NULL compression
+            0x00, 0x1e, // Extensions length
+            // SNI extension
+            0x00, 0x00, // Extension type: SNI
+            0x00, 0x0f, // Extension length
+            0x00, 0x0d, // Server name list length
+            0x00, // Name type: host_name
+            0x00, 0x0a, // Name length
+            b'e', b'x', b'a', b'm', b'p', b'l', b'e', b'.', b'c', b'o', b'm',
+            // ALPN extension
+            0x00, 0x10, // Extension type: ALPN
+            0x00, 0x05, // Extension length
+            0x00, 0x03, // Protocol list length
+            0x02, // Protocol length
+            b'h', b'2',
+        ];
+
+        let info = parse_tls_info(client_hello);
+
+        assert_eq!(info.sni, Some("example.com".to_string()));
+        assert_eq!(info.alpn, Some("h2".to_string()));
+        assert_eq!(info.tls_ver, Some("TLS1.2".to_string()));
+        assert_eq!(info.cipher_suites_count, Some(2));
+        assert!(info.ja3_lite.is_some());
+    }
+
+    #[test]
+    fn test_parse_tls_info_invalid_input() {
+        // Empty buffer
+        let info = parse_tls_info(&[]);
+        assert_eq!(info.sni, None);
+        assert_eq!(info.alpn, None);
+        assert_eq!(info.tls_ver, None);
+
+        // Invalid first byte
+        let info = parse_tls_info(&[0x17, 0x03, 0x03, 0x00, 0x00]);
+        assert_eq!(info.tls_ver, None);
+    }
 }
 
 async fn run_tarpit(upgrade_fut: hyper::upgrade::OnUpgrade, host: String, state: SharedState) {
     let upgraded = match upgrade_fut.await {
         Ok(u) => u,
-        Err(e) => { debug!(%host, %e, "tarpit upgrade failed"); return; }
+        Err(e) => {
+            debug!(%host, %e, "tarpit upgrade failed");
+            return;
+        }
     };
     let start = Instant::now();
     let mut stream = TokioIo::new(upgraded);
     let _ = tokio::time::timeout(
         tokio::time::Duration::from_millis(MAX_TARPIT_MS),
         tokio::io::copy(&mut stream, &mut tokio::io::sink()),
-    ).await;
+    )
+    .await;
     let held_ms = start.elapsed().as_millis() as u64;
     state.record_tarpit_held(&host, held_ms);
     info!(
@@ -72,16 +142,19 @@ fn emit_full(
     let raw = v.to_string();
     let _ = state.events_tx.send(raw.clone());
     #[cfg(feature = "oracle-db")]
-    crate::db::insert_proxy_event(state.db.clone(), crate::db::ProxyEvent {
-        event_type: event.to_string(),
-        host: host.to_string(),
-        peer_ip,
-        bytes_up,
-        bytes_down,
-        status_code,
-        blocked,
-        raw_json: raw,
-    });
+    crate::db::insert_proxy_event(
+        state.db.clone(),
+        crate::db::ProxyEvent {
+            event_type: event.to_string(),
+            host: host.to_string(),
+            peer_ip,
+            bytes_up,
+            bytes_down,
+            status_code,
+            blocked,
+            raw_json: raw,
+        },
+    );
 }
 /// Transparent proxy entry point: called for raw TCP connections redirected by
 /// iptables REDIRECT. Reads SO_ORIGINAL_DST to find the real destination, peeks
@@ -129,9 +202,17 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
             let (attempts, blocked_bytes, freq_hz, verdict, iat_ms, streak, risk) = state
                 .host_stats
                 .get(name.as_str())
-                .map(|s| (s.blocked_attempts, s.blocked_bytes_approx, s.frequency_hz(),
-                          s.verdict(), s.iat_ms, s.consecutive_blocks,
-                          (s.risk_score() * 100.0).round() / 100.0))
+                .map(|s| {
+                    (
+                        s.blocked_attempts,
+                        s.blocked_bytes_approx,
+                        s.frequency_hz(),
+                        s.verdict(),
+                        s.iat_ms,
+                        s.consecutive_blocks,
+                        (s.risk_score() * 100.0).round() / 100.0,
+                    )
+                })
                 .unwrap_or((1, approx_bytes, 0.0, "BLOCKED", None, 1, 0.0));
             // Epic 3.3 — emit verdict_change event
             if let Some((prev, next)) = verdict_change {
@@ -146,23 +227,32 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
             // Epic 2.1 — async DNS resolution with 500 ms timeout + 5-min cache
             {
                 let state2 = state.clone();
-                let name2  = name.clone();
+                let name2 = name.clone();
                 tokio::spawn(async move {
                     const TTL_SECS: u64 = 300;
-                    if state2.dns_cache.get(&name2)
+                    if state2
+                        .dns_cache
+                        .get(&name2)
                         .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
                         .unwrap_or(false)
-                    { return; }
+                    {
+                        return;
+                    }
                     if let Ok(Ok(addrs)) = tokio::time::timeout(
                         tokio::time::Duration::from_millis(500),
                         state2.resolver.lookup_ip(name2.as_str()),
-                    ).await {
+                    )
+                    .await
+                    {
                         if let Some(ip) = addrs.iter().next() {
                             let ip_str = ip.to_string();
-                            state2.dns_cache.insert(name2.clone(), crate::state::ResolvedMeta {
-                                ip: ip_str.clone(),
-                                resolved_at: Instant::now(),
-                            });
+                            state2.dns_cache.insert(
+                                name2.clone(),
+                                crate::state::ResolvedMeta {
+                                    ip: ip_str.clone(),
+                                    resolved_at: Instant::now(),
+                                },
+                            );
                             state2.record_resolved(&name2, ip_str, None);
                         }
                     }
@@ -203,23 +293,27 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
             let raw = event.to_string();
             let _ = state.events_tx.send(raw.clone());
             #[cfg(feature = "oracle-db")]
-            crate::db::insert_proxy_event(state.db.clone(), crate::db::ProxyEvent {
-                event_type: "block".to_string(),
-                host: name.clone(),
-                peer_ip: peer_ip.clone(),
-                bytes_up: 0,
-                bytes_down: 0,
-                status_code: None,
-                blocked: true,
-                raw_json: raw,
-            });
+            crate::db::insert_proxy_event(
+                state.db.clone(),
+                crate::db::ProxyEvent {
+                    event_type: "block".to_string(),
+                    host: name.clone(),
+                    peer_ip: peer_ip.clone(),
+                    bytes_up: 0,
+                    bytes_down: 0,
+                    status_code: None,
+                    blocked: true,
+                    raw_json: raw,
+                },
+            );
             if verdict == "TARPIT" {
                 if let Ok(_permit) = state.tarpit_sem.clone().try_acquire_owned() {
                     let tarpit_start = Instant::now();
                     let _ = tokio::time::timeout(
                         tokio::time::Duration::from_millis(MAX_TARPIT_MS),
                         tokio::io::copy(&mut stream, &mut tokio::io::sink()),
-                    ).await;
+                    )
+                    .await;
                     state.record_tarpit_held(name, tarpit_start.elapsed().as_millis() as u64);
                 }
             }
@@ -227,20 +321,30 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
         }
     }
 
+    // Classify obfuscation profile after blocklist check
+    let profile = if let Some(ref name) = hostname {
+        obfuscation::classify_obfuscation(name, &state.config)
+    } else {
+        obfuscation::Profile::None
+    };
+
     // Epic 3.4 — record allow for streak reset
     if let Some(ref name) = hostname {
         state.record_host_allow(name);
     }
-    run_transparent(stream, orig_dst, host, state, category, tls, peer_ip).await;
+    run_transparent(
+        stream, orig_dst, host, state, category, tls, peer_ip, profile,
+    )
+    .await;
 }
 
 #[derive(Default)]
 struct TlsInfo {
-    sni:                 Option<String>,
-    alpn:                Option<String>,
-    tls_ver:             Option<String>,
+    sni: Option<String>,
+    alpn: Option<String>,
+    tls_ver: Option<String>,
     cipher_suites_count: Option<u8>,
-    ja3_lite:            Option<String>,
+    ja3_lite: Option<String>,
 }
 
 async fn peek_tls_info(stream: &mut tokio::net::TcpStream) -> TlsInfo {
@@ -258,20 +362,27 @@ async fn peek_tls_info(stream: &mut tokio::net::TcpStream) -> TlsInfo {
 
 fn parse_tls_info(buf: &[u8]) -> TlsInfo {
     let mut info = TlsInfo::default();
-    if buf.len() < 5 || buf[0] != 22 { return info; }
+    if buf.len() < 5 || buf[0] != 22 {
+        return info;
+    }
     info.tls_ver = match (buf[1], buf[2]) {
         (3, 3) => Some("TLS1.2".into()),
         (3, 1) => Some("TLS1.0".into()),
-        _      => None,
+        _ => None,
     };
     let record_len = u16::from_be_bytes([buf[3], buf[4]]) as usize;
     let hs = match buf.get(5..5 + record_len.min(buf.len().saturating_sub(5))) {
         Some(s) => s,
         None => return info,
     };
-    if hs.first() != Some(&1) || hs.len() < 6 { return info; }
+    if hs.first() != Some(&1) || hs.len() < 6 {
+        return info;
+    }
     let mut pos = 4 + 2 + 32;
-    let sid_len = match hs.get(pos) { Some(&v) => v as usize, None => return info };
+    let sid_len = match hs.get(pos) {
+        Some(&v) => v as usize,
+        None => return info,
+    };
     pos += 1 + sid_len;
     let cs_len = match hs.get(pos..pos + 2) {
         Some(s) => u16::from_be_bytes([s[0], s[1]]) as usize,
@@ -280,27 +391,37 @@ fn parse_tls_info(buf: &[u8]) -> TlsInfo {
     // Epic 4.2 — cipher suite count (each suite is 2 bytes)
     info.cipher_suites_count = Some((cs_len / 2).min(255) as u8);
     let cs_start = pos + 2;
-    let cs_end   = cs_start + cs_len;
+    let cs_end = cs_start + cs_len;
     pos += 2 + cs_len;
-    let cm_len = match hs.get(pos) { Some(&v) => v as usize, None => return info };
+    let cm_len = match hs.get(pos) {
+        Some(&v) => v as usize,
+        None => return info,
+    };
     pos += 1 + cm_len;
-    if pos + 2 > hs.len() { return info; }
+    if pos + 2 > hs.len() {
+        return info;
+    }
     let ext_total = u16::from_be_bytes([hs[pos], hs[pos + 1]]) as usize;
     pos += 2;
     let ext_end = (pos + ext_total).min(hs.len());
 
     // Epic 4.3 — JA3-lite: collect extension types, curves, point formats
-    let mut ext_types:   Vec<u16> = Vec::new();
-    let mut curves:      Vec<u16> = Vec::new();
-    let mut point_fmts:  Vec<u8>  = Vec::new();
+    let mut ext_types: Vec<u16> = Vec::new();
+    let mut curves: Vec<u16> = Vec::new();
+    let mut point_fmts: Vec<u8> = Vec::new();
 
     while pos + 4 <= ext_end {
         let ext_type = u16::from_be_bytes([hs[pos], hs[pos + 1]]);
-        let ext_len  = u16::from_be_bytes([hs[pos + 2], hs[pos + 3]]) as usize;
+        let ext_len = u16::from_be_bytes([hs[pos + 2], hs[pos + 3]]) as usize;
         pos += 4;
-        let ext_data = match hs.get(pos..pos + ext_len) { Some(s) => s, None => break };
+        let ext_data = match hs.get(pos..pos + ext_len) {
+            Some(s) => s,
+            None => break,
+        };
         // Collect all extension types for JA3 (skip GREASE: 0x?a?a)
-        if ext_type & 0x0f0f != 0x0a0a { ext_types.push(ext_type); }
+        if ext_type & 0x0f0f != 0x0a0a {
+            ext_types.push(ext_type);
+        }
         match ext_type {
             // SNI
             0 if ext_len >= 5 => {
@@ -334,7 +455,9 @@ fn parse_tls_info(buf: &[u8]) -> TlsInfo {
                 let mut i = 2;
                 while i + 2 <= (2 + list_len).min(ext_data.len()) {
                     let g = u16::from_be_bytes([ext_data[i], ext_data[i + 1]]);
-                    if g & 0x0f0f != 0x0a0a { curves.push(g); }
+                    if g & 0x0f0f != 0x0a0a {
+                        curves.push(g);
+                    }
                     i += 2;
                 }
             }
@@ -355,7 +478,7 @@ fn parse_tls_info(buf: &[u8]) -> TlsInfo {
         Some("TLS1.3") => 772,
         Some("TLS1.2") => 771,
         Some("TLS1.0") => 769,
-        _              => 0,
+        _ => 0,
     };
     let cs_nums: Vec<u16> = hs
         .get(cs_start..cs_end)
@@ -364,9 +487,20 @@ fn parse_tls_info(buf: &[u8]) -> TlsInfo {
         .map(|c| u16::from_be_bytes([c[0], c[1]]))
         .filter(|&v| v & 0x0f0f != 0x0a0a)
         .collect();
-    let join_u16 = |v: &[u16]| v.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("-");
-    let join_u8  = |v: &[u8]|  v.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("-");
-    info.ja3_lite = Some(format!("{},{},{},{},{}",
+    let join_u16 = |v: &[u16]| {
+        v.iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("-")
+    };
+    let join_u8 = |v: &[u8]| {
+        v.iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("-")
+    };
+    info.ja3_lite = Some(format!(
+        "{},{},{},{},{}",
         tls_ver_num,
         join_u16(&cs_nums),
         join_u16(&ext_types),
@@ -379,51 +513,90 @@ fn parse_tls_info(buf: &[u8]) -> TlsInfo {
 /// Maps hostname + port + ALPN to a human-readable traffic category.
 fn classify(host: &str, port: u16, alpn: Option<&str>) -> &'static str {
     let h = host.to_ascii_lowercase();
-    if h.contains("firebaselogging") || h.contains("firebase-settings") ||
-       h.contains("app-measurement")  || h.contains("crashlytics")        ||
-       h.contains("sentry.io")        || h.contains("analytics")          ||
-       h.contains("telemetry")        || h.contains("metrics")            ||
-       h.contains("datadog")          || h.contains("newrelic")           ||
-       h.contains("segment.io") {
+    if h.contains("firebaselogging")
+        || h.contains("firebase-settings")
+        || h.contains("app-measurement")
+        || h.contains("crashlytics")
+        || h.contains("sentry.io")
+        || h.contains("analytics")
+        || h.contains("telemetry")
+        || h.contains("metrics")
+        || h.contains("datadog")
+        || h.contains("newrelic")
+        || h.contains("segment.io")
+    {
         return "telemetry";
     }
-    if h.contains("doubleclick")      || h.contains("googlesyndication") ||
-       h.contains("adnxs")            || h.contains("criteo")            ||
-       h.contains("pubmatic")         || h.contains("rubiconproject")    ||
-       h.contains("scorecardresearch") {
+    if h.contains("doubleclick")
+        || h.contains("googlesyndication")
+        || h.contains("adnxs")
+        || h.contains("criteo")
+        || h.contains("pubmatic")
+        || h.contains("rubiconproject")
+        || h.contains("scorecardresearch")
+    {
         return "ads/tracking";
     }
-    if h.contains("push.apple.com") || h.contains("push.googleapis") ||
-       h.contains("fcm.googleapis") || h.contains("notify.windows") {
+    if h.contains("push.apple.com")
+        || h.contains("push.googleapis")
+        || h.contains("fcm.googleapis")
+        || h.contains("notify.windows")
+    {
         return "push-notifications";
     }
-    if h.contains("accounts.google") || h.contains("oauth")         ||
-       h.contains("auth0.com")        || h.contains("okta")          ||
-       h.contains("login.microsoft") || h.contains("appleid.apple") {
+    if h.contains("accounts.google")
+        || h.contains("oauth")
+        || h.contains("auth0.com")
+        || h.contains("okta")
+        || h.contains("login.microsoft")
+        || h.contains("appleid.apple")
+    {
         return "auth";
     }
-    if h.contains("akamai")     || h.contains("cloudfront") ||
-       h.contains("fastly.net") || h.contains(".cdn.")      ||
-       h.contains("static.")    || h.contains("assets.") {
+    if h.contains("akamai")
+        || h.contains("cloudfront")
+        || h.contains("fastly.net")
+        || h.contains(".cdn.")
+        || h.contains("static.")
+        || h.contains("assets.")
+    {
         return "cdn/media";
     }
-    if h.contains("apple.com")                    { return "apple-services"; }
-    if h.contains("icloud.com")                   { return "icloud"; }
-    if h.contains("googleapis.com")               { return "google-services"; }
-    if h.contains("whatsapp")                     { return "whatsapp"; }
-    if h.contains("instagram")                    { return "instagram"; }
-    if h.contains("facebook")                     { return "facebook"; }
-    if h.contains("twitter") || h.contains("twimg") { return "twitter/x"; }
-    if h.contains("netflix")                      { return "netflix"; }
-    if h.contains("spotify")                      { return "spotify"; }
+    if h.contains("apple.com") {
+        return "apple-services";
+    }
+    if h.contains("icloud.com") {
+        return "icloud";
+    }
+    if h.contains("googleapis.com") {
+        return "google-services";
+    }
+    if h.contains("whatsapp") {
+        return "whatsapp";
+    }
+    if h.contains("instagram") {
+        return "instagram";
+    }
+    if h.contains("facebook") {
+        return "facebook";
+    }
+    if h.contains("twitter") || h.contains("twimg") {
+        return "twitter/x";
+    }
+    if h.contains("netflix") {
+        return "netflix";
+    }
+    if h.contains("spotify") {
+        return "spotify";
+    }
     match (port, alpn) {
-        (443, Some("h2"))       => "https/h2",
+        (443, Some("h2")) => "https/h2",
         (443, Some("http/1.1")) => "https/h1",
-        (443, _)               => "https",
-        (80,  _)               => "http",
-        (22,  _)               => "ssh",
-        (5228, _)              => "google-push",
-        _                      => "unknown",
+        (443, _) => "https",
+        (80, _) => "http",
+        (22, _) => "ssh",
+        (5228, _) => "google-push",
+        _ => "unknown",
     }
 }
 
@@ -458,7 +631,7 @@ fn original_dst(stream: &tokio::net::TcpStream) -> std::io::Result<SocketAddr> {
         let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
         let ret = libc::getsockopt(
             fd,
-            0, // SOL_IP (IPPROTO_IP)
+            0,  // SOL_IP (IPPROTO_IP)
             80, // SO_ORIGINAL_DST
             &mut addr as *mut _ as *mut libc::c_void,
             &mut len,
@@ -481,6 +654,7 @@ async fn run_transparent(
     category: &'static str,
     tls: TlsInfo,
     peer_ip: Option<String>,
+    profile: crate::obfuscation::Profile,
 ) {
     set_keepalive(&client);
     match tokio::time::timeout(
@@ -499,12 +673,37 @@ async fn run_transparent(
                 category = category,
                 "transparent tunnel established"
             );
-            emit_full(&state, "tunnel_open", &host, peer_ip.clone(), 0, 0, None, false, serde_json::json!({
-                "kind":     "transparent",
-                "category": category,
-                "alpn":     tls.alpn,
-                "tls_ver":  tls.tls_ver,
-            }));
+            // Emit obfuscated event if profile is not None
+            if !matches!(profile, crate::obfuscation::Profile::None) {
+                state.obfuscated_count.fetch_add(1, Ordering::Relaxed);
+                info!(
+                    target: "audit",
+                    event = "tunnel_obfuscated",
+                    kind = "transparent",
+                    host = %host,
+                    profile = profile.as_str(),
+                    category = category,
+                    "transparent tunnel obfuscated"
+                );
+            }
+
+            emit_full(
+                &state,
+                "tunnel_open",
+                &host,
+                peer_ip.clone(),
+                0,
+                0,
+                None,
+                false,
+                serde_json::json!({
+                    "kind":             "transparent",
+                    "category":         category,
+                    "alpn":             tls.alpn,
+                    "tls_ver":          tls.tls_ver,
+                    "obfuscation_profile": profile.as_str(),
+                }),
+            );
             state.record_tunnel_open();
             match tokio::io::copy_bidirectional(&mut client, &mut upstream).await {
                 Ok((up, down)) => {
@@ -520,13 +719,23 @@ async fn run_transparent(
                         category = category,
                         "transparent tunnel closed"
                     );
-                    emit_full(&state, "tunnel_close", &host, peer_ip, up, down, None, false, serde_json::json!({
-                        "kind":        "transparent",
-                        "category":    category,
-                        "bytes_up":    up,
-                        "bytes_down":  down,
-                        "duration_ms": start.elapsed().as_millis(),
-                    }));
+                    emit_full(
+                        &state,
+                        "tunnel_close",
+                        &host,
+                        peer_ip,
+                        up,
+                        down,
+                        None,
+                        false,
+                        serde_json::json!({
+                            "kind":        "transparent",
+                            "category":    category,
+                            "bytes_up":    up,
+                            "bytes_down":  down,
+                            "duration_ms": start.elapsed().as_millis(),
+                        }),
+                    );
                 }
                 Err(e) => {
                     state.record_tunnel_close(0, 0);
@@ -565,13 +774,16 @@ pub async fn handle(
 
     let hostname_owned: String = host
         .rsplit_once(':')
-        .and_then(|(h, p)| p.parse::<u16>().ok().map(|_| {
-            h.trim_start_matches('[').trim_end_matches(']').to_string()
-        }))
-        .unwrap_or_else(|| host
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .to_string());
+        .and_then(|(h, p)| {
+            p.parse::<u16>()
+                .ok()
+                .map(|_| h.trim_start_matches('[').trim_end_matches(']').to_string())
+        })
+        .unwrap_or_else(|| {
+            host.trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_string()
+        });
     let port = host
         .rsplit_once(':')
         .and_then(|(_, p)| p.parse::<u16>().ok())
@@ -591,9 +803,17 @@ pub async fn handle(
         let (attempts, blocked_bytes, freq_hz, verdict, iat_ms, streak, risk) = state
             .host_stats
             .get(hostname)
-            .map(|s| (s.blocked_attempts, s.blocked_bytes_approx, s.frequency_hz(),
-                      s.verdict(), s.iat_ms, s.consecutive_blocks,
-                      (s.risk_score() * 100.0).round() / 100.0))
+            .map(|s| {
+                (
+                    s.blocked_attempts,
+                    s.blocked_bytes_approx,
+                    s.frequency_hz(),
+                    s.verdict(),
+                    s.iat_ms,
+                    s.consecutive_blocks,
+                    (s.risk_score() * 100.0).round() / 100.0,
+                )
+            })
             .unwrap_or((1, approx_bytes, 0.0, "BLOCKED", None, 1, 0.0));
         // Epic 3.3 — verdict_change event
         if let Some((prev, next)) = verdict_change {
@@ -607,24 +827,33 @@ pub async fn handle(
         }
         // Epic 2.1 — async DNS resolution
         {
-            let state2    = state.clone();
+            let state2 = state.clone();
             let hostname2 = hostname.to_string();
             tokio::spawn(async move {
                 const TTL_SECS: u64 = 300;
-                if state2.dns_cache.get(&hostname2)
+                if state2
+                    .dns_cache
+                    .get(&hostname2)
                     .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
                     .unwrap_or(false)
-                { return; }
+                {
+                    return;
+                }
                 if let Ok(Ok(addrs)) = tokio::time::timeout(
                     tokio::time::Duration::from_millis(500),
                     state2.resolver.lookup_ip(hostname2.as_str()),
-                ).await {
+                )
+                .await
+                {
                     if let Some(ip) = addrs.iter().next() {
                         let ip_str = ip.to_string();
-                        state2.dns_cache.insert(hostname2.clone(), crate::state::ResolvedMeta {
-                            ip: ip_str.clone(),
-                            resolved_at: std::time::Instant::now(),
-                        });
+                        state2.dns_cache.insert(
+                            hostname2.clone(),
+                            crate::state::ResolvedMeta {
+                                ip: ip_str.clone(),
+                                resolved_at: std::time::Instant::now(),
+                            },
+                        );
                         state2.record_resolved(&hostname2, ip_str, None);
                     }
                 }
@@ -659,16 +888,19 @@ pub async fn handle(
         let raw = event.to_string();
         let _ = state.events_tx.send(raw.clone());
         #[cfg(feature = "oracle-db")]
-        crate::db::insert_proxy_event(state.db.clone(), crate::db::ProxyEvent {
-            event_type: "block".to_string(),
-            host: hostname.to_string(),
-            peer_ip: peer_ip.clone(),
-            bytes_up: 0,
-            bytes_down: 0,
-            status_code: None,
-            blocked: true,
-            raw_json: raw,
-        });
+        crate::db::insert_proxy_event(
+            state.db.clone(),
+            crate::db::ProxyEvent {
+                event_type: "block".to_string(),
+                host: hostname.to_string(),
+                peer_ip: peer_ip.clone(),
+                bytes_up: 0,
+                bytes_down: 0,
+                status_code: None,
+                blocked: true,
+                raw_json: raw,
+            },
+        );
 
         if verdict == "TARPIT" {
             // Acquire a permit; fall back to fast drop if at capacity.
@@ -699,12 +931,15 @@ pub async fn handle(
             .unwrap());
     }
 
+    // Classify obfuscation profile after blocklist check
+    let profile = obfuscation::classify_obfuscation(hostname, &state.config);
+
     // Epic 3.4 — record allow for streak reset
     state.record_host_allow(hostname);
 
     tokio::spawn(async move {
         match upgrade_fut.await {
-            Ok(upgraded) => run_tunnel(upgraded, host, state, category, peer_ip).await,
+            Ok(upgraded) => run_tunnel(upgraded, host, state, category, peer_ip, profile).await,
             Err(e) => error!(%e, "CONNECT upgrade failed"),
         }
     });
@@ -715,7 +950,14 @@ pub async fn handle(
         .unwrap())
 }
 
-async fn run_tunnel(upgraded: hyper::upgrade::Upgraded, host: String, state: SharedState, category: &'static str, peer_ip: Option<String>) {
+async fn run_tunnel(
+    upgraded: hyper::upgrade::Upgraded,
+    host: String,
+    state: SharedState,
+    category: &'static str,
+    peer_ip: Option<String>,
+    profile: crate::obfuscation::Profile,
+) {
     let (name, port) = host
         .rsplit_once(':')
         .and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h, p)))
@@ -724,7 +966,8 @@ async fn run_tunnel(upgraded: hyper::upgrade::Upgraded, host: String, state: Sha
 
     let connect = async {
         let addrs = state.resolver.lookup_ip(name).await?;
-        let mut last_err = std::io::Error::new(std::io::ErrorKind::NotFound, "DoH returned no addresses");
+        let mut last_err =
+            std::io::Error::new(std::io::ErrorKind::NotFound, "DoH returned no addresses");
         for ip in addrs.iter() {
             match tokio::net::TcpStream::connect((ip, port)).await {
                 Ok(stream) => return Ok(stream),
@@ -745,10 +988,36 @@ async fn run_tunnel(upgraded: hyper::upgrade::Upgraded, host: String, state: Sha
                 category = category,
                 "tunnel established"
             );
-            emit_full(&state, "tunnel_open", &host, peer_ip.clone(), 0, 0, None, false, serde_json::json!({
-                "kind":     "connect",
-                "category": category,
-            }));
+
+            // Emit obfuscated event if profile is not None
+            if !matches!(profile, crate::obfuscation::Profile::None) {
+                state.obfuscated_count.fetch_add(1, Ordering::Relaxed);
+                info!(
+                    target: "audit",
+                    event = "tunnel_obfuscated",
+                    kind = "connect",
+                    host = %host,
+                    profile = profile.as_str(),
+                    category = category,
+                    "connect tunnel obfuscated"
+                );
+            }
+
+            emit_full(
+                &state,
+                "tunnel_open",
+                &host,
+                peer_ip.clone(),
+                0,
+                0,
+                None,
+                false,
+                serde_json::json!({
+                    "kind":             "connect",
+                    "category":         category,
+                    "obfuscation_profile": profile.as_str(),
+                }),
+            );
             state.record_tunnel_open();
             let mut client = TokioIo::new(upgraded);
             match tokio::io::copy_bidirectional(&mut client, &mut upstream).await {
@@ -765,13 +1034,23 @@ async fn run_tunnel(upgraded: hyper::upgrade::Upgraded, host: String, state: Sha
                         category = category,
                         "tunnel closed"
                     );
-                    emit_full(&state, "tunnel_close", &host, peer_ip, up, down, None, false, serde_json::json!({
-                        "kind":        "connect",
-                        "category":    category,
-                        "bytes_up":    up,
-                        "bytes_down":  down,
-                        "duration_ms": start.elapsed().as_millis(),
-                    }));
+                    emit_full(
+                        &state,
+                        "tunnel_close",
+                        &host,
+                        peer_ip,
+                        up,
+                        down,
+                        None,
+                        false,
+                        serde_json::json!({
+                            "kind":        "connect",
+                            "category":    category,
+                            "bytes_up":    up,
+                            "bytes_down":  down,
+                            "duration_ms": start.elapsed().as_millis(),
+                        }),
+                    );
                 }
                 Err(e) => {
                     state.record_tunnel_close(0, 0);

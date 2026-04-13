@@ -5,13 +5,13 @@ edition = "2021"
 
 [dependencies]
 axum = { version = "0.7", features = ["ws"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.40", features = ["full"] }
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "http2", "server", "tokio"] }
 http-body-util = "0.1"
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["set-header", "fs", "trace", "cors"] }
-tracing = "0.1"
+tracing = "0.1.40"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -25,7 +25,6 @@ dashmap = "6"
 socket2 = { version = "0.5", features = ["all"] }
 oracle = { version = "0.6", optional = true }
 subtle = "2"
-boringtun = { path = "../boringtun", features = ["device"] }
 
 [features]
 oracle-db = ["oracle"]

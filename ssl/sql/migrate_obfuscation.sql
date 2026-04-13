@@ -1,0 +1,1 @@
+ALTER TABLE proxy_events ADD (obfuscation_profile VARCHAR2(32));

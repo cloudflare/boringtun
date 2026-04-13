@@ -1,0 +1,36 @@
+name: SSL Proxy Docker Tests
+
+on:
+  push:
+    paths:
+      - 'ssl/**'
+      - '.github/workflows/ssl-docker.yml'
+  pull_request:
+    paths:
+      - 'ssl/**'
+      - '.github/workflows/ssl-docker.yml'
+
+jobs:
+  test:
+    name: Docker Container Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build docker image
+        working-directory: ./ssl
+        run: docker compose build
+
+      - name: Run cargo tests inside container
+        working-directory: ./ssl
+        run: docker compose run --rm rust-proxy cargo test --workspace
+
+      - name: Run smoke test
+        working-directory: ./ssl
+        run: ./tests/smoke.sh

@@ -846,4 +846,92 @@ mod tests {
             t.join().unwrap();
         }
     }
+
+    #[test]
+    #[ignore]
+    /// Test TUN device creation and teardown lifecycle
+    fn test_tun_device_creation_teardown() {
+        let addr_v4 = next_ip();
+        let addr_v6 = next_ip_v6();
+
+        // Create device with embedded path configuration
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
+        let device_name = wg.name.clone();
+
+        // Verify device exists after creation
+        #[cfg(target_os = "macos")]
+        {
+            let output = std::process::Command::new("ifconfig")
+                .arg(&device_name)
+                .output()
+                .expect("Failed to run ifconfig");
+            assert!(
+                output.status.success(),
+                "TUN device should exist after creation"
+            );
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let output = std::process::Command::new("ip")
+                .args(["link", "show", &device_name])
+                .output()
+                .expect("Failed to run ip link");
+            assert!(
+                output.status.success(),
+                "TUN device should exist after creation"
+            );
+        }
+
+        // Start device, verify it comes up properly
+        wg.start();
+
+        #[cfg(target_os = "macos")]
+        {
+            let output = std::process::Command::new("ifconfig")
+                .arg(&device_name)
+                .output()
+                .unwrap();
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            assert!(output_str.contains("UP"), "Interface should be in UP state");
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let output = std::process::Command::new("ip")
+                .args(["link", "show", &device_name])
+                .output()
+                .unwrap();
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            assert!(output_str.contains("UP"), "Interface should be in UP state");
+        }
+
+        // Drop the handle to trigger teardown
+        drop(wg);
+
+        // Verify device is cleaned up properly after drop
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        #[cfg(target_os = "macos")]
+        {
+            let output = std::process::Command::new("ifconfig")
+                .arg(&device_name)
+                .output();
+            assert!(
+                output.is_err() || !output.unwrap().status.success(),
+                "TUN device should be destroyed after handle is dropped"
+            );
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let output = std::process::Command::new("ip")
+                .args(["link", "show", &device_name])
+                .output();
+            assert!(
+                output.is_err() || !output.unwrap().status.success(),
+                "TUN device should be destroyed after handle is dropped"
+            );
+        }
+    }
 }

@@ -7,6 +7,7 @@ CREATE INDEX ix_pe_time       ON proxy_events (event_time DESC)    LOCAL;
 CREATE INDEX ix_pe_host       ON proxy_events (host, event_time)   LOCAL;
 CREATE INDEX ix_pe_blocked    ON proxy_events (blocked, event_time) LOCAL;
 CREATE INDEX ix_pe_type_time  ON proxy_events (event_type, event_time DESC) LOCAL;
+CREATE INDEX ix_pe_obfuscation ON proxy_events (obfuscation_profile, event_time) LOCAL;
 
 -- wg_events: peer timeline, endpoint correlation
 CREATE INDEX ix_wg_time       ON wg_events (event_time DESC)              LOCAL;

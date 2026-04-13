@@ -1,8 +1,11 @@
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Path, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
+    },
     http::StatusCode,
-    Json,
     response::IntoResponse,
+    Json,
 };
 use serde::Serialize;
 use std::sync::atomic::Ordering;
@@ -14,30 +17,30 @@ use crate::state::SharedState;
 /// Serializable snapshot of one host's heuristic stats.
 #[derive(Serialize)]
 pub struct HostSnapshot {
-    pub host:                 String,
-    pub blocked_attempts:     u64,
+    pub host: String,
+    pub blocked_attempts: u64,
     pub blocked_bytes_approx: u64,
-    pub frequency_hz:         f64,
-    pub risk_score:           f64,
-    pub verdict:              &'static str,
-    pub tarpit_held_ms:       u64,
-    pub battery_saved_mwh:    f64,
-    pub category:             &'static str,
-    pub consecutive_blocks:   u32,
+    pub frequency_hz: f64,
+    pub risk_score: f64,
+    pub verdict: &'static str,
+    pub tarpit_held_ms: u64,
+    pub battery_saved_mwh: f64,
+    pub category: &'static str,
+    pub consecutive_blocks: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub iat_ms:               Option<u64>,
+    pub iat_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tls_ver:              Option<String>,
+    pub tls_ver: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub alpn:                 Option<String>,
+    pub alpn: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cipher_suites_count:  Option<u8>,
+    pub cipher_suites_count: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ja3_lite:             Option<String>,
+    pub ja3_lite: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolved_ip:          Option<String>,
+    pub resolved_ip: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub asn_org:              Option<String>,
+    pub asn_org: Option<String>,
 }
 
 /// GET /health — liveness probe; verifies Oracle DB connectivity when the
@@ -46,13 +49,15 @@ pub async fn health() -> impl IntoResponse {
     #[cfg(feature = "oracle-db")]
     {
         let conn_str = std::env::var("ORACLE_CONN").unwrap_or_default();
-        let user     = std::env::var("ORACLE_USER").unwrap_or_default();
-        let pass     = std::env::var("ORACLE_PASS").unwrap_or_default();
+        let user = std::env::var("ORACLE_USER").unwrap_or_default();
+        let pass = std::env::var("ORACLE_PASS").unwrap_or_default();
         let result = tokio::time::timeout(
             tokio::time::Duration::from_secs(5),
             tokio::task::spawn_blocking(move || {
-                oracle::Connection::connect(&user, &pass, &conn_str)
-                    .and_then(|conn| conn.query_row_as::<u32>("SELECT 1 FROM DUAL", &[]).map(|_| ()))
+                oracle::Connection::connect(&user, &pass, &conn_str).and_then(|conn| {
+                    conn.query_row_as::<u32>("SELECT 1 FROM DUAL", &[])
+                        .map(|_| ())
+                })
             }),
         )
         .await;
@@ -75,8 +80,8 @@ pub async fn health() -> impl IntoResponse {
 pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::CancellationToken) {
     tokio::spawn(async move {
         let conn_str = std::env::var("ORACLE_CONN").unwrap_or_default();
-        let user     = std::env::var("ORACLE_USER").unwrap_or_default();
-        let pass     = std::env::var("ORACLE_PASS").unwrap_or_default();
+        let user = std::env::var("ORACLE_USER").unwrap_or_default();
+        let pass = std::env::var("ORACLE_PASS").unwrap_or_default();
         loop {
             tokio::select! {
                 _ = token.cancelled() => { info!("oracle flusher shutting down"); return; }
@@ -85,26 +90,30 @@ pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::Cancell
             let rows: Vec<_> = state
                 .host_stats
                 .iter()
-                .map(|e| (
-                    e.key().clone(),
-                    e.blocked_attempts,
-                    e.blocked_bytes_approx,
-                    (e.frequency_hz() * 100.0).round() / 100.0,
-                    e.verdict(),
-                    e.category,
-                    (e.risk_score() * 100.0).round() / 100.0,
-                    e.tarpit_held_ms,
-                    e.iat_ms,
-                    e.consecutive_blocks,
-                    e.last_verdict,
-                    e.tls_ver.clone(),
-                    e.alpn.clone(),
-                    e.ja3_lite.clone(),
-                    e.resolved_ip.clone(),
-                    e.asn_org.clone(),
-                ))
+                .map(|e| {
+                    (
+                        e.key().clone(),
+                        e.blocked_attempts,
+                        e.blocked_bytes_approx,
+                        (e.frequency_hz() * 100.0).round() / 100.0,
+                        e.verdict(),
+                        e.category,
+                        (e.risk_score() * 100.0).round() / 100.0,
+                        e.tarpit_held_ms,
+                        e.iat_ms,
+                        e.consecutive_blocks,
+                        e.last_verdict,
+                        e.tls_ver.clone(),
+                        e.alpn.clone(),
+                        e.ja3_lite.clone(),
+                        e.resolved_ip.clone(),
+                        e.asn_org.clone(),
+                    )
+                })
                 .collect();
-            if rows.is_empty() { continue; }
+            if rows.is_empty() {
+                continue;
+            }
             let (cs, u, p) = (conn_str.clone(), user.clone(), pass.clone());
             let flush = tokio::task::spawn_blocking(move || {
                 let conn = oracle::Connection::connect(&u, &p, &cs)?;
@@ -147,8 +156,29 @@ pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::Cancell
                                    s.tls_ver, s.alpn, s.ja3_lite, s.resolved_ip, s.asn_org)";
                 let mut stmt = conn.statement(sql).build()?;
                 let mut flushed = 0usize;
-                for (host, attempts, bytes, hz, verdict, cat, risk, tarpit, iat, streak, lv, tv, alpn, ja3, ip, asn) in &rows {
-                    match stmt.execute(&[host, attempts, bytes, hz, verdict, cat, risk, tarpit, iat, streak, lv, tv, alpn, ja3, ip, asn]) {
+                for (
+                    host,
+                    attempts,
+                    bytes,
+                    hz,
+                    verdict,
+                    cat,
+                    risk,
+                    tarpit,
+                    iat,
+                    streak,
+                    lv,
+                    tv,
+                    alpn,
+                    ja3,
+                    ip,
+                    asn,
+                ) in &rows
+                {
+                    match stmt.execute(&[
+                        host, attempts, bytes, hz, verdict, cat, risk, tarpit, iat, streak, lv, tv,
+                        alpn, ja3, ip, asn,
+                    ]) {
                         Ok(_) => flushed += 1,
                         Err(e) => tracing::warn!(host = %host, %e, "failed to flush row"),
                     }
@@ -157,9 +187,9 @@ pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::Cancell
                 Ok::<usize, oracle::Error>(flushed)
             });
             match tokio::time::timeout(tokio::time::Duration::from_secs(30), flush).await {
-                Ok(Ok(Ok(n)))  => info!(flushed = n, "oracle flush complete"),
+                Ok(Ok(Ok(n))) => info!(flushed = n, "oracle flush complete"),
                 Ok(Ok(Err(e))) => error!(%e, "oracle flush failed"),
-                _              => error!("oracle flush timed out or panicked"),
+                _ => error!("oracle flush timed out or panicked"),
             }
         }
     });
@@ -168,22 +198,22 @@ pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::Cancell
 fn to_snapshot(host: String, e: &crate::state::HostStats) -> HostSnapshot {
     HostSnapshot {
         host,
-        blocked_attempts:     e.blocked_attempts,
+        blocked_attempts: e.blocked_attempts,
         blocked_bytes_approx: e.blocked_bytes_approx,
-        frequency_hz:         (e.frequency_hz() * 100.0).round() / 100.0,
-        risk_score:           e.risk_score().round(),
-        verdict:              e.verdict(),
-        tarpit_held_ms:       e.tarpit_held_ms,
-        battery_saved_mwh:    (e.battery_saved_approx() * 1_000_000.0).round() / 1_000_000.0,
-        category:             e.category,
-        consecutive_blocks:   e.consecutive_blocks,
-        iat_ms:               e.iat_ms,
-        tls_ver:              e.tls_ver.clone(),
-        alpn:                 e.alpn.clone(),
-        cipher_suites_count:  e.cipher_suites_count,
-        ja3_lite:             e.ja3_lite.clone(),
-        resolved_ip:          e.resolved_ip.clone(),
-        asn_org:              e.asn_org.clone(),
+        frequency_hz: (e.frequency_hz() * 100.0).round() / 100.0,
+        risk_score: e.risk_score().round(),
+        verdict: e.verdict(),
+        tarpit_held_ms: e.tarpit_held_ms,
+        battery_saved_mwh: (e.battery_saved_approx() * 1_000_000.0).round() / 1_000_000.0,
+        category: e.category,
+        consecutive_blocks: e.consecutive_blocks,
+        iat_ms: e.iat_ms,
+        tls_ver: e.tls_ver.clone(),
+        alpn: e.alpn.clone(),
+        cipher_suites_count: e.cipher_suites_count,
+        ja3_lite: e.ja3_lite.clone(),
+        resolved_ip: e.resolved_ip.clone(),
+        asn_org: e.asn_org.clone(),
     }
 }
 
@@ -194,7 +224,11 @@ pub async fn hosts_snapshot(State(state): State<SharedState>) -> Json<Vec<HostSn
         .iter()
         .map(|e| to_snapshot(e.key().clone(), e.value()))
         .collect();
-    rows.sort_by(|a, b| b.risk_score.partial_cmp(&a.risk_score).unwrap_or(std::cmp::Ordering::Equal));
+    rows.sort_by(|a, b| {
+        b.risk_score
+            .partial_cmp(&a.risk_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Json(rows)
 }
 
@@ -203,7 +237,8 @@ pub async fn host_detail(
     State(state): State<SharedState>,
     Path(hostname): Path<String>,
 ) -> Result<Json<HostSnapshot>, StatusCode> {
-    state.host_stats
+    state
+        .host_stats
         .get(&hostname)
         .map(|e| Json(to_snapshot(hostname.clone(), e.value())))
         .ok_or(StatusCode::NOT_FOUND)
@@ -212,28 +247,34 @@ pub async fn host_detail(
 /// GET /stats/summary — aggregate overview (Epic 6.4).
 #[derive(Serialize)]
 pub struct StatsSummary {
-    total_hosts:      usize,
-    tarpit_count:     usize,
-    top_category:     Option<String>,
+    total_hosts: usize,
+    tarpit_count: usize,
+    top_category: Option<String>,
     highest_risk_host: Option<String>,
 }
 
 pub async fn stats_summary(State(state): State<SharedState>) -> Json<StatsSummary> {
-    let mut cat_counts: std::collections::HashMap<&'static str, usize> = std::collections::HashMap::new();
+    let mut cat_counts: std::collections::HashMap<&'static str, usize> =
+        std::collections::HashMap::new();
     let mut tarpit_count = 0usize;
     let mut highest_risk: Option<(String, f64)> = None;
     for e in state.host_stats.iter() {
         let v = e.verdict();
-        if v == "TARPIT" { tarpit_count += 1; }
+        if v == "TARPIT" {
+            tarpit_count += 1;
+        }
         *cat_counts.entry(e.category).or_insert(0) += 1;
         let rs = e.risk_score();
         if highest_risk.as_ref().map(|(_, r)| rs > *r).unwrap_or(true) {
             highest_risk = Some((e.key().clone(), rs));
         }
     }
-    let top_category = cat_counts.into_iter().max_by_key(|(_, c)| *c).map(|(k, _)| k.to_string());
+    let top_category = cat_counts
+        .into_iter()
+        .max_by_key(|(_, c)| *c)
+        .map(|(k, _)| k.to_string());
     Json(StatsSummary {
-        total_hosts:       state.host_stats.len(),
+        total_hosts: state.host_stats.len(),
         tarpit_count,
         top_category,
         highest_risk_host: highest_risk.map(|(h, _)| h),
@@ -306,6 +347,7 @@ pub fn spawn_stats_poller(state: SharedState, token: tokio_util::sync::Cancellat
                 "bytes_up":       bytes_up,
                 "bytes_down":     bytes_down,
                 "blocked":        state.blocked_count.load(Ordering::Relaxed),
+                "obfuscated":     state.obfuscated_count.load(Ordering::Relaxed),
             });
 
             match state.stats_tx.send(stats.to_string()) {

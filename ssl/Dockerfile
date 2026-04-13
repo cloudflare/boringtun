@@ -4,15 +4,9 @@ FROM rust:1.86-slim AS builder
 ARG CARGO_FEATURES="oracle-db"
 WORKDIR /app
 COPY lib-linux /opt/instantclient
-COPY Cargo.toml Cargo.lock ./
-RUN mkdir src \
- && echo "fn main(){}" > src/main.rs \
- && OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES" \
- && rm -rf src
-COPY src ./src
-RUN touch src/main.rs \
- && OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES"
-RUN cargo install boringtun-cli --version 0.7.0 --locked --root /opt/boringtun
+COPY . ./
+RUN OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES" -p ssl-proxy
+RUN OCI_LIB_DIR=/opt/instantclient cargo build --release -p boringtun-cli
 
 # debian:bookworm-slim is required (not alpine) because Oracle Instant Client
 # depends on libaio1, which is glibc-only and unavailable on musl/alpine.
@@ -29,7 +23,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY --from=coredns /coredns /usr/local/bin/coredns
 COPY --from=builder /app/target/release/ssl-proxy .
-COPY --from=builder /opt/boringtun/bin/boringtun-cli /usr/local/bin/boringtun-cli
+COPY --from=builder /app/target/release/boringtun-cli /usr/local/bin/boringtun-cli
 COPY static ./static
 COPY --from=builder /opt/instantclient /app/lib
 COPY wallet ./wallet
