@@ -238,10 +238,12 @@ impl AppState {
         let db = {
             let conn_str = config.oracle_conn.clone();
             let user = config.oracle_user.clone();
-            let pass = std::fs::read_to_string(&config.oracle_pass_file)
-                .unwrap_or_default()
-                .trim_end_matches(&['\n', '\r'][..])
-                .to_string();
+            let pass = config.oracle_pass.clone().unwrap_or_else(|| {
+                std::fs::read_to_string(&config.oracle_pass_file)
+                    .unwrap_or_default()
+                    .trim_end_matches(&['\n', '\r'][..])
+                    .to_string()
+            });
             if conn_str.is_empty() || user.is_empty() {
                 tracing::warn!(
                     "oracle-db feature enabled but ORACLE_CONN/ORACLE_USER not set; \

@@ -12,6 +12,7 @@ pub struct Config {
     pub log_format: String,
     pub oracle_conn: String,
     pub oracle_user: String,
+    pub oracle_pass: Option<String>,
     pub oracle_pass_file: String,
     pub obfuscation_profiles: String,
     pub obfuscation_enabled: bool,
@@ -100,6 +101,7 @@ impl Config {
         let log_format = std::env::var("LOG_FORMAT").unwrap_or_else(|_| "human".to_string());
         let oracle_conn = std::env::var("ORACLE_CONN").unwrap_or_default();
         let oracle_user = std::env::var("ORACLE_USER").unwrap_or_default();
+        let oracle_pass = std::env::var("ORACLE_PASS").ok().filter(|s| !s.is_empty());
         let oracle_pass_file = std::env::var("ORACLE_PASS_FILE").unwrap_or_default();
         let obfuscation_profiles = std::env::var("OBFUSCATION_PROFILES").unwrap_or_default();
         let obfuscation_enabled = std::env::var("OBFUSCATION_ENABLED")
@@ -141,6 +143,7 @@ impl Config {
             log_format,
             oracle_conn,
             oracle_user,
+            oracle_pass,
             oracle_pass_file,
             obfuscation_profiles,
             obfuscation_enabled,
