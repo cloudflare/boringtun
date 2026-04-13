@@ -63,6 +63,7 @@ fn emit_full(
     crate::db::insert_proxy_event(
         state.db.clone(),
         crate::db::ProxyEvent {
+            obfuscation_profile: None,
             event_type: event.to_string(),
             host: host.to_string(),
             peer_ip,
