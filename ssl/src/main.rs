@@ -132,14 +132,21 @@ async fn main() {
             move |req: Request<Body>, next: Next| {
                 let key = config.admin_api_key.clone();
                 async move {
+                    // If no admin API key configured, deny all access to admin endpoints
+                    let Some(ref valid_key) = key else {
+                        return StatusCode::NOT_FOUND.into_response();
+                    };
+
                     let provided = req
                         .headers()
                         .get("x-api-key")
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("");
-                    if key.is_empty() || !constant_time_eq(provided, &key) {
+
+                    if !constant_time_eq(provided, valid_key) {
                         return StatusCode::UNAUTHORIZED.into_response();
                     }
+
                     next.run(req).await
                 }
             },
