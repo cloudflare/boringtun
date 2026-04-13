@@ -10,7 +10,7 @@ networks:
 
 services:
   boringtun:
-    image: ghcr.io/cloudflare/boringtun:latest
+    image: ghcr.io/leonnicolas/boringtun:latest
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
