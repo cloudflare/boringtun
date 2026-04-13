@@ -26,11 +26,11 @@ WORKDIR /app
 COPY --from=coredns /coredns /usr/local/bin/coredns
 COPY --from=builder /app/target/release/ssl-proxy .
 COPY --from=builder /app/target/release/boringtun-cli /usr/local/bin/
-COPY ssl/static ./static
+COPY --from=builder /app/ssl/static ./static
 COPY --from=builder /opt/instantclient /app/lib
-COPY ssl/wallet ./wallet
-COPY ssl/docker/wg_up.sh /usr/local/bin/wg_up.sh
-COPY ssl/docker/entrypoint.sh /usr/local/bin/start-proxy-wg
+COPY --from=builder /app/ssl/wallet ./wallet
+COPY --from=builder /app/ssl/docker/wg_up.sh /usr/local/bin/wg_up.sh
+COPY --from=builder /app/ssl/docker/entrypoint.sh /usr/local/bin/start-proxy-wg
 RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh /usr/local/bin/boringtun-cli \
  && groupadd -r proxyuser && useradd -r -g proxyuser proxyuser \
  && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh /usr/local/bin/boringtun-cli \
