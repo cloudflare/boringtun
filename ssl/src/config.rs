@@ -19,7 +19,9 @@ pub struct Config {
     pub fox_ua_override: String,
 }
 
-#[derive(Debug, thiserror::Error)]
+use thiserror::Error;
+
+#[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("PROXY_PORT must not equal WG_PORT")]
     PortConflict,

@@ -159,7 +159,7 @@ pub async fn handler(
     }
 
     // Classify obfuscation profile after blocklist check
-    let profile = obfuscation::classify_obfuscation(&hostname);
+    let profile = obfuscation::classify_obfuscation(&hostname, &state.config);
 
     // Rewrite absolute URI to origin form and forward to the correct host.
     if req.uri().scheme().is_some() {
@@ -191,7 +191,7 @@ pub async fn handler(
 
     // Apply request header obfuscation for Fox profiles
     if !matches!(profile, obfuscation::Profile::None) {
-        obfuscation::apply_request_headers(req.headers_mut(), &profile);
+        obfuscation::apply_request_headers(req.headers_mut(), &profile, &state.config);
         state.obfuscated_count.fetch_add(1, Ordering::Relaxed);
     }
 

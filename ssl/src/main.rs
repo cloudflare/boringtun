@@ -63,7 +63,7 @@ async fn main() {
 
     let shutdown = CancellationToken::new();
 
-    let config = config::Config::from_env();
+    let config = config::Config::from_env_or_panic();
 
     // LOG_FORMAT=json  →  newline-delimited JSON (pipe to Vector/Filebeat)
     // anything else    →  human-readable (default for dev)
@@ -84,7 +84,7 @@ async fn main() {
         events_tx,
         config.wg_interface.clone(),
         config.tarpit_max_connections,
-        config,
+        config.clone(),
         #[cfg(feature = "oracle-db")]
         shutdown.clone(),
     );

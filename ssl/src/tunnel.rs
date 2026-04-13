@@ -4,7 +4,7 @@ use axum::{
 };
 use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
-use std::os::fd::AsRawFd;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Semaphore;
