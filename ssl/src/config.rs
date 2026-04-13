@@ -7,7 +7,7 @@ pub struct Config {
     pub wg_interface: Option<String>,
     pub max_connections: usize,
     pub tarpit_max_connections: usize,
-    pub admin_api_key: String,
+    pub admin_api_key: Option<String>,
     pub cors_allowed_origins: Vec<String>,
     pub log_format: String,
     pub oracle_conn: String,
@@ -90,7 +90,7 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(64);
-        let admin_api_key = std::env::var("ADMIN_API_KEY").unwrap_or_default();
+        let admin_api_key = std::env::var("ADMIN_API_KEY").ok().filter(|s| !s.is_empty());
         let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
             .unwrap_or_default()
             .split(',')
@@ -127,9 +127,7 @@ impl Config {
         if oracle_user.is_empty() && cfg!(feature = "oracle-db") {
             return Err(ConfigError::MissingOracleUser);
         }
-        if admin_api_key.is_empty() {
-            return Err(ConfigError::MissingAdminApiKey);
-        }
+
 
         Ok(Self {
             proxy_port,

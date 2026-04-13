@@ -38,15 +38,28 @@ run_hooks() {
 
 cleanup() {
     set +e
+
+    # Signal processes first (in correct order)
+    if [ -n "${PROXY_PID:-}" ]; then
+        kill -TERM "$PROXY_PID" 2>/dev/null || true
+    fi
+    if [ -n "${BORINGTUN_PID:-}" ]; then
+        kill -TERM "$BORINGTUN_PID" 2>/dev/null || true
+    fi
+    if [ -n "${COREDNS_PID:-}" ]; then
+        kill -TERM "$COREDNS_PID" 2>/dev/null || true
+    fi
+
+    # Wait for boringtun to exit cleanly before deleting interface
+    if [ -n "${BORINGTUN_PID:-}" ]; then
+        wait "$BORINGTUN_PID" 2>/dev/null || true
+        sleep 0.2
+    fi
+
+    # Now safely delete network interface
     if ip link show dev "$INTERFACE_NAME" >/dev/null 2>&1; then
         run_hooks PostDown || true
         ip link delete dev "$INTERFACE_NAME" || true
-    fi
-    if [ -n "${COREDNS_PID:-}" ]; then
-        kill "$COREDNS_PID" 2>/dev/null || true
-    fi
-    if [ -n "${BORINGTUN_PID:-}" ]; then
-        kill "$BORINGTUN_PID" 2>/dev/null || true
     fi
 }
 
@@ -127,10 +140,27 @@ echo "starting ssl-proxy"
 "$PROXY_BIN" &
 PROXY_PID=$!
 
-# Monitor child processes with wait -n
+# Monitor critical child processes
 while true; do
-    if ! wait -n; then
-        echo "A child process exited unexpectedly"
+    # Wait for any child to exit
+    wait -n
+    exit_code=$?
+
+    # Check if critical processes are still alive
+    if ! kill -0 "$BORINGTUN_PID" 2>/dev/null; then
+        echo "boringtun exited unexpectedly, restarting container"
         exit 1
+    fi
+
+    if ! kill -0 "$COREDNS_PID" 2>/dev/null; then
+        echo "coredns exited unexpectedly, restarting container"
+        exit 1
+    fi
+
+    # If ssl-proxy died, restart it
+    if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+        echo "ssl-proxy exited, restarting..."
+        "$PROXY_BIN" &
+        PROXY_PID=$!
     fi
 done

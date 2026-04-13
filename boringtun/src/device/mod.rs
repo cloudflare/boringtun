@@ -787,6 +787,12 @@ impl Device {
                             if ek == io::ErrorKind::Interrupted || ek == io::ErrorKind::WouldBlock {
                                 break;
                             }
+                            // EBADF (File descriptor in bad state) means interface was deleted - exit cleanly
+                            if let Some(os_err) = e.raw_os_error() {
+                                if os_err == 77 || os_err == 9 { // 77=EBADFD on Linux, 9=EBADF general
+                                    return Action::Exit;
+                                }
+                            }
                             tracing::error!("Fatal read error on tun interface: {:?}", e);
                             return Action::Exit;
                         }
