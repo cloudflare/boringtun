@@ -2,10 +2,10 @@
 members = ["boringtun", "boringtun-cli", "ssl"]
 resolver = "2"
 
-[workspace.dependencies]
-time = "=0.3.36"
-time-core = "=0.1.7"
-time-macros = "=0.2.26"
+[patch.crates-io]
+time = { version = "=0.3.36" }
+time-core = { version = "=0.1.7" }
+time-macros = { version = "=0.2.26" }
 
 [profile.release]
 lto = true        # Enable full link-time optimization.
