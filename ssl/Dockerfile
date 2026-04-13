@@ -8,6 +8,8 @@ COPY boringtun ./boringtun
 COPY boringtun-cli ./boringtun-cli
 COPY ssl ./ssl
 COPY Cargo.toml ./
+# Pin time dependencies to compatible versions for Rust 1.86.0
+RUN cargo update time@0.3.47 --precise 0.3.36
 RUN OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES" -p ssl-proxy -p boringtun-cli
 
 # debian:bookworm-slim is required (not alpine) because Oracle Instant Client
