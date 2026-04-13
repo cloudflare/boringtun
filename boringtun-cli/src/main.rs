@@ -10,7 +10,17 @@ use std::os::unix::net::UnixDatagram;
 use std::process::exit;
 use tracing::Level;
 
-fn check_tun_name(_v: String) -> Result<(), String> {
+fn check_tun_name(mut _v: String) -> Result<(), String> {
+    // Backwards compatibility: if the argument looks like a .conf file path,
+    // extract interface name before validating
+    if _v.ends_with(".conf") {
+        _v = std::path::Path::new(&_v)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&_v)
+            .to_string();
+    }
+
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     {
         if boringtun::device::tun::parse_utun_name(&_v).is_ok() {
@@ -90,6 +100,17 @@ fn main() {
     let uapi_fd: i32 = matches.value_of_t("uapi-fd").unwrap_or_else(|e| e.exit());
     let tun_fd: isize = matches.value_of_t("tun-fd").unwrap_or_else(|e| e.exit());
     let mut tun_name = matches.value_of("INTERFACE_NAME").unwrap();
+
+    // Backwards compatibility: if interface name argument looks like a .conf file path,
+    // extract the actual interface name from the filename (basename without .conf extension)
+    // This allows compatibility with old scripts that pass full config file path
+    if tun_name.ends_with(".conf") {
+        tun_name = std::path::Path::new(tun_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(tun_name);
+    }
+
     if tun_fd >= 0 {
         tun_name = matches.value_of("tun-fd").unwrap();
     }

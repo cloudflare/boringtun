@@ -25,8 +25,9 @@ COPY --from=builder /app/target/release/ssl-proxy .
 COPY static ./static
 COPY --from=builder /opt/instantclient /app/lib
 COPY wallet ./wallet
+COPY docker/wg_up.sh /usr/local/bin/wg_up.sh
 COPY docker/entrypoint.sh /usr/local/bin/start-proxy-wg
-RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg \
+RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh \
  && groupadd -r proxyuser && useradd -r -g proxyuser proxyuser \
  && setcap cap_net_admin+eip /usr/local/bin/coredns \
  && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg
