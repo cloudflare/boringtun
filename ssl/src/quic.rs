@@ -302,14 +302,6 @@ async fn handle_h3_request(
         loop {
             match h3_recv.recv_data().await {
                 Ok(Some(mut buf)) => {
-                    let chunk: &[u8] = bytes::Buf::chunk(&buf);
-                    let len = chunk.len();
-                    if let Err(e) = upstream_write.write_all(chunk).await {
-                        debug!(%host, %e, "QUIC: upstream write failed");
-                        break;
-                    }
-                    total += len as u64;
-                Ok(Some(mut buf)) => {
                     while bytes::Buf::has_remaining(&buf) {
                         let chunk: &[u8] = bytes::Buf::chunk(&buf);
                         let len = chunk.len();
@@ -321,6 +313,13 @@ async fn handle_h3_request(
                         bytes::Buf::advance(&mut buf, len);
                     }
                 }
+                Ok(None) => break,
+                Err(e) => {
+                    debug!(%host, %e, "QUIC: H3 recv failed");
+                    break;
+                }
+            }
+        }
         total
     };
 
