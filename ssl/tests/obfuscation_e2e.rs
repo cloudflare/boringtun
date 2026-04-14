@@ -72,7 +72,11 @@ mod tests {
             captured_headers.contains_key("user-agent"),
             "User-Agent header should be present in captured headers"
         );
-        let ua = captured_headers.get("user-agent").unwrap().to_str().unwrap();
+        let ua = captured_headers
+            .get("user-agent")
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert_ne!(
             ua, "boringtun/1.0",
             "Original User-Agent should be overridden in actual request"

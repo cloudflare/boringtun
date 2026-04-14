@@ -93,7 +93,9 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(64);
-        let admin_api_key = std::env::var("ADMIN_API_KEY").ok().filter(|s| !s.is_empty());
+        let admin_api_key = std::env::var("ADMIN_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
         let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
             .unwrap_or_default()
             .split(',')
@@ -120,7 +122,9 @@ impl Config {
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
                 .to_string()
         });
-        let tls_cert_path = std::env::var("TLS_CERT_PATH").ok().filter(|s| !s.is_empty());
+        let tls_cert_path = std::env::var("TLS_CERT_PATH")
+            .ok()
+            .filter(|s| !s.is_empty());
         let tls_key_path = std::env::var("TLS_KEY_PATH").ok().filter(|s| !s.is_empty());
 
         // Validate required fields
@@ -133,7 +137,6 @@ impl Config {
         if oracle_user.is_empty() && cfg!(feature = "oracle-db") {
             return Err(ConfigError::MissingOracleUser);
         }
-
 
         Ok(Self {
             proxy_port,

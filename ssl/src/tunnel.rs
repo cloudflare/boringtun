@@ -296,16 +296,16 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
             #[cfg(feature = "oracle-db")]
             crate::db::insert_proxy_event(
                 state.db.clone(),
-            crate::db::ProxyEvent {
-                obfuscation_profile: None,
-                event_type: "block".to_string(),
-                host: name.clone(),
-                peer_ip: peer_ip.clone(),
-                bytes_up: 0,
-                bytes_down: 0,
-                status_code: None,
-                blocked: true,
-                raw_json: raw,
+                crate::db::ProxyEvent {
+                    obfuscation_profile: None,
+                    event_type: "block".to_string(),
+                    host: name.clone(),
+                    peer_ip: peer_ip.clone(),
+                    bytes_up: 0,
+                    bytes_down: 0,
+                    status_code: None,
+                    blocked: true,
+                    raw_json: raw,
                 },
             );
             if verdict == "TARPIT" {

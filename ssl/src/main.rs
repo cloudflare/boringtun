@@ -30,10 +30,10 @@ use hyper_util::{
 };
 use std::net::SocketAddr;
 use tokio::{sync::broadcast, task::JoinSet};
+use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
-use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info, warn};
 
 fn constant_time_eq(a: &str, b: &str) -> bool {
@@ -187,27 +187,26 @@ async fn main() {
     info!(%addr, "proxy + dashboard active");
 
     // Build TLS acceptor if cert/key paths are configured
-    let tls_acceptor: Option<TlsAcceptor> = if let (Some(cert_path), Some(key_path)) =
-        (&config.tls_cert_path, &config.tls_key_path)
-    {
-        let cert_pem = std::fs::read(cert_path).expect("failed to read TLS cert");
-        let key_pem = std::fs::read(key_path).expect("failed to read TLS key");
-        let certs: Vec<_> = rustls_pemfile::certs(&mut &cert_pem[..])
-            .collect::<Result<_, _>>()
-            .expect("invalid cert PEM");
-        let key = rustls_pemfile::private_key(&mut &key_pem[..])
-            .expect("failed to parse key PEM")
-            .expect("no private key found");
-        let tls_config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .expect("invalid TLS config");
-        info!("TLS enabled on proxy listener");
-        Some(TlsAcceptor::from(std::sync::Arc::new(tls_config)))
-    } else {
-        warn!("TLS_CERT_PATH / TLS_KEY_PATH not set \u{2014} proxy listener is PLAINTEXT");
-        None
-    };
+    let tls_acceptor: Option<TlsAcceptor> =
+        if let (Some(cert_path), Some(key_path)) = (&config.tls_cert_path, &config.tls_key_path) {
+            let cert_pem = std::fs::read(cert_path).expect("failed to read TLS cert");
+            let key_pem = std::fs::read(key_path).expect("failed to read TLS key");
+            let certs: Vec<_> = rustls_pemfile::certs(&mut &cert_pem[..])
+                .collect::<Result<_, _>>()
+                .expect("invalid cert PEM");
+            let key = rustls_pemfile::private_key(&mut &key_pem[..])
+                .expect("failed to parse key PEM")
+                .expect("no private key found");
+            let tls_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .expect("invalid TLS config");
+            info!("TLS enabled on proxy listener");
+            Some(TlsAcceptor::from(std::sync::Arc::new(tls_config)))
+        } else {
+            warn!("TLS_CERT_PATH / TLS_KEY_PATH not set \u{2014} proxy listener is PLAINTEXT");
+            None
+        };
 
     // Spawn QUIC/H3 listener if TLS is configured
     if config.tls_cert_path.is_some() && config.tls_key_path.is_some() {

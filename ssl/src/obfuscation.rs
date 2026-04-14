@@ -159,8 +159,8 @@ pub fn apply_response_headers(headers: &mut axum::http::HeaderMap, profile: &Pro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::{HeaderMap, HeaderValue};
     use crate::config::Config;
+    use axum::http::{HeaderMap, HeaderValue};
 
     fn test_config() -> Config {
         Config {
@@ -194,9 +194,18 @@ mod tests {
     #[test]
     fn test_classify_obfuscation_fox_news() {
         let config = test_config();
-        assert_eq!(classify_obfuscation("foxnews.com", &config), Profile::FoxNews);
-        assert_eq!(classify_obfuscation("www.foxnews.com", &config), Profile::FoxNews);
-        assert_eq!(classify_obfuscation("api.foxnews.com", &config), Profile::FoxNews);
+        assert_eq!(
+            classify_obfuscation("foxnews.com", &config),
+            Profile::FoxNews
+        );
+        assert_eq!(
+            classify_obfuscation("www.foxnews.com", &config),
+            Profile::FoxNews
+        );
+        assert_eq!(
+            classify_obfuscation("api.foxnews.com", &config),
+            Profile::FoxNews
+        );
         assert_eq!(
             classify_obfuscation("sub.api.foxnews.com", &config),
             Profile::FoxNews
@@ -206,7 +215,10 @@ mod tests {
     #[test]
     fn test_classify_obfuscation_fox_sports() {
         let config = test_config();
-        assert_eq!(classify_obfuscation("foxsports.com", &config), Profile::FoxSports);
+        assert_eq!(
+            classify_obfuscation("foxsports.com", &config),
+            Profile::FoxSports
+        );
         assert_eq!(
             classify_obfuscation("www.foxsports.com", &config),
             Profile::FoxSports
@@ -232,15 +244,27 @@ mod tests {
     #[test]
     fn test_classify_obfuscation_case_insensitive() {
         let config = test_config();
-        assert_eq!(classify_obfuscation("FOXNEWS.COM", &config), Profile::FoxNews);
-        assert_eq!(classify_obfuscation("FoxSports.Com", &config), Profile::FoxSports);
+        assert_eq!(
+            classify_obfuscation("FOXNEWS.COM", &config),
+            Profile::FoxNews
+        );
+        assert_eq!(
+            classify_obfuscation("FoxSports.Com", &config),
+            Profile::FoxSports
+        );
     }
 
     #[test]
     fn test_classify_obfuscation_trailing_dot() {
         let config = test_config();
-        assert_eq!(classify_obfuscation("foxnews.com.", &config), Profile::FoxNews);
-        assert_eq!(classify_obfuscation("www.foxnews.com.", &config), Profile::FoxNews);
+        assert_eq!(
+            classify_obfuscation("foxnews.com.", &config),
+            Profile::FoxNews
+        );
+        assert_eq!(
+            classify_obfuscation("www.foxnews.com.", &config),
+            Profile::FoxNews
+        );
     }
 
     #[test]

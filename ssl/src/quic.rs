@@ -98,11 +98,7 @@ pub async fn run_quic_listener(state: SharedState, config: Config, shutdown: Can
 }
 
 /// Handle a single QUIC connection: accept it, then process HTTP/3 requests.
-async fn handle_quic_connection(
-    incoming: quinn::Incoming,
-    state: SharedState,
-    config: Config,
-) {
+async fn handle_quic_connection(incoming: quinn::Incoming, state: SharedState, config: Config) {
     let connection = match incoming.await {
         Ok(c) => c,
         Err(e) => {
@@ -270,24 +266,20 @@ async fn handle_h3_request(
         Err(last_err)
     };
 
-    let mut upstream = match tokio::time::timeout(
-        tokio::time::Duration::from_secs(10),
-        connect,
-    )
-    .await
-    {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            error!(%host, %e, "QUIC: failed to connect to tunnel target");
-            stream.finish().await.ok();
-            return;
-        }
-        Err(_) => {
-            error!(%host, "QUIC: tunnel connect timed out");
-            stream.finish().await.ok();
-            return;
-        }
-    };
+    let mut upstream =
+        match tokio::time::timeout(tokio::time::Duration::from_secs(10), connect).await {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                error!(%host, %e, "QUIC: failed to connect to tunnel target");
+                stream.finish().await.ok();
+                return;
+            }
+            Err(_) => {
+                error!(%host, "QUIC: tunnel connect timed out");
+                stream.finish().await.ok();
+                return;
+            }
+        };
 
     let start = Instant::now();
     info!(
