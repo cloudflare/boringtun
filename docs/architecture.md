@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart LR
-    C[WireGuard Client] -->|UDP 443| WG[BoringTun / WireGuard]
+    C[WireGuard Client] -->|UDP 443| WG[WireGuard Kernel Module]
     WG --> TUN[TUN Interface wg0]
     TUN --> DNS[CoreDNS Resolver]
     DNS --> PROXY[ssl-proxy]
@@ -28,7 +28,7 @@ flowchart LR
 ## Component Startup Order
 
 1.  **CoreDNS** - Initializes DNS resolver with filtering rules
-2.  **BoringTun** - Creates `wg0` TUN interface, establishes WireGuard encryption layer
+2.  **WireGuard** - Creates `wg0` TUN interface via kernel module, establishes encryption layer
 3.  **ssl-proxy** - Starts HTTP/S interception, obfuscation engine, and audit logging
 
 ## Obfuscation Profiles

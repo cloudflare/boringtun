@@ -7,24 +7,24 @@
 ### 1. Adding a New Obfuscation Profile
 
 #### Steps:
-1.  **Edit `ssl/src/obfuscation.rs`:**
+1.  **Edit `src/obfuscation.rs`:**
     -   Add new domain patterns to the `FOX_DOMAINS` array
     -   Add new variant to the `Profile` enum
     -   Update `as_str()` conversion method
     -   Extend match statement in `classify_obfuscation()`
 
 2.  **Update configuration struct:**
-    -   Add profile enable flag in `ssl/src/config.rs`
+    -   Add profile enable flag in `src/config.rs`
     -   Add environment variable mapping
 
 3.  **Verify implementation:**
     ```bash
-    cd ssl && cargo test obfuscation::tests
+    cargo test obfuscation::tests
     ```
 
 4.  **Rebuild container:**
     ```bash
-    docker compose build rust-proxy
+    docker compose build ssl-proxy
     docker compose up -d
     ```
 
@@ -59,7 +59,7 @@ curl -X POST http://localhost:3000/admin/refresh-blocklist
 
 3.  **Restart service:**
     ```bash
-    docker compose restart rust-proxy
+    docker compose restart ssl-proxy
     ```
 
 > **Important:** All connected clients will require updated configuration with the new server public key.

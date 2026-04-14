@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WireGuard interface setup script
+# WireGuard interface setup script (kernel module)
 # Extracted from entrypoint.sh for testability
 
 cmd() {
@@ -12,27 +12,19 @@ cmd() {
 configure_interface() {
     local mtu
 
-    cmd /usr/local/bin/boringtun-cli --disable-drop-privileges --foreground "$INTERFACE_NAME" &
-    BORINGTUN_PID=$!
+    # Load the WireGuard kernel module (ignore failure — it may already be loaded
+    # or built-in to the kernel)
+    modprobe wireguard 2>/dev/null || true
 
-    for _ in $(seq 1 50); do
-        if ip link show dev "$INTERFACE_NAME" >/dev/null 2>&1; then
-            break
-        fi
-        if ! kill -0 "$BORINGTUN_PID" 2>/dev/null; then
-            echo "boringtun-cli (PID $BORINGTUN_PID) exited unexpectedly before $INTERFACE_NAME appeared" >&2
-            exit 1
-        fi
-        sleep 0.1
-    done
+    # Create the WireGuard interface using the kernel module
+    cmd ip link add dev "$INTERFACE_NAME" type wireguard
+
     if ! ip link show dev "$INTERFACE_NAME" >/dev/null 2>&1; then
         echo "WireGuard interface $INTERFACE_NAME failed to appear" >&2
         exit 1
     fi
 
-    # Apply WireGuard configuration via UAPI (sets ListenPort and other interface parameters)
-    # Command: wg setconf <interface> <(wg-quick strip <config_file>)
-    # This configures the listening port (WG_PORT) through the UAPI socket
+    # Apply WireGuard configuration via wg setconf (sets ListenPort, keys, peers)
     cmd wg setconf "$INTERFACE_NAME" <(wg-quick strip "$WG_CONFIG_PATH")
 
     # Wait for WireGuard interface to report a listening port before starting ssl-proxy

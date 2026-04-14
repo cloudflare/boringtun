@@ -1,66 +1,47 @@
 ---
-description: "Workspace instructions for BoringTun contributors: build, test, platform, and project conventions."
+description: "Instructions for SSL Proxy contributors: build, test, and project conventions."
 ---
 
-# BoringTun Workspace Instructions
+# SSL Proxy Instructions
 
-These instructions help Copilot understand the repository structure, core workflows, and important conventions for `boringtun` development.
+These instructions help Copilot understand the repository structure, core workflows, and important conventions for `ssl-proxy` development.
 
 ## What this repository is
 
-- A Rust workspace with two members: `boringtun` (library) and `boringtun-cli` (userspace WireGuard executable).
-- The root `README.md` is the primary project overview and contains build/test guidance.
-- The repository also contains an `ssl/` folder with a separate SSL proxy/configuration subproject and Docker-based tooling.
+- A Rust project implementing a high-performance HTTP/HTTPS forward proxy with WireGuard VPN integration.
+- Uses kernel WireGuard (not userspace) for VPN tunneling.
+- Includes Docker-based deployment with CoreDNS for DNS resolution.
 
 ## Key paths
 
-- `Cargo.toml` — workspace manifest for the Rust project.
-- `boringtun/Cargo.toml` — main library crate with platform-specific features.
-- `boringtun/src/` — core WireGuard implementation, platform abstraction, and JNI/FFI bindings.
-- `boringtun/src/device/` — device/peer/runtime and OS-specific tunnel implementations.
-- `boringtun/benches/` — benchmark harnesses for crypto and performance.
-- `boringtun-cli/src/main.rs` — CLI entry point.
-- `ssl/` — separate SSL proxy and tooling, not part of the Rust workspace.
+- `Cargo.toml` — package manifest.
+- `src/` — Rust source code (proxy, tunnel, blocklist, obfuscation, dashboard, etc.).
+- `config/` — WireGuard and CoreDNS configuration files.
+- `docker/` — container entrypoint and WireGuard setup scripts.
+- `static/` — dashboard web assets.
+- `sql/` — database schema and migrations.
+- `tests/` — integration tests and smoke tests.
+- `Dockerfile` — container build definition.
+- `docker-compose.yaml` — container orchestration.
 
 ## Build commands
 
-Use `cargo` from the repository root when working with the Rust workspace.
-
-- Build library only:
-  - `cargo build --lib --no-default-features --release`
-- Build executable:
-  - `cargo build --bin boringtun-cli --release`
-- Install executable:
-  - `cargo install boringtun-cli`
-- Run workspace tests:
-  - `cargo test`
-
-## Testing notes
-
-- `sudo` is usually required for tests that create network tunnels.
-- `cargo test` may prompt for a password.
-- Docker is required for some integration or environment-isolated tests in this repository.
+- Build: `cargo build --release`
+- Build with Oracle DB: `cargo build --release --features oracle-db`
+- Test: `cargo test`
+- Lint: `cargo clippy -- -D warnings`
+- Format: `cargo fmt --all --check`
+- Docker: `docker compose build`
 
 ## Project conventions
 
-- Default Rust features are empty; optional features enable JNI, FFI, and device behavior.
-- Platform-specific code is isolated behind OS-target modules such as `tun_linux.rs` and `tun_darwin.rs`.
-- The library exposes both C ABI bindings (`wireguard_ffi.h`) and JNI bindings (`src/jni.rs`).
-- Keep changes focused to the appropriate crate: `boringtun` for protocol/device behavior, `boringtun-cli` for the runtime CLI.
-
-## When to use these instructions
-
-Use this guidance for general development tasks in this repo:
-
-- building or testing the Rust workspace
-- understanding which crate owns a change
-- working on cross-platform tunnel support
-- interpreting `README.md` build/test conventions
-- recognizing that `ssl/` is a separate support subproject, not the core Rust crate
+- Configuration is loaded from environment variables at startup via `src/config.rs`.
+- The `oracle-db` feature gate controls Oracle database integration.
+- WireGuard is managed via kernel module (`ip link add type wireguard`), not userspace.
+- The container entrypoint (`docker/entrypoint.sh`) starts CoreDNS, WireGuard, and the proxy in sequence.
 
 ## Notes for Copilot
 
-- Prefer `cargo build` and `cargo test` rooted at the repository root.
-- Do not treat `ssl/` as part of the main `boringtun` workspace unless the task explicitly mentions it.
-- Honor platform-specific module boundaries in `boringtun/src/device/`.
-- When a request is about an executable or integration path, check `boringtun-cli/src/main.rs` first.
+- Prefer `cargo build` and `cargo test` from the repository root.
+- The proxy source is in `src/`, not in any subdirectory.
+- Docker builds use the root `Dockerfile` with `docker compose build`.

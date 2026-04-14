@@ -3,14 +3,12 @@ FROM coredns/coredns:1.12.3 AS coredns
 FROM rust:1.86-slim AS builder
 ARG CARGO_FEATURES="oracle-db"
 WORKDIR /app
-COPY ssl/lib-linux /opt/instantclient
-COPY boringtun ./boringtun
-COPY boringtun-cli ./boringtun-cli
-COPY ssl ./ssl
-COPY Cargo.toml ./
+COPY lib-linux /opt/instantclient
+COPY src ./src
+COPY Cargo.toml Cargo.lock ./
 # Pin time dependencies to compatible versions for Rust 1.86.0
 RUN cargo update time@0.3.47 --precise 0.3.36
-RUN OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES" -p ssl-proxy -p boringtun-cli
+RUN OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES"
 
 # debian:bookworm-slim is required (not alpine) because Oracle Instant Client
 # depends on libaio1, which is glibc-only and unavailable on musl/alpine.
@@ -21,24 +19,23 @@ RUN apt-get update && apt-get install -y \
         curl \
         iproute2 \
         iptables \
+        kmod \
         libaio1 \
         wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=coredns /coredns /usr/local/bin/coredns
 COPY --from=builder /app/target/release/ssl-proxy .
-COPY --from=builder /app/target/release/boringtun-cli /usr/local/bin/
-COPY --from=builder /app/ssl/static ./static
+COPY static ./static
 COPY --from=builder /opt/instantclient /app/lib
-COPY --from=builder /app/ssl/wallet ./wallet
-COPY --from=builder /app/ssl/docker/wg_up.sh /usr/local/bin/wg_up.sh
-COPY --from=builder /app/ssl/docker/entrypoint.sh /usr/local/bin/start-proxy-wg
-RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh /usr/local/bin/boringtun-cli \
+COPY wallet ./wallet
+COPY docker/wg_up.sh /usr/local/bin/wg_up.sh
+COPY docker/entrypoint.sh /usr/local/bin/start-proxy-wg
+RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh \
  && groupadd -r proxyuser && useradd -r -g proxyuser proxyuser \
- && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh /usr/local/bin/boringtun-cli \
+ && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh \
  && setcap cap_net_admin+eip /usr/local/bin/coredns \
- && setcap cap_net_admin+eip /app/ssl-proxy \
- && setcap cap_net_admin+eip /usr/local/bin/boringtun-cli
+ && setcap cap_net_admin+eip /app/ssl-proxy
 ENV LD_LIBRARY_PATH=/app/lib \
     WG_CONFIG_PATH=/config/wg_confs/wg0.conf \
     WG_SUDO=1 \

@@ -1,108 +1,95 @@
-![boringtun logo banner](./banner.png)
+# SSL Proxy
 
-# BoringTun
+A high-performance Rust HTTP/HTTPS forward proxy with transparent TCP/TLS interception, WireGuard VPN integration, and Oracle database analytics.
 
-## Warning
-Boringtun is currently undergoing a restructuring. You should probably not rely on or link to 
-the master branch right now. Instead you should use the crates.io page.
+## Features
 
-- boringtun: [![crates.io](https://img.shields.io/crates/v/boringtun.svg)](https://crates.io/crates/boringtun)
-- boringtun-cli [![crates.io](https://img.shields.io/crates/v/boringtun-cli.svg)](https://crates.io/crates/boringtun-cli)
+- **HTTP/HTTPS Forward Proxy** — full CONNECT tunnel support with SNI sniffing
+- **Transparent Proxy** — intercepts traffic via `iptables REDIRECT` without client configuration
+- **WireGuard VPN** — kernel WireGuard module integration for encrypted tunneling
+- **TLS Interception** — SNI-based hostname extraction without decryption
+- **Traffic Obfuscation** — header normalization profiles to mimic standard browser traffic
+- **Blocklist Engine** — domain-based filtering with heuristic threat scoring
+- **Dashboard & WebSocket API** — real-time stats, host snapshots, and event streaming
+- **Oracle DB Integration** — optional audit event persistence (feature-gated behind `oracle-db`)
+- **QUIC/H3 Support** — HTTP/3 listener for modern clients
+- **CoreDNS** — embedded DNS resolver for the VPN network
 
-**BoringTun** is an implementation of the [WireGuard<sup>®</sup>](https://www.wireguard.com/) protocol designed for portability and speed.
+## Quick Start
 
-**BoringTun** is successfully deployed on millions of [iOS](https://apps.apple.com/us/app/1-1-1-1-faster-internet/id1423538627) and [Android](https://play.google.com/store/apps/details?id=com.cloudflare.onedotonedotonedotone&hl=en_US) consumer devices as well as thousands of Cloudflare Linux servers. 
+### Prerequisites
 
-The project consists of two parts:
-
-* The executable `boringtun-cli`, a [userspace WireGuard](https://www.wireguard.com/xplatform/) 
-  implementation for Linux and macOS.
-* The library `boringtun` that can be used to implement fast and efficient WireGuard client apps on various platforms, including iOS and Android. It implements the underlying WireGuard protocol, without the network or tunnel stacks, those can be implemented in a platform idiomatic way.
-
-### Installation
-
-You can install this project using `cargo`:
-
-```
-cargo install boringtun-cli
-```
-
-### Building
-
-- Library only: `cargo build --lib --no-default-features --release [--target $(TARGET_TRIPLE)]`
-- Executable: `cargo build --bin boringtun-cli --release [--target $(TARGET_TRIPLE)]`
-
-By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin boringtun --path .`.
+- Docker and Docker Compose
+- WireGuard configuration in `config/wg_confs/wg0.conf`
 
 ### Running
 
-As per the specification, to start a tunnel use:
+```bash
+# Start the proxy stack
+docker compose up -d --build
 
-`boringtun-cli [-f/--foreground] INTERFACE-NAME`
+# Or use the setup script (installs Docker if needed)
+sudo ./setup-ubuntu.sh
+```
 
-The tunnel can then be configured using [wg](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg.8), as a regular WireGuard tunnel, or any other tool.
+### Building from Source
 
-It is also possible to use with [wg-quick](https://git.zx2c4.com/WireGuard/about/src/tools/man/wg-quick.8) by setting the environment variable `WG_QUICK_USERSPACE_IMPLEMENTATION` to `boringtun`. For example:
+```bash
+# Build the binary
+cargo build --release
 
-`sudo WG_QUICK_USERSPACE_IMPLEMENTATION=boringtun-cli WG_SUDO=1 wg-quick up CONFIGURATION`
+# Build with Oracle DB support
+cargo build --release --features oracle-db
+```
 
 ### Testing
 
-Testing this project has a few requirements:
+```bash
+cargo test
+```
 
-- `sudo`: required to create tunnels. When you run `cargo test` you'll be prompted for your password.
-- Docker: you can install it [here](https://www.docker.com/get-started). If you are on Ubuntu/Debian you can run `apt-get install docker.io`.
+## Project Structure
 
-## Supported platforms
+```
+├── src/                  # Rust source code
+│   ├── main.rs           # Application entry point
+│   ├── proxy.rs          # HTTP/HTTPS forward proxy handler
+│   ├── tunnel.rs         # CONNECT tunnel & transparent proxy
+│   ├── blocklist.rs      # Domain blocklist engine
+│   ├── obfuscation.rs    # Traffic obfuscation profiles
+│   ├── dashboard.rs      # REST API & WebSocket endpoints
+│   ├── quic.rs           # QUIC/H3 listener
+│   ├── config.rs         # Environment-based configuration
+│   ├── state.rs          # Shared application state
+│   └── db.rs             # Oracle DB integration (optional)
+├── config/               # WireGuard & CoreDNS configuration
+├── docker/               # Container entrypoint scripts
+├── static/               # Dashboard web assets
+├── sql/                  # Database schema & migrations
+├── Dockerfile            # Container build definition
+└── docker-compose.yaml   # Container orchestration
+```
 
-Target triple                 |Binary|Library|
-------------------------------|:----:|------|
-x86_64-unknown-linux-gnu      |  ✓   | ✓    |
-aarch64-unknown-linux-gnu     |  ✓   | ✓    |
-armv7-unknown-linux-gnueabihf |  ✓   | ✓    |
-x86_64-apple-darwin           |  ✓   | ✓    |
-x86_64-pc-windows-msvc        |      | ✓    |
-aarch64-apple-ios             |      | ✓    |
-armv7-apple-ios               |      | ✓    |
-armv7s-apple-ios              |      | ✓    |
-aarch64-linux-android         |      | ✓    |
-arm-linux-androideabi         |      | ✓    |
+## Configuration
 
-<sub>Other platforms may be added in the future</sub>
+All configuration is via environment variables. Key settings:
 
-#### Linux
-
-`x86-64`, `aarch64` and `armv7` architectures are supported. The behaviour should be identical to that of [wireguard-go](https://git.zx2c4.com/wireguard-go/about/), with the following difference:
-
-`boringtun` will drop privileges when started. When privileges are dropped it is not possible to set `fwmark`. If `fwmark` is required, such as when using `wg-quick`, run with `--disable-drop-privileges` or set the environment variable `WG_SUDO=1`.
-
-You will need to give the executable the `CAP_NET_ADMIN` capability using: `sudo setcap cap_net_admin+epi boringtun`. sudo is not needed.
-
-#### macOS
-
-The behaviour is similar to that of [wireguard-go](https://git.zx2c4.com/wireguard-go/about/). Specifically the interface name must be `utun[0-9]+` for an explicit interface name or `utun` to have the kernel select the lowest available. If you choose `utun` as the interface name, and the environment variable `WG_TUN_NAME_FILE` is defined, then the actual name of the interface chosen by the kernel is written to the file specified by that variable.
-
----
-
-#### FFI bindings
-
-The library exposes a set of C ABI bindings, those are defined in the `wireguard_ffi.h` header file. The C bindings can be used with C/C++, Swift (using a bridging header) or C# (using [DLLImport](https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.dllimportattribute?view=netcore-2.2) with [CallingConvention](https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.dllimportattribute.callingconvention?view=netcore-2.2) set to `Cdecl`).
-
-#### JNI bindings
-
-The library exposes a set of Java Native Interface bindings, those are defined in `src/jni.rs`.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROXY_PORT` | `3000` | Dashboard + REST API port |
+| `TPROXY_PORT` | `3001` | Transparent proxy port |
+| `WG_PORT` | `443` | WireGuard UDP port |
+| `WG_CONFIG_PATH` | `/config/wg_confs/wg0.conf` | WireGuard config file path |
+| `RUST_LOG` | — | Log level filter |
+| `LOG_FORMAT` | `text` | `json` for structured logging |
+| `TLS_CERT_PATH` | — | TLS certificate for proxy listener |
+| `TLS_KEY_PATH` | — | TLS private key for proxy listener |
+| `ADMIN_API_KEY` | — | API key for admin endpoints |
+| `CORS_ALLOWED_ORIGINS` | — | Comma-separated allowed origins |
 
 ## License
 
 The project is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause).
 
-### Contribution
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the 3-Clause BSD License, shall be licensed as above, without any additional terms or conditions.
-
-If you want to contribute to this project, please read our [`CONTRIBUTING.md`].
-
-[`CONTRIBUTING.md`]: https://github.com/cloudflare/.github/blob/master/CONTRIBUTING.md
-
 ---
-<sub><sub><sub><sub>WireGuard is a registered trademark of Jason A. Donenfeld. BoringTun is not sponsored or endorsed by Jason A. Donenfeld.</sub></sub></sub></sub>
+<sub><sub><sub><sub>WireGuard is a registered trademark of Jason A. Donenfeld.</sub></sub></sub></sub>

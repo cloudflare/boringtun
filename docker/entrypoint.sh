@@ -43,20 +43,11 @@ cleanup() {
     if [ -n "${PROXY_PID:-}" ]; then
         kill -TERM "$PROXY_PID" 2>/dev/null || true
     fi
-    if [ -n "${BORINGTUN_PID:-}" ]; then
-        kill -TERM "$BORINGTUN_PID" 2>/dev/null || true
-    fi
     if [ -n "${COREDNS_PID:-}" ]; then
         kill -TERM "$COREDNS_PID" 2>/dev/null || true
     fi
 
-    # Wait for boringtun to exit cleanly before deleting interface
-    if [ -n "${BORINGTUN_PID:-}" ]; then
-        wait "$BORINGTUN_PID" 2>/dev/null || true
-        sleep 0.2
-    fi
-
-    # Now safely delete network interface
+    # Safely delete network interface
     if ip link show dev "$INTERFACE_NAME" >/dev/null 2>&1; then
         run_hooks PostDown || true
         ip link delete dev "$INTERFACE_NAME" || true
@@ -80,43 +71,11 @@ if [ ! -f "$COREDNS_CONFIG" ]; then
     exit 1
 fi
 
-# Validate boringtun-cli binary exists and is executable
-if [ ! -f /usr/local/bin/boringtun-cli ]; then
-    echo "ERROR: boringtun-cli not found at /usr/local/bin/boringtun-cli" >&2
-    exit 1
-fi
-if [ ! -x /usr/local/bin/boringtun-cli ]; then
-    echo "ERROR: boringtun-cli is not executable" >&2
-    ls -la /usr/local/bin/boringtun-cli >&2
-    exit 1
-fi
-# Check for missing dynamic libraries
-if ! ldd /usr/local/bin/boringtun-cli >/dev/null 2>&1; then
-    echo "ERROR: boringtun-cli has missing dynamic libraries:" >&2
-    ldd /usr/local/bin/boringtun-cli >&2
-    exit 1
-fi
-
-# Health check function for boringtun-cli
-health_check_boringtun() {
-    while true; do
-        sleep 5
-        if ! kill -0 "$BORINGTUN_PID" 2>/dev/null; then
-            echo "boringtun-cli (PID $BORINGTUN_PID) died, restarting..."
-            cmd /usr/local/bin/boringtun-cli --disable-drop-privileges --foreground "$INTERFACE_NAME" &
-            BORINGTUN_PID=$!
-        fi
-    done
-}
-
 # Signal handler for graceful shutdown
 shutdown() {
     echo "Received shutdown signal, terminating children..."
     if [ -n "${PROXY_PID:-}" ]; then
         kill -TERM "$PROXY_PID" 2>/dev/null || true
-    fi
-    if [ -n "${BORINGTUN_PID:-}" ]; then
-        kill -TERM "$BORINGTUN_PID" 2>/dev/null || true
     fi
     if [ -n "${COREDNS_PID:-}" ]; then
         kill -TERM "$COREDNS_PID" 2>/dev/null || true
@@ -130,11 +89,8 @@ echo "starting CoreDNS: $COREDNS_CONFIG"
 cmd /usr/local/bin/coredns -conf "$COREDNS_CONFIG" &
 COREDNS_PID=$!
 
-echo "bringing up WireGuard via boringtun: $WG_CONFIG_PATH"
+echo "bringing up WireGuard (kernel module): $WG_CONFIG_PATH"
 configure_interface
-
-# Start health check in background
-health_check_boringtun &
 
 echo "starting ssl-proxy"
 "$PROXY_BIN" &
@@ -145,12 +101,6 @@ while true; do
     # Wait for any child to exit
     wait -n
     exit_code=$?
-
-    # Check if critical processes are still alive
-    if ! kill -0 "$BORINGTUN_PID" 2>/dev/null; then
-        echo "boringtun exited unexpectedly, restarting container"
-        exit 1
-    fi
 
     if ! kill -0 "$COREDNS_PID" 2>/dev/null; then
         echo "coredns exited unexpectedly, restarting container"
