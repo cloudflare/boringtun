@@ -1,2 +1,0 @@
-[target.'cfg(unix)']
-runner = 'sudo -E'

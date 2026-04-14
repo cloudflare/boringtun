@@ -18,7 +18,7 @@ docker compose up -d
 
 echo "⏳ Waiting for health check to pass (timeout 60s)"
 for i in {1..60}; do
-    if docker compose exec -T rust-proxy curl -f -s http://localhost:3000/health >/dev/null 2>&1; then
+    if docker compose exec -T ssl-proxy curl -f -s http://localhost:3000/health >/dev/null 2>&1; then
         echo "✅ HTTP health check passed"
         break
     fi
@@ -31,7 +31,7 @@ for i in {1..60}; do
 done
 
 echo "🔍 Checking WireGuard interface status"
-docker compose exec -T rust-proxy wg show wg0
+docker compose exec -T ssl-proxy wg show wg0
 echo "✅ WireGuard interface is active"
 
 echo "🔌 Testing CONNECT proxy request"
@@ -44,13 +44,13 @@ if [ "${CURL_EXIT:-0}" -ne 0 ] && [ "${CURL_EXIT:-0}" -ne 56 ] && [ "${CURL_EXIT
     echo "Curl output:"
     echo "$CURL_OUTPUT"
     echo "Proxy logs:"
-    docker compose logs rust-proxy | tail -20
+    docker compose logs ssl-proxy | tail -20
     exit 1
 fi
 
 echo "🔍 Verifying request was logged"
 sleep 2
-LOGS=$(docker compose logs rust-proxy)
+LOGS=$(docker compose logs ssl-proxy)
 
 if echo "$LOGS" | grep -q "foxnews.com"; then
     echo "✅ Proxy request successfully logged"

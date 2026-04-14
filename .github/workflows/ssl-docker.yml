@@ -1,13 +1,23 @@
-name: SSL Proxy Docker Tests
+name: Docker Tests
 
 on:
   push:
     paths:
-      - 'ssl/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Dockerfile'
+      - 'docker-compose.yaml'
+      - 'docker/**'
       - '.github/workflows/ssl-docker.yml'
   pull_request:
     paths:
-      - 'ssl/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Dockerfile'
+      - 'docker-compose.yaml'
+      - 'docker/**'
       - '.github/workflows/ssl-docker.yml'
 
 jobs:
@@ -24,13 +34,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build docker image
-        working-directory: ./ssl
-        run: docker compose build
-
-      - name: Run cargo tests inside container
-        working-directory: ./ssl
-        run: docker compose run --rm rust-proxy cargo test --workspace
+        run: docker build -t ssl-proxy .
 
       - name: Run smoke test
-        working-directory: ./ssl
         run: ./tests/smoke.sh

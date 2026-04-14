@@ -1,20 +1,20 @@
 .PHONY: build test docker lint clean
 
-# Build all crates in the workspace
+# Build the ssl-proxy binary
 build:
-	cargo build --release --workspace
+	cargo build --release
 
-# Run tests for all crates in the workspace
+# Run tests
 test:
-	cargo test --workspace
+	cargo test
 
 # Build the Docker image for ssl-proxy
 docker:
-	cd ssl && docker build -t ssl-proxy .
+	docker compose build
 
 # Run clippy lints
 lint:
-	cargo clippy --workspace -- -D warnings
+	cargo clippy -- -D warnings
 
 # Clean build artifacts
 clean:
