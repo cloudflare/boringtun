@@ -75,14 +75,16 @@ fn emit_full(
             bytes_down,
             status_code,
             blocked,
+            correlation_id: None,
+            parent_event_id: None,
+            event_sequence: None,
+            duration_ms: None,
             raw_json: raw,
         };
         
         // Offload blocking DB operation to blocking thread pool
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = crate::db::insert_proxy_event(&db, &event) {
-                tracing::error!(target: "audit", error = %e, "failed to insert proxy event");
-            }
+            crate::db::insert_proxy_event(db, event);
         });
     }
 }

@@ -153,6 +153,10 @@ fn emit_full(
             bytes_down,
             status_code,
             blocked,
+            correlation_id: None,
+            parent_event_id: None,
+            event_sequence: None,
+            duration_ms: None,
             raw_json: raw,
         },
     );
@@ -305,6 +309,10 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
                     bytes_down: 0,
                     status_code: None,
                     blocked: true,
+                    correlation_id: None,
+                    parent_event_id: None,
+                    event_sequence: None,
+                    duration_ms: None,
                     raw_json: raw,
                 },
             );
@@ -929,17 +937,21 @@ pub async fn handle(
         #[cfg(feature = "oracle-db")]
         crate::db::insert_proxy_event(
             state.db.clone(),
-            crate::db::ProxyEvent {
-                obfuscation_profile: None,
-                event_type: "block".to_string(),
-                host: hostname.to_string(),
-                peer_ip: peer_ip.clone(),
-                bytes_up: 0,
-                bytes_down: 0,
-                status_code: None,
-                blocked: true,
-                raw_json: raw,
-            },
+                crate::db::ProxyEvent {
+                    obfuscation_profile: None,
+                    event_type: "block".to_string(),
+                    host: hostname.to_string(),
+                    peer_ip: peer_ip.clone(),
+                    bytes_up: 0,
+                    bytes_down: 0,
+                    status_code: None,
+                    blocked: true,
+                    correlation_id: None,
+                    parent_event_id: None,
+                    event_sequence: None,
+                    duration_ms: None,
+                    raw_json: raw,
+                },
         );
 
         if verdict == "TARPIT" {
