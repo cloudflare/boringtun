@@ -41,6 +41,7 @@ services:
       - PROXY_USERNAME=proxy
       - PROXY_PASSWORD_FILE=/run/secrets/proxy_password
       - LD_LIBRARY_PATH=/app/lib
+      - ADMIN_API_KEY=test
     secrets:
       - oracle_password
       - proxy_password
