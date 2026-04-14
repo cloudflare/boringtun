@@ -37,7 +37,7 @@ use tower::ServiceExt;
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
-fn constant_time_eq(a: &str, b: &str) -> bool {
+pub(crate) fn constant_time_eq(a: &str, b: &str) -> bool {
     use subtle::ConstantTimeEq;
     const MAX_LEN: usize = 256;
     let mut a_buf = [0u8; MAX_LEN];
@@ -51,7 +51,8 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 
 /// Validate the Proxy-Authorization header (RFC 7235 / RFC 7617 Basic scheme).
 /// Returns `true` when the header carries valid credentials.
-fn check_proxy_auth(req: &Request<Body>, username: &str, password: &str) -> bool {
+/// Generic over the body type so it works for both hyper and h3 requests.
+pub(crate) fn check_proxy_auth<B>(req: &Request<B>, username: &str, password: &str) -> bool {
     let header = match req
         .headers()
         .get("proxy-authorization")
@@ -76,7 +77,9 @@ fn check_proxy_auth(req: &Request<Body>, username: &str, password: &str) -> bool
         Some(pair) => pair,
         None => return false,
     };
-    constant_time_eq(user, username) && constant_time_eq(pass, password)
+    let user_ok = constant_time_eq(user, username);
+    let pass_ok = constant_time_eq(pass, password);
+    user_ok & pass_ok
 }
 
 #[tokio::main]
@@ -259,8 +262,9 @@ async fn main() {
         let quic_state = state.clone();
         let quic_config = config.clone();
         let quic_shutdown = shutdown.clone();
+        let quic_creds = proxy_creds.clone();
         tokio::spawn(async move {
-            quic::run_quic_listener(quic_state, quic_config, quic_shutdown).await;
+            quic::run_quic_listener(quic_state, quic_config, quic_shutdown, quic_creds).await;
         });
     }
 

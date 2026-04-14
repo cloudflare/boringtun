@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
 use crate::blocklist;
+use crate::check_proxy_auth;
 use crate::config::Config;
 use crate::obfuscation;
 use crate::state::SharedState;
@@ -49,7 +50,12 @@ fn build_rustls_config(config: &Config) -> Arc<rustls::ServerConfig> {
 /// For each incoming QUIC connection, spawns a task that processes HTTP/3
 /// requests. CONNECT requests are handled with the same blocklist/policy
 /// logic as the TCP proxy, then bidirectional-copied to the upstream.
-pub async fn run_quic_listener(state: SharedState, config: Config, shutdown: CancellationToken) {
+pub async fn run_quic_listener(
+    state: SharedState,
+    config: Config,
+    shutdown: CancellationToken,
+    proxy_creds: Option<Arc<(String, String)>>,
+) {
     let rustls_config = build_rustls_config(&config);
 
     let quinn_config = quinn::crypto::rustls::QuicServerConfig::try_from(rustls_config);
@@ -89,8 +95,9 @@ pub async fn run_quic_listener(state: SharedState, config: Config, shutdown: Can
                 };
                 let state = state.clone();
                 let config = config.clone();
+                let creds = proxy_creds.clone();
                 tokio::spawn(async move {
-                    handle_quic_connection(incoming, state, config).await;
+                    handle_quic_connection(incoming, state, config, creds).await;
                 });
             }
         }
@@ -98,7 +105,12 @@ pub async fn run_quic_listener(state: SharedState, config: Config, shutdown: Can
 }
 
 /// Handle a single QUIC connection: accept it, then process HTTP/3 requests.
-async fn handle_quic_connection(incoming: quinn::Incoming, state: SharedState, config: Config) {
+async fn handle_quic_connection(
+    incoming: quinn::Incoming,
+    state: SharedState,
+    config: Config,
+    proxy_creds: Option<Arc<(String, String)>>,
+) {
     let connection = match incoming.await {
         Ok(c) => c,
         Err(e) => {
@@ -123,10 +135,11 @@ async fn handle_quic_connection(incoming: quinn::Incoming, state: SharedState, c
             Ok(Some(resolver)) => {
                 let state = state.clone();
                 let config = config.clone();
+                let creds = proxy_creds.clone();
                 tokio::spawn(async move {
                     match resolver.resolve_request().await {
                         Ok((req, stream)) => {
-                            handle_h3_request(req, stream, state, config, peer).await;
+                            handle_h3_request(req, stream, state, config, peer, creds).await;
                         }
                         Err(e) => {
                             debug!(%peer, %e, "H3 request resolve failed");
@@ -157,9 +170,25 @@ async fn handle_h3_request(
     state: SharedState,
     config: Config,
     peer: SocketAddr,
+    proxy_creds: Option<Arc<(String, String)>>,
 ) {
     let method = req.method().clone();
     let uri = req.uri().clone();
+
+    // Proxy authentication check — all H3 requests are proxy requests
+    // (QUIC/H3 is only used for CONNECT tunnels, not internal management).
+    if let Some(ref creds) = proxy_creds {
+        if !check_proxy_auth(&req, &creds.0, &creds.1) {
+            let resp = axum::http::Response::builder()
+                .status(axum::http::StatusCode::from_u16(407).unwrap())
+                .header("Proxy-Authenticate", "Basic realm=\"proxy\"")
+                .body(())
+                .unwrap();
+            stream.send_response(resp).await.ok();
+            stream.finish().await.ok();
+            return;
+        }
+    }
 
     if method != axum::http::Method::CONNECT {
         // Non-CONNECT: return 405 Method Not Allowed
