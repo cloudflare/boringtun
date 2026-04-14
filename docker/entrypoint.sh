@@ -46,6 +46,26 @@ echo "starting CoreDNS: $COREDNS_CONFIG"
 cmd /usr/local/bin/coredns -conf "$COREDNS_CONFIG" &
 COREDNS_PID=$!
 
+# Auto-generate self-signed TLS certificate if not provided
+if [ -z "${TLS_CERT_PATH:-}" ] && [ -z "${TLS_KEY_PATH:-}" ]; then
+    if [ ! -f "/ssl/tls.crt" ] || [ ! -f "/ssl/tls.key" ]; then
+        echo "[#] Generating self-signed TLS certificate for proxy listener"
+        mkdir -p /ssl
+        openssl req -x509 -nodes -days 365 -newkey rsa:4096 \
+            -keyout /ssl/tls.key \
+            -out /ssl/tls.crt \
+            -subj "/CN=ssl-proxy.local" \
+            -addext "subjectAltName=DNS:ssl-proxy.local,DNS:localhost,IP:127.0.0.1" 2>/dev/null
+        chmod 600 /ssl/tls.key
+        export TLS_CERT_PATH="/ssl/tls.crt"
+        export TLS_KEY_PATH="/ssl/tls.key"
+        echo "[#] TLS certificate generated at /ssl/tls.crt"
+    else
+        export TLS_CERT_PATH="/ssl/tls.crt"
+        export TLS_KEY_PATH="/ssl/tls.key"
+    fi
+fi
+
 echo "starting ssl-proxy"
 "$PROXY_BIN" &
 PROXY_PID=$!
