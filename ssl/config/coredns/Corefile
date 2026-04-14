@@ -1,6 +1,8 @@
 . {
-    loop
+    forward . https://dns.quad9.net/dns-query {
+        tls_servername dns.quad9.net
+    }
     errors
     health
-    forward . 1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4
+    loop
 }

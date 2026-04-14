@@ -789,7 +789,8 @@ impl Device {
                             }
                             // EBADF (File descriptor in bad state) means interface was deleted - exit cleanly
                             if let Some(os_err) = e.raw_os_error() {
-                                if os_err == 77 || os_err == 9 { // 77=EBADFD on Linux, 9=EBADF general
+                                if os_err == 77 || os_err == 9 {
+                                    // 77=EBADFD on Linux, 9=EBADF general
                                     return Action::Exit;
                                 }
                             }
