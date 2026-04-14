@@ -26,6 +26,13 @@ socket2 = { version = "0.5", features = ["all"] }
 oracle = { version = "0.6", optional = true }
 subtle = "2"
 thiserror = "1.0"
+tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rustls-pemfile = "2"
+quinn = "0.11"
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+bytes = "1"
 
 [features]
 oracle-db = ["oracle"]

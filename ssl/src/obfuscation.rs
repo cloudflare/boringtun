@@ -186,6 +186,8 @@ mod tests {
                 "fx-network".to_string(),
             ],
             fox_ua_override: "Mozilla/5.0 (Test UA)".to_string(),
+            tls_cert_path: None,
+            tls_key_path: None,
         }
     }
 

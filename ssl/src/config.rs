@@ -18,6 +18,8 @@ pub struct Config {
     pub obfuscation_enabled: bool,
     pub obfuscation_profile: Vec<String>,
     pub fox_ua_override: String,
+    pub tls_cert_path: Option<String>,
+    pub tls_key_path: Option<String>,
 }
 
 use thiserror::Error;
@@ -118,6 +120,8 @@ impl Config {
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
                 .to_string()
         });
+        let tls_cert_path = std::env::var("TLS_CERT_PATH").ok().filter(|s| !s.is_empty());
+        let tls_key_path = std::env::var("TLS_KEY_PATH").ok().filter(|s| !s.is_empty());
 
         // Validate required fields
         if proxy_port == wg_port {
@@ -149,6 +153,8 @@ impl Config {
             obfuscation_enabled,
             obfuscation_profile,
             fox_ua_override,
+            tls_cert_path,
+            tls_key_path,
         })
     }
 

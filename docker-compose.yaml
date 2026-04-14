@@ -47,6 +47,7 @@ services:
     ports:
       - "3000:3000"
       - "3001:3001"
+      - "443:443/udp"
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
@@ -54,6 +55,7 @@ services:
     volumes:
       - ./ssl/config:/config
       - ./ssl/wallet:/app/wallet
+      - ./ssl/tls:/config/tls
     environment:
       - WG_CONFIG_PATH=/config/wg_confs/wg0.conf
       - WG_SUDO=1
@@ -64,6 +66,8 @@ services:
       - ORACLE_PASS_FILE=/run/secrets/oracle_password
       - LD_LIBRARY_PATH=/app/lib
       - BORINGTUN_ENDPOINT=172.28.1.1:443
+      - TLS_CERT_PATH=/config/tls/fullchain.pem
+      - TLS_KEY_PATH=/config/tls/privkey.pem
     secrets:
       - oracle_password
     healthcheck:

@@ -5,6 +5,7 @@ mod dashboard;
 mod db;
 mod obfuscation;
 mod proxy;
+mod quic;
 mod state;
 mod tunnel;
 
@@ -32,6 +33,7 @@ use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
+use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info, warn};
 
 fn constant_time_eq(a: &str, b: &str) -> bool {
@@ -124,13 +126,14 @@ async fn main() {
             CorsLayer::new()
         }
     };
+    let admin_api_key = config.admin_api_key.clone();
     let admin_routes = Router::new()
         .route("/hosts", get(dashboard::hosts_snapshot))
         .route("/hosts/:hostname", get(dashboard::host_detail))
         .route("/stats/summary", get(dashboard::stats_summary))
         .layer(middleware::from_fn(
             move |req: Request<Body>, next: Next| {
-                let key = config.admin_api_key.clone();
+                let key = admin_api_key.clone();
                 async move {
                     // If no admin API key configured, deny all access to admin endpoints
                     let Some(ref valid_key) = key else {
@@ -182,6 +185,39 @@ async fn main() {
             std::process::exit(1)
         });
     info!(%addr, "proxy + dashboard active");
+
+    // Build TLS acceptor if cert/key paths are configured
+    let tls_acceptor: Option<TlsAcceptor> = if let (Some(cert_path), Some(key_path)) =
+        (&config.tls_cert_path, &config.tls_key_path)
+    {
+        let cert_pem = std::fs::read(cert_path).expect("failed to read TLS cert");
+        let key_pem = std::fs::read(key_path).expect("failed to read TLS key");
+        let certs: Vec<_> = rustls_pemfile::certs(&mut &cert_pem[..])
+            .collect::<Result<_, _>>()
+            .expect("invalid cert PEM");
+        let key = rustls_pemfile::private_key(&mut &key_pem[..])
+            .expect("failed to parse key PEM")
+            .expect("no private key found");
+        let tls_config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .expect("invalid TLS config");
+        info!("TLS enabled on proxy listener");
+        Some(TlsAcceptor::from(std::sync::Arc::new(tls_config)))
+    } else {
+        warn!("TLS_CERT_PATH / TLS_KEY_PATH not set \u{2014} proxy listener is PLAINTEXT");
+        None
+    };
+
+    // Spawn QUIC/H3 listener if TLS is configured
+    if config.tls_cert_path.is_some() && config.tls_key_path.is_some() {
+        let quic_state = state.clone();
+        let quic_config = config.clone();
+        let quic_shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            quic::run_quic_listener(quic_state, quic_config, quic_shutdown).await;
+        });
+    }
 
     // Transparent proxy listener — receives connections redirected by iptables REDIRECT
     let tproxy_addr = SocketAddr::from(([0, 0, 0, 0], config.tproxy_port));
@@ -254,34 +290,56 @@ async fn main() {
                 let state = state.clone();
                 let router = router.clone();
                 let token = shutdown.clone();
+                let tls_acceptor = tls_acceptor.clone();
 
                 tasks.spawn(async move {
                     let _permit = permit; // hold until task completes
-                    let svc = service_fn(move |req: Request<hyper::body::Incoming>| {
-                        let state = state.clone();
-                        let router = router.clone();
-                        async move {
-                            let req: Request<Body> = req.map(Body::new);
-                            if req.method() == Method::CONNECT {
-                                tunnel::handle(req, state, Some(peer.ip().to_string())).await
-                            } else {
-                                router.oneshot(req).await.map_err(|e| match e {})
-                            }
-                        }
-                    });
 
-                    let builder = ServerBuilder::new(TokioExecutor::new());
-                    let conn = builder
-                        .serve_connection_with_upgrades(TokioIo::new(stream), svc);
-                    tokio::select! {
-                        result = conn => {
-                            if let Err(e) = result {
-                                debug!(%peer, %e, "connection error");
+                    // Macro-like closure to build the service and serve a connection
+                    // on an arbitrary AsyncRead + AsyncWrite stream.
+                    macro_rules! serve_io {
+                        ($io:expr) => {{
+                            let io = $io;
+                            let svc = service_fn(move |req: Request<hyper::body::Incoming>| {
+                                let state = state.clone();
+                                let router = router.clone();
+                                async move {
+                                    let req: Request<Body> = req.map(Body::new);
+                                    if req.method() == Method::CONNECT {
+                                        tunnel::handle(req, state, Some(peer.ip().to_string())).await
+                                    } else {
+                                        router.oneshot(req).await.map_err(|e| match e {})
+                                    }
+                                }
+                            });
+
+                            let builder = ServerBuilder::new(TokioExecutor::new());
+                            let conn = builder.serve_connection_with_upgrades(io, svc);
+                            tokio::select! {
+                                result = conn => {
+                                    if let Err(e) = result {
+                                        debug!(%peer, %e, "connection error");
+                                    }
+                                }
+                                _ = token.cancelled() => {
+                                    debug!(%peer, "connection dropped due to shutdown");
+                                }
+                            }
+                        }};
+                    }
+
+                    if let Some(ref acceptor) = tls_acceptor {
+                        match acceptor.accept(stream).await {
+                            Ok(tls_stream) => {
+                                serve_io!(TokioIo::new(tls_stream));
+                            }
+                            Err(e) => {
+                                debug!(%peer, %e, "TLS handshake failed");
+                                return;
                             }
                         }
-                        _ = token.cancelled() => {
-                            debug!(%peer, "connection dropped due to shutdown");
-                        }
+                    } else {
+                        serve_io!(TokioIo::new(stream));
                     }
                 });
             }
