@@ -41,6 +41,10 @@ pub enum ConfigError {
         "PROXY_USERNAME is set but PROXY_PASSWORD is missing (both are required for proxy auth)"
     )]
     MissingProxyPassword,
+    #[error(
+        "PROXY_PASSWORD is set but PROXY_USERNAME is missing (both are required for proxy auth)"
+    )]
+    MissingProxyUsername,
 }
 
 #[cfg(test)]
@@ -163,6 +167,9 @@ impl Config {
         }
         if proxy_username.is_some() && proxy_password.is_none() {
             return Err(ConfigError::MissingProxyPassword);
+        }
+        if proxy_password.is_some() && proxy_username.is_none() {
+            return Err(ConfigError::MissingProxyUsername);
         }
 
         Ok(Self {
