@@ -61,9 +61,11 @@ pub(crate) fn check_proxy_auth<B>(req: &Request<B>, username: &str, password: &s
         Some(h) => h,
         None => return false,
     };
-    let encoded = match header.strip_prefix("Basic ") {
-        Some(e) => e,
-        None => return false,
+    // RFC 7235 §2.1: auth-scheme comparison is case-insensitive.
+    let encoded = if header.len() >= 6 && header[..6].eq_ignore_ascii_case("basic ") {
+        &header[6..]
+    } else {
+        return false;
     };
     let decoded = match base64::engine::general_purpose::STANDARD.decode(encoded) {
         Ok(d) => d,
