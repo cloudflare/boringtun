@@ -39,10 +39,11 @@ services:
       - ORACLE_CONN=mainerc_tp
       - ORACLE_USER=USCIS_APP
       - ORACLE_PASS_FILE=/run/secrets/oracle_password
-      - PROXY_USERNAME=proxy
-      - PROXY_PASSWORD_FILE=/run/secrets/proxy_password
       - LD_LIBRARY_PATH=/app/lib
       - ADMIN_API_KEY=test
+      - PROXY_USERNAME=iphoneuser
+      - PROXY_PASSWORD=yourpasswordhere
+
     secrets:
       - oracle_password
       - proxy_password
