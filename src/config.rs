@@ -171,6 +171,9 @@ impl Config {
         if proxy_password.is_some() && proxy_username.is_none() {
             return Err(ConfigError::MissingProxyUsername);
         }
+        if admin_api_key.is_none() {
+            return Err(ConfigError::MissingAdminApiKey);
+        }
 
         Ok(Self {
             proxy_port,

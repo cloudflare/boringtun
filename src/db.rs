@@ -1,3 +1,5 @@
+#![cfg(feature = "oracle-db")]
+
 /// Oracle DB integration — compiled only with `--features oracle-db`.
 ///
 /// All proxy_events inserts are serialised through a single background writer
