@@ -248,11 +248,12 @@ impl Config {
     }
 
     /// Load config from environment and exit process on failure (for tests and main)
-pub fn from_env_or_panic() -> Self {
-    match Config::from_env() {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            panic!("Configuration error: {}", e);
+    pub fn from_env_or_panic() -> Self {
+        match Config::from_env() {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                panic!("Configuration error: {}", e);
+            }
         }
     }
 }

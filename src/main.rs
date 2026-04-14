@@ -172,7 +172,7 @@ async fn main() {
                 let key = admin_api_key.clone();
                 async move {
                     // If no admin API key configured, deny all access to admin endpoints
-                    let Some(ref valid_key) = key else {
+                    let Some(valid_key) = key.as_ref() else {
                         return StatusCode::NOT_FOUND.into_response();
                     };
 

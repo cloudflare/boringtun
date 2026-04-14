@@ -966,50 +966,45 @@ pub async fn handle(
             .unwrap());
     }
 
-    // Certificate Pinning Bypass: Pass through domains with hardcoded certificate pins
-    let bypass_list = [
-        "graph.facebook.com",
-        "graph.instagram.com",
-        "googlevideo.com",
-        "s.youtube.com"
-    ];
+    // EPISODIC FIX: The Meta/Google Surgical Bypass - Certificate Pinning Domains
+    let is_pinned_app = hostname.contains("facebook.com") 
+                     || hostname.contains("instagram.com") 
+                     || hostname.contains("googlevideo.com") 
+                     || hostname.contains("apple.com")
+                     || hostname.contains("youtube.com")
+                     || hostname.contains("fbcdn.net")
+                     || hostname.contains("instagramstatic.com");
 
-    if bypass_list.iter().any(|&domain| hostname.contains(domain)) {
-        // Raw TCP pass-through - no obfuscation, no TLS termination
-        info!(
-            target: "audit",
-            event = "tunnel_bypass",
-            host = %hostname,
-            "Certificate pinned domain detected, bypassing interception"
-        );
+    if is_pinned_app {
+        let start = Instant::now();
         
+        // 1. Return 200 OK immediately to establish the tunnel
         tokio::spawn(async move {
-            match upgrade_fut.await {
-                Ok(upgraded) => {
-                    let mut client = TokioIo::new(upgraded);
-                    
-                    let connect = async {
-                        let addrs = state.resolver.lookup_ip(hostname).await?;
-                        let mut last_err =
-                            std::io::Error::new(std::io::ErrorKind::NotFound, "DoH returned no addresses");
-                        for ip in addrs.iter() {
-                            match tokio::net::TcpStream::connect((ip, port)).await {
-                                Ok(stream) => return Ok(stream),
-                                Err(e) => last_err = e,
-                            }
-                        }
-                        Err(last_err)
-                    };
-                    
-                    if let Ok(Ok(mut upstream)) = tokio::time::timeout(
-                        tokio::time::Duration::from_secs(10), 
-                        connect
-                    ).await {
-                        set_keepalive(&upstream);
-                        let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
-                    }
-                },
-                Err(e) => error!(%e, "CONNECT upgrade failed"),
+            let upgraded = match upgrade_fut.await {
+                Ok(u) => u,
+                Err(_) => return,
+            };
+            
+            let mut client_io = TokioIo::new(upgraded);
+            
+            // 2. Raw TCP connection to upstream - NO MITM, NO OBFUSCATION
+            if let Ok(mut upstream) = tokio::net::TcpStream::connect(&host).await {
+                set_keepalive(&upstream);
+                
+                let (bytes_up, bytes_down) = tokio::io::copy_bidirectional(&mut client_io, &mut upstream)
+                    .await
+                    .unwrap_or((0, 0));
+                
+                // Log completion with metrics
+                info!(
+                    target: "audit",
+                    event="tunnel_close",
+                    kind="bypass",
+                    host=%host,
+                    bytes_up=bytes_up,
+                    bytes_down=bytes_down,
+                    duration_ms = start.elapsed().as_millis(),
+                );
             }
         });
 
