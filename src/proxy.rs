@@ -45,6 +45,7 @@ fn emit_full(
     bytes_down: u64,
     status_code: Option<u16>,
     blocked: bool,
+    obfuscation_profile: Option<String>,
     extra: serde_json::Value,
 ) {
     let mut v = serde_json::json!({
@@ -56,14 +57,17 @@ fn emit_full(
         obj.extend(ext.clone());
     }
     let raw = v.to_string();
+    
+    // Send to broadcast channel (non-blocking for broadcast senders)
     if let Err(e) = state.events_tx.send(raw.clone()) {
         tracing::warn!(target: "audit", error = %e, "failed to send audit event to channel");
     }
+    
     #[cfg(feature = "oracle-db")]
-    crate::db::insert_proxy_event(
-        state.db.clone(),
-        crate::db::ProxyEvent {
-            obfuscation_profile: None,
+    {
+        let db = state.db.clone();
+        let event = crate::db::ProxyEvent {
+            obfuscation_profile,
             event_type: event.to_string(),
             host: host.to_string(),
             peer_ip,
@@ -72,8 +76,15 @@ fn emit_full(
             status_code,
             blocked,
             raw_json: raw,
-        },
-    );
+        };
+        
+        // Offload blocking DB operation to blocking thread pool
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = crate::db::insert_proxy_event(&db, &event) {
+                tracing::error!(target: "audit", error = %e, "failed to insert proxy event");
+            }
+        });
+    }
 }
 pub async fn handler(
     State(state): State<SharedState>,
@@ -144,6 +155,7 @@ pub async fn handler(
             0,
             None,
             true,
+            None,
             serde_json::json!({
                 "method":              req.method().as_str(),
                 "uri":                 scrubbed,
@@ -238,6 +250,7 @@ pub async fn handler(
                 0,
                 Some(status),
                 false,
+                if matches!(profile, obfuscation::Profile::None) { None } else { Some(profile.as_str().to_string()) },
                 serde_json::json!({
                     "method": method.as_str(),
                     "uri":    scrubbed_uri,
@@ -294,6 +307,7 @@ pub async fn handler(
                 0,
                 None,
                 false,
+                None,
                 serde_json::json!({
                     "method": method.as_str(),
                     "uri":    scrubbed_uri,

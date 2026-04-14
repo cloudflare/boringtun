@@ -130,15 +130,15 @@ pub fn apply_request_headers(
     headers.remove("dnt");
     headers.remove("sec-gpc");
 
-    // Normalize User-Agent to configured override string
-    if !config.fox_ua_override.is_empty() {
-        headers.insert(
-            "user-agent",
-            axum::http::HeaderValue::from_str(&config.fox_ua_override).unwrap_or_else(|_| {
-                axum::http::HeaderValue::from_static("Mozilla/5.0 (compatible; Generic/1.0)")
-            }),
-        );
-    }
+    // Normalize User-Agent to configured override string (or default if empty)
+    let ua = if config.fox_ua_override.is_empty() {
+        axum::http::HeaderValue::from_static("Mozilla/5.0 (compatible; Generic/1.0)")
+    } else {
+        axum::http::HeaderValue::from_str(&config.fox_ua_override).unwrap_or_else(|_| {
+            axum::http::HeaderValue::from_static("Mozilla/5.0 (compatible; Generic/1.0)")
+        })
+    };
+    headers.insert("user-agent", ua);
 }
 
 /// Apply response header obfuscation for Fox profiles.

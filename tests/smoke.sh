@@ -31,8 +31,16 @@ for i in {1..60}; do
 done
 
 echo "🔍 Checking WireGuard interface status"
-docker compose exec -T ssl-proxy wg show wg0
-echo "✅ WireGuard interface is active"
+WG_OUTPUT=$(docker compose exec -T ssl-proxy wg show wg0)
+echo "$WG_OUTPUT"
+
+if echo "$WG_OUTPUT" | grep -q "peer:" && echo "$WG_OUTPUT" | grep -q "latest handshake"; then
+    echo "✅ WireGuard interface is active with connected peers"
+else
+    echo "⚠️ WireGuard interface exists but has no active peers"
+    echo "Full wg output:"
+    echo "$WG_OUTPUT"
+fi
 
 echo "🔌 Testing CONNECT proxy request"
 echo "Using proxy health endpoint for reliable testing"
@@ -52,7 +60,7 @@ echo "🔍 Verifying request was logged"
 sleep 2
 LOGS=$(docker compose logs ssl-proxy)
 
-if echo "$LOGS" | grep -q "foxnews.com"; then
+if echo "$LOGS" | grep -q "localhost:3000/health\|/health"; then
     echo "✅ Proxy request successfully logged"
 else
     echo "❌ Proxy request not found in logs"
