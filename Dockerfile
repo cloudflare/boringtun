@@ -5,8 +5,6 @@ ARG CARGO_FEATURES=""
 WORKDIR /app
 COPY src ./src
 COPY Cargo.toml Cargo.lock ./
-# Create Oracle Instant Client directory (populated via lib-linux/ when oracle-db feature is used)
-RUN mkdir -p /opt/instantclient
 RUN if [ -n "$CARGO_FEATURES" ]; then \
       OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES"; \
     else \

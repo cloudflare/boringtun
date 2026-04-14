@@ -28,6 +28,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     volumes:
+      - ./lib:/app/lib
       - ./config:/config
       - ./wallet:/app/wallet
     environment:
