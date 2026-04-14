@@ -34,7 +34,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build docker image
-        run: docker compose build
+        run: docker build -t ssl-proxy .
 
       - name: Run smoke test
         run: ./tests/smoke.sh

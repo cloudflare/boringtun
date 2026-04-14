@@ -1,14 +1,17 @@
 FROM coredns/coredns:1.12.3 AS coredns
 
 FROM rust:1.86-slim AS builder
-ARG CARGO_FEATURES="oracle-db"
+ARG CARGO_FEATURES=""
 WORKDIR /app
-COPY lib-linux /opt/instantclient
 COPY src ./src
 COPY Cargo.toml Cargo.lock ./
-# Pin time dependencies to compatible versions for Rust 1.86.0
-RUN cargo update time@0.3.47 --precise 0.3.36
-RUN OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES"
+# Optionally copy Oracle Instant Client libs (only needed for oracle-db feature)
+COPY lib-linux* /opt/instantclient/
+RUN if [ -n "$CARGO_FEATURES" ]; then \
+      OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES"; \
+    else \
+      cargo build --release; \
+    fi
 
 # debian:bookworm-slim is required (not alpine) because Oracle Instant Client
 # depends on libaio1, which is glibc-only and unavailable on musl/alpine.
@@ -27,8 +30,10 @@ WORKDIR /app
 COPY --from=coredns /coredns /usr/local/bin/coredns
 COPY --from=builder /app/target/release/ssl-proxy .
 COPY static ./static
-COPY --from=builder /opt/instantclient /app/lib
-COPY wallet ./wallet
+# Oracle Instant Client libs (may be empty if oracle-db feature is not used)
+COPY --from=builder /opt/instantclient/ /app/lib/
+# Wallet directory is optional; create empty dir if not present
+RUN mkdir -p /app/wallet
 COPY docker/wg_up.sh /usr/local/bin/wg_up.sh
 COPY docker/entrypoint.sh /usr/local/bin/start-proxy-wg
 RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh \
