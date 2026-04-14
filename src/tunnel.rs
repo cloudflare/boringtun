@@ -13,7 +13,7 @@ use tracing::{debug, error, info};
 use crate::{blocklist, obfuscation, state::SharedState};
 
 /// Maximum time a single tarpit connection is held open.
-const MAX_TARPIT_MS: u64 = 5 * 60 * 1_000; // 5 minutes
+const MAX_TARPIT_MS: u64 = 10_000; // 10 seconds
 
 /// Process-wide semaphore — initialised once, shared via Arc in AppState.
 pub fn tarpit_semaphore(max_tarpit: usize) -> Arc<Semaphore> {
