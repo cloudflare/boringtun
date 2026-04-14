@@ -10,3 +10,5 @@
 /config/**/*-credentials.*
 /config/**/secrets.*
 /config/wg_confs/*.conf
+/secrets/proxy_password.txt
+/secrets/oracle_password.txt

@@ -20,6 +20,9 @@ pub struct Config {
     pub fox_ua_override: String,
     pub tls_cert_path: Option<String>,
     pub tls_key_path: Option<String>,
+    pub proxy_username: Option<String>,
+    pub proxy_password: Option<String>,
+    pub proxy_password_file: String,
 }
 
 use thiserror::Error;
@@ -34,6 +37,8 @@ pub enum ConfigError {
     MissingOracleUser,
     #[error("ADMIN_API_KEY is required and must not be empty")]
     MissingAdminApiKey,
+    #[error("PROXY_USERNAME is set but PROXY_PASSWORD is missing (both are required for proxy auth)")]
+    MissingProxyPassword,
 }
 
 #[cfg(test)]
@@ -126,6 +131,21 @@ impl Config {
             .ok()
             .filter(|s| !s.is_empty());
         let tls_key_path = std::env::var("TLS_KEY_PATH").ok().filter(|s| !s.is_empty());
+        let proxy_username = std::env::var("PROXY_USERNAME").ok().filter(|s| !s.is_empty());
+        let proxy_password_file = std::env::var("PROXY_PASSWORD_FILE").unwrap_or_default();
+        let proxy_password = std::env::var("PROXY_PASSWORD")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                if !proxy_password_file.is_empty() {
+                    std::fs::read_to_string(&proxy_password_file)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                } else {
+                    None
+                }
+            });
 
         // Validate required fields
         if proxy_port == wg_port {
@@ -136,6 +156,9 @@ impl Config {
         }
         if oracle_user.is_empty() && cfg!(feature = "oracle-db") {
             return Err(ConfigError::MissingOracleUser);
+        }
+        if proxy_username.is_some() && proxy_password.is_none() {
+            return Err(ConfigError::MissingProxyPassword);
         }
 
         Ok(Self {
@@ -158,6 +181,9 @@ impl Config {
             fox_ua_override,
             tls_cert_path,
             tls_key_path,
+            proxy_username,
+            proxy_password,
+            proxy_password_file,
         })
     }
 

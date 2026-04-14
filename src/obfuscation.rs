@@ -189,6 +189,9 @@ mod tests {
             fox_ua_override: "Mozilla/5.0 (Test UA)".to_string(),
             tls_cert_path: None,
             tls_key_path: None,
+            proxy_username: None,
+            proxy_password: None,
+            proxy_password_file: String::new(),
         }
     }
 

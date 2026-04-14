@@ -33,6 +33,7 @@ quinn = "0.11"
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
 bytes = "1"
+base64 = "0.22"
 
 [features]
 oracle-db = ["oracle"]

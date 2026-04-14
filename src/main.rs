@@ -12,12 +12,13 @@ mod tunnel;
 use axum::http::Method;
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::{Request, Response, StatusCode},
     middleware::{self, Next},
     response::IntoResponse,
     routing::{any, get},
     Router,
 };
+use base64::Engine;
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
     TokioAsyncResolver,
@@ -46,6 +47,36 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     a_buf[..a_bytes.len().min(MAX_LEN)].copy_from_slice(&a_bytes[..a_bytes.len().min(MAX_LEN)]);
     b_buf[..b_bytes.len().min(MAX_LEN)].copy_from_slice(&b_bytes[..b_bytes.len().min(MAX_LEN)]);
     a_buf.ct_eq(&b_buf).into()
+}
+
+/// Validate the Proxy-Authorization header (RFC 7235 / RFC 7617 Basic scheme).
+/// Returns `true` when the header carries valid credentials.
+fn check_proxy_auth(req: &Request<Body>, username: &str, password: &str) -> bool {
+    let header = match req
+        .headers()
+        .get("proxy-authorization")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(h) => h,
+        None => return false,
+    };
+    let encoded = match header.strip_prefix("Basic ") {
+        Some(e) => e,
+        None => return false,
+    };
+    let decoded = match base64::engine::general_purpose::STANDARD.decode(encoded) {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    let decoded_str = match std::str::from_utf8(&decoded) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let (user, pass) = match decoded_str.split_once(':') {
+        Some(pair) => pair,
+        None => return false,
+    };
+    constant_time_eq(user, username) && constant_time_eq(pass, password)
 }
 
 #[tokio::main]
@@ -170,6 +201,19 @@ async fn main() {
     #[cfg(feature = "oracle-db")]
     dashboard::spawn_oracle_flusher(state.clone(), shutdown.clone());
 
+    // Build proxy credentials for WAN authentication (RFC 7235 Basic).
+    let proxy_creds: Option<std::sync::Arc<(String, String)>> =
+        match (&config.proxy_username, &config.proxy_password) {
+            (Some(u), Some(p)) => {
+                info!(username = %u, "proxy authentication enabled");
+                Some(std::sync::Arc::new((u.clone(), p.clone())))
+            }
+            _ => {
+                warn!("PROXY_USERNAME / PROXY_PASSWORD not set \u{2014} proxy has NO authentication");
+                None
+            }
+        };
+
     info!(
         proxy_port = config.proxy_port,
         tproxy_port = config.tproxy_port,
@@ -290,6 +334,7 @@ async fn main() {
                 let router = router.clone();
                 let token = shutdown.clone();
                 let tls_acceptor = tls_acceptor.clone();
+                let proxy_creds = proxy_creds.clone();
 
                 tasks.spawn(async move {
                     let _permit = permit; // hold until task completes
@@ -302,8 +347,32 @@ async fn main() {
                             let svc = service_fn(move |req: Request<hyper::body::Incoming>| {
                                 let state = state.clone();
                                 let router = router.clone();
+                                let creds = proxy_creds.clone();
                                 async move {
                                     let req: Request<Body> = req.map(Body::new);
+
+                                    // Proxy requests (CONNECT or absolute-URI forwards)
+                                    // require Proxy-Authorization when credentials are
+                                    // configured. Internal management routes (relative
+                                    // URIs such as /health, /dashboard) pass through.
+                                    let is_proxy_request = req.method() == Method::CONNECT
+                                        || req.uri().scheme().is_some();
+
+                                    if is_proxy_request {
+                                        if let Some(ref c) = creds {
+                                            if !check_proxy_auth(&req, &c.0, &c.1) {
+                                                return Ok(Response::builder()
+                                                    .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+                                                    .header(
+                                                        "Proxy-Authenticate",
+                                                        "Basic realm=\"proxy\"",
+                                                    )
+                                                    .body(Body::empty())
+                                                    .unwrap());
+                                            }
+                                        }
+                                    }
+
                                     if req.method() == Method::CONNECT {
                                         tunnel::handle(req, state, Some(peer.ip().to_string())).await
                                     } else {
