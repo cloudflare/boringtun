@@ -86,6 +86,11 @@ pub(crate) fn check_proxy_auth<B>(req: &Request<B>, username: &str, password: &s
 
 #[tokio::main]
 async fn main() {
+    // Install rustls crypto provider FIRST before ANY other code
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     let filter = tracing_subscriber::EnvFilter::from_default_env()
         .add_directive("ssl_proxy=info".parse().unwrap())
         .add_directive("tower_http=info".parse().unwrap());
