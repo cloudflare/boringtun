@@ -209,7 +209,9 @@ async fn main() {
                 Some(std::sync::Arc::new((u.clone(), p.clone())))
             }
             _ => {
-                warn!("PROXY_USERNAME / PROXY_PASSWORD not set \u{2014} proxy has NO authentication");
+                warn!(
+                    "PROXY_USERNAME / PROXY_PASSWORD not set \u{2014} proxy has NO authentication"
+                );
                 None
             }
         };

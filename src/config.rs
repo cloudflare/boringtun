@@ -37,7 +37,9 @@ pub enum ConfigError {
     MissingOracleUser,
     #[error("ADMIN_API_KEY is required and must not be empty")]
     MissingAdminApiKey,
-    #[error("PROXY_USERNAME is set but PROXY_PASSWORD is missing (both are required for proxy auth)")]
+    #[error(
+        "PROXY_USERNAME is set but PROXY_PASSWORD is missing (both are required for proxy auth)"
+    )]
     MissingProxyPassword,
 }
 
@@ -131,7 +133,9 @@ impl Config {
             .ok()
             .filter(|s| !s.is_empty());
         let tls_key_path = std::env::var("TLS_KEY_PATH").ok().filter(|s| !s.is_empty());
-        let proxy_username = std::env::var("PROXY_USERNAME").ok().filter(|s| !s.is_empty());
+        let proxy_username = std::env::var("PROXY_USERNAME")
+            .ok()
+            .filter(|s| !s.is_empty());
         let proxy_password_file = std::env::var("PROXY_PASSWORD_FILE").unwrap_or_default();
         let proxy_password = std::env::var("PROXY_PASSWORD")
             .ok()
