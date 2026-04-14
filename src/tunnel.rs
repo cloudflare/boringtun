@@ -323,6 +323,38 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
         }
     }
 
+    // Certificate Pinning Bypass: Pass through domains with hardcoded certificate pins
+    let bypass_list = [
+        "graph.facebook.com",
+        "graph.instagram.com",
+        "googlevideo.com",
+        "s.youtube.com"
+    ];
+
+    if let Some(ref name) = hostname {
+        if bypass_list.iter().any(|&domain| name.contains(domain)) {
+            // Raw TCP pass-through - no obfuscation, no TLS termination
+            info!(
+                target: "audit",
+                event = "tunnel_bypass",
+                host = %name,
+                "Certificate pinned domain detected, bypassing interception"
+            );
+            
+            match tokio::time::timeout(
+                tokio::time::Duration::from_secs(10),
+                tokio::net::TcpStream::connect(orig_dst),
+            ).await {
+                Ok(Ok(mut upstream)) => {
+                    set_keepalive(&upstream);
+                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut upstream).await;
+                },
+                _ => {}
+            }
+            return;
+        }
+    }
+
     // Classify obfuscation profile after blocklist check
     let profile = if let Some(ref name) = hostname {
         obfuscation::classify_obfuscation(name, &state.config)
@@ -928,6 +960,59 @@ pub async fn handle(
                 }
             });
         }
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::empty())
+            .unwrap());
+    }
+
+    // Certificate Pinning Bypass: Pass through domains with hardcoded certificate pins
+    let bypass_list = [
+        "graph.facebook.com",
+        "graph.instagram.com",
+        "googlevideo.com",
+        "s.youtube.com"
+    ];
+
+    if bypass_list.iter().any(|&domain| hostname.contains(domain)) {
+        // Raw TCP pass-through - no obfuscation, no TLS termination
+        info!(
+            target: "audit",
+            event = "tunnel_bypass",
+            host = %hostname,
+            "Certificate pinned domain detected, bypassing interception"
+        );
+        
+        tokio::spawn(async move {
+            match upgrade_fut.await {
+                Ok(upgraded) => {
+                    let mut client = TokioIo::new(upgraded);
+                    
+                    let connect = async {
+                        let addrs = state.resolver.lookup_ip(hostname).await?;
+                        let mut last_err =
+                            std::io::Error::new(std::io::ErrorKind::NotFound, "DoH returned no addresses");
+                        for ip in addrs.iter() {
+                            match tokio::net::TcpStream::connect((ip, port)).await {
+                                Ok(stream) => return Ok(stream),
+                                Err(e) => last_err = e,
+                            }
+                        }
+                        Err(last_err)
+                    };
+                    
+                    if let Ok(Ok(mut upstream)) = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(10), 
+                        connect
+                    ).await {
+                        set_keepalive(&upstream);
+                        let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
+                    }
+                },
+                Err(e) => error!(%e, "CONNECT upgrade failed"),
+            }
+        });
+
         return Ok(Response::builder()
             .status(StatusCode::OK)
             .body(Body::empty())
