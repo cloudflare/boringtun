@@ -5,8 +5,8 @@ ARG CARGO_FEATURES=""
 WORKDIR /app
 COPY src ./src
 COPY Cargo.toml Cargo.lock ./
-# Optionally copy Oracle Instant Client libs (only needed for oracle-db feature)
-COPY lib-linux* /opt/instantclient/
+# Create Oracle Instant Client directory (populated via lib-linux/ when oracle-db feature is used)
+RUN mkdir -p /opt/instantclient
 RUN if [ -n "$CARGO_FEATURES" ]; then \
       OCI_LIB_DIR=/opt/instantclient cargo build --release --features "$CARGO_FEATURES"; \
     else \
@@ -30,8 +30,8 @@ WORKDIR /app
 COPY --from=coredns /coredns /usr/local/bin/coredns
 COPY --from=builder /app/target/release/ssl-proxy .
 COPY static ./static
-# Oracle Instant Client libs (may be empty if oracle-db feature is not used)
-COPY --from=builder /opt/instantclient/ /app/lib/
+# Oracle Instant Client libs (empty unless oracle-db feature was built with lib-linux/)
+RUN mkdir -p /app/lib
 # Wallet directory is optional; create empty dir if not present
 RUN mkdir -p /app/wallet
 COPY docker/wg_up.sh /usr/local/bin/wg_up.sh
