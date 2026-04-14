@@ -202,6 +202,26 @@ pub async fn handler(
     req.headers_mut().remove("transfer-encoding");
     req.headers_mut().remove("upgrade");
 
+    // Clean header policy: Remove identifying headers before upstream
+    {
+        let headers = req.headers_mut();
+        
+        // Remove all X-Forwarded-* headers
+        let x_forwarded_headers: Vec<_> = headers.keys()
+            .filter(|k| k.as_str().starts_with("x-forwarded-"))
+            .map(|k| k.clone())
+            .collect();
+        for name in x_forwarded_headers {
+            headers.remove(name);
+        }
+        
+        // Remove Via headers
+        headers.remove("via");
+        
+        // Replace User-Agent with generic value
+        headers.insert("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse().unwrap());
+    }
+
     // Apply request header obfuscation for Fox profiles
     if !matches!(profile, obfuscation::Profile::None) {
         obfuscation::apply_request_headers(req.headers_mut(), &profile, &state.config);

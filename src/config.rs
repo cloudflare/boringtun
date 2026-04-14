@@ -23,6 +23,7 @@ pub struct Config {
     pub proxy_username: Option<String>,
     pub proxy_password: Option<String>,
     pub proxy_password_file: String,
+    pub tunnel_endpoint: Option<String>,
 }
 
 use thiserror::Error;
@@ -109,6 +110,7 @@ impl std::fmt::Debug for Config {
             .field("proxy_username", &self.proxy_username)
             .field("proxy_password", &"[REDACTED]")
             .field("proxy_password_file", &self.proxy_password_file)
+            .field("tunnel_endpoint", &self.tunnel_endpoint)
             .finish()
     }
 }
@@ -201,6 +203,10 @@ impl Config {
                 }
             });
 
+        let tunnel_endpoint = std::env::var("TUNNEL_ENDPOINT")
+            .ok()
+            .filter(|s| !s.is_empty());
+
         // Validate required fields
         if proxy_port == tproxy_port || tproxy_port == wg_port || proxy_port == wg_port {
             return Err(ConfigError::PortConflict);
@@ -244,6 +250,7 @@ impl Config {
             proxy_username,
             proxy_password,
             proxy_password_file,
+            tunnel_endpoint,
         })
     }
 
