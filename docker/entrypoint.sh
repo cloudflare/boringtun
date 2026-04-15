@@ -40,6 +40,14 @@ read_trimmed_file() {
     tr -d '\r' <"$path" | sed -e 's/[[:space:]]*$//' | tail -n 1
 }
 
+try_read_trimmed_file() {
+    local path="$1"
+    if [ ! -f "$path" ]; then
+        return 1
+    fi
+    tr -d '\r' <"$path" | sed -e 's/[[:space:]]*$//' | tail -n 1
+}
+
 write_trimmed_file() {
     local path="$1"
     local value="$2"
@@ -107,6 +115,41 @@ resolve_wan_interface() {
     fi
 
     WG_WAN_INTERFACE="$resolved"
+}
+
+resolve_peer_public_key() {
+    local peer_public_key=""
+    local legacy_peer_public_key_file=""
+    local peer_private_key=""
+
+    peer_public_key="$(try_read_trimmed_file "$WG_PEER_PUBLIC_KEY_FILE" || true)"
+    if [ -n "$peer_public_key" ]; then
+        printf '%s' "$peer_public_key"
+        return 0
+    fi
+
+    legacy_peer_public_key_file="$(dirname "$WG_PEER_PUBLIC_KEY_FILE")/pubickey-peer1"
+    peer_public_key="$(try_read_trimmed_file "$legacy_peer_public_key_file" || true)"
+    if [ -n "$peer_public_key" ]; then
+        echo "[#] Using legacy peer public key file: $legacy_peer_public_key_file" >&2
+        write_trimmed_file "$WG_PEER_PUBLIC_KEY_FILE" "$peer_public_key" 644
+        echo "[#] Synced peer public key to $WG_PEER_PUBLIC_KEY_FILE" >&2
+        printf '%s' "$peer_public_key"
+        return 0
+    fi
+
+    peer_private_key="$(trim "$(extract_ini_value "$WG_PEER_CONFIG_PATH" "Interface" "PrivateKey")")"
+    if [ -n "$peer_private_key" ]; then
+        peer_public_key="$(printf '%s\n' "$peer_private_key" | wg pubkey)"
+        echo "[#] Derived peer public key from $WG_PEER_CONFIG_PATH" >&2
+        write_trimmed_file "$WG_PEER_PUBLIC_KEY_FILE" "$peer_public_key" 644
+        echo "[#] Wrote derived peer public key to $WG_PEER_PUBLIC_KEY_FILE" >&2
+        printf '%s' "$peer_public_key"
+        return 0
+    fi
+
+    echo "missing peer public key: set WG_PEER_PUBLIC_KEY_FILE or include Interface.PrivateKey in $WG_PEER_CONFIG_PATH" >&2
+    exit 1
 }
 
 format_handshake_timestamp() {
@@ -249,7 +292,7 @@ render_wireguard_config() {
     fi
 
     server_private_key="$(read_trimmed_file "$WG_SERVER_PRIVATE_KEY_FILE")"
-    peer_public_key="$(read_trimmed_file "$WG_PEER_PUBLIC_KEY_FILE")"
+    peer_public_key="$(resolve_peer_public_key)"
 
     if [ -f "$WG_PEER_PRESHARED_KEY_FILE" ]; then
         peer_preshared_key="$(read_trimmed_file "$WG_PEER_PRESHARED_KEY_FILE")"
