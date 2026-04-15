@@ -430,9 +430,9 @@ fn update_connection_session_close(
     let sql = "UPDATE connection_sessions SET \
                closed_at = SYSTIMESTAMP, duration_ms = :2, bytes_up = :3, bytes_down = :4, \
                blocked = :5, tarpitted = :6, tarpit_held_ms = :7, verdict = :8, category = :9, \
-               obfuscation_profile = :10, tls_ver = COALESCE(:11, tls_ver), \
-               alpn = COALESCE(:12, alpn), ja3_lite = COALESCE(:13, ja3_lite), \
-               resolved_ip = COALESCE(:14, resolved_ip), asn_org = COALESCE(:15, asn_org) \
+               obfuscation_profile = :10, tls_ver = :11, \
+               alpn = :12, ja3_lite = :13, \
+               resolved_ip = :14, asn_org = :15 \
                WHERE session_id = :1";
     let mut stmt = conn.statement(sql).build()?;
     for ev in batch {
