@@ -3,6 +3,13 @@ FROM coredns/coredns:1.12.3 AS coredns
 FROM rust:1.86-slim AS builder
 ARG CARGO_FEATURES=""
 WORKDIR /app
+
+# Install build dependencies required for openssl-sys
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY src ./src
 COPY Cargo.toml Cargo.lock ./
 RUN if [ -n "$CARGO_FEATURES" ]; then \
