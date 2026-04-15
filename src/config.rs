@@ -16,6 +16,7 @@ pub struct Config {
     pub oracle_user: String,
     pub oracle_pass: Option<String>,
     pub oracle_pass_file: String,
+    pub tns_admin: Option<String>,
     pub obfuscation_profiles: String,
     pub obfuscation_enabled: bool,
     pub obfuscation_profile: Vec<String>,
@@ -80,6 +81,7 @@ mod tests {
             "ORACLE_USER",
             "ORACLE_PASS",
             "ORACLE_PASS_FILE",
+            "TNS_ADMIN",
             "OBFUSCATION_PROFILES",
             "OBFUSCATION_ENABLED",
             "OBFUSCATION_PROFILE",
@@ -177,6 +179,7 @@ impl std::fmt::Debug for Config {
             .field("oracle_user", &self.oracle_user)
             .field("oracle_pass", &"[REDACTED]")
             .field("oracle_pass_file", &self.oracle_pass_file)
+            .field("tns_admin", &self.tns_admin)
             .field("obfuscation_profiles", &self.obfuscation_profiles)
             .field("obfuscation_enabled", &self.obfuscation_enabled)
             .field("obfuscation_profile", &self.obfuscation_profile)
@@ -250,6 +253,7 @@ impl Config {
         let oracle_user = std::env::var("ORACLE_USER").unwrap_or_default();
         let oracle_pass = std::env::var("ORACLE_PASS").ok().filter(|s| !s.is_empty());
         let oracle_pass_file = std::env::var("ORACLE_PASS_FILE").unwrap_or_default();
+        let tns_admin = std::env::var("TNS_ADMIN").ok().filter(|s| !s.is_empty());
         let obfuscation_profiles = std::env::var("OBFUSCATION_PROFILES").unwrap_or_default();
         let obfuscation_enabled = std::env::var("OBFUSCATION_ENABLED")
             .map(|v| match v.to_ascii_lowercase().as_str() {
@@ -348,6 +352,7 @@ impl Config {
             oracle_user,
             oracle_pass,
             oracle_pass_file,
+            tns_admin,
             obfuscation_profiles,
             obfuscation_enabled,
             obfuscation_profile,

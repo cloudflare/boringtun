@@ -179,6 +179,7 @@ mod tests {
             oracle_user: "".to_string(),
             oracle_pass: None,
             oracle_pass_file: "".to_string(),
+            tns_admin: None,
             obfuscation_profiles: "".to_string(),
             obfuscation_enabled: true,
             obfuscation_profile: vec![

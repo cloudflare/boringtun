@@ -43,6 +43,7 @@ mod tests {
             oracle_user: "".to_string(),
             oracle_pass: None,
             oracle_pass_file: "".to_string(),
+            tns_admin: None,
             obfuscation_profiles: "".to_string(),
             obfuscation_enabled: true,
             obfuscation_profile: vec![
@@ -261,6 +262,8 @@ pub struct AppState {
     pub config: crate::config::Config,
     #[cfg(feature = "oracle-db")]
     pub db: std::sync::Arc<crate::db::EventSender>,
+    #[cfg(feature = "oracle-db")]
+    pub oracle_startup_status: crate::db::OracleStatus,
 }
 
 impl AppState {
@@ -276,22 +279,28 @@ impl AppState {
     ) -> SharedState {
         let seed = SEED.iter().map(|s| s.to_string()).collect();
         #[cfg(feature = "oracle-db")]
-        let db = {
-            let conn_str = config.oracle_conn.clone();
-            let user = config.oracle_user.clone();
-            let pass = config.oracle_pass.clone().unwrap_or_else(|| {
-                std::fs::read_to_string(&config.oracle_pass_file)
-                    .unwrap_or_default()
-                    .trim_end_matches(&['\n', '\r'][..])
-                    .to_string()
-            });
-            if conn_str.is_empty() || user.is_empty() {
-                tracing::warn!(
-                    "oracle-db feature enabled but ORACLE_CONN/ORACLE_USER not set; \
-                     DB events will not be persisted"
-                );
+        let (oracle_startup_status, db) = match crate::db::oracle_connect_args(&config) {
+            Ok(args) => (
+                crate::db::OracleStatus::Ready,
+                std::sync::Arc::new(crate::db::spawn_writer(
+                    args.conn_str,
+                    args.user,
+                    args.pass,
+                    shutdown,
+                )),
+            ),
+            Err(status) => {
+                if let crate::db::OracleStatus::Misconfigured(reason) = &status {
+                    warn!(
+                        reason = %reason,
+                        "oracle startup degraded; DB events will not be persisted until the container is restarted with a valid wallet"
+                    );
+                }
+                (
+                    status,
+                    std::sync::Arc::new(crate::db::EventSender::disabled()),
+                )
             }
-            std::sync::Arc::new(crate::db::spawn_writer(conn_str, user, pass, shutdown))
         };
         Arc::new(Self {
             client,
@@ -314,6 +323,8 @@ impl AppState {
             config,
             #[cfg(feature = "oracle-db")]
             db,
+            #[cfg(feature = "oracle-db")]
+            oracle_startup_status,
         })
     }
 
