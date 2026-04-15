@@ -5,11 +5,38 @@
 /// All proxy_events inserts are serialised through a single background writer
 /// task (one persistent connection, one blocking thread).  The hot path just
 /// sends to an mpsc channel and returns immediately — no pool, no contention.
-use std::sync::Arc;
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
+use crate::config::Config;
+
 const CHANNEL_CAP: usize = 4_096;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OracleStatus {
+    Ready,
+    Misconfigured(String),
+    Unreachable(String),
+    Timeout,
+}
+
+impl OracleStatus {
+    pub fn readiness_body(&self) -> &'static str {
+        match self {
+            Self::Ready => "ok",
+            Self::Misconfigured(_) => "oracle misconfigured",
+            Self::Unreachable(_) => "db unreachable",
+            Self::Timeout => "db timeout",
+        }
+    }
+}
+
+pub struct OracleConnectArgs {
+    pub conn_str: String,
+    pub user: String,
+    pub pass: String,
+}
 
 #[derive(Clone)]
 pub struct ProxyEvent {
@@ -122,19 +149,185 @@ struct ProcessingError {
 
 /// Cheap sender handle cloned into every request handler.
 #[derive(Clone)]
-pub struct EventSender(mpsc::Sender<DbEvent>);
+pub struct EventSender(Option<mpsc::Sender<DbEvent>>);
 
 impl EventSender {
+    pub fn disabled() -> Self {
+        Self(None)
+    }
+
     /// Non-blocking enqueue.  Drops the event and logs a warning if the
     /// channel is full — the hot path must never block.
     pub fn send(&self, ev: DbEvent) {
-        if let Err(e) = self.0.try_send(ev) {
+        let Some(sender) = &self.0 else {
+            return;
+        };
+
+        if let Err(e) = sender.try_send(ev) {
             warn!(
                 ev = ?event_kind(&e.into_inner()),
                 "db: event channel full, dropping row"
             );
         }
     }
+}
+
+pub fn oracle_connect_args(config: &Config) -> Result<OracleConnectArgs, OracleStatus> {
+    let conn_str = config.oracle_conn.trim().to_string();
+    let user = config.oracle_user.trim().to_string();
+
+    if conn_str.is_empty() {
+        return Err(OracleStatus::Misconfigured(
+            "ORACLE_CONN is empty".to_string(),
+        ));
+    }
+    if user.is_empty() {
+        return Err(OracleStatus::Misconfigured(
+            "ORACLE_USER is empty".to_string(),
+        ));
+    }
+
+    let pass = read_oracle_password(config).map_err(OracleStatus::Misconfigured)?;
+    validate_wallet(config, &conn_str)?;
+
+    Ok(OracleConnectArgs {
+        conn_str,
+        user,
+        pass,
+    })
+}
+
+pub async fn oracle_readiness(config: &Config, timeout: Duration) -> OracleStatus {
+    let args = match oracle_connect_args(config) {
+        Ok(args) => args,
+        Err(status) => return status,
+    };
+
+    let OracleConnectArgs {
+        conn_str,
+        user,
+        pass,
+    } = args;
+
+    match tokio::time::timeout(
+        timeout,
+        tokio::task::spawn_blocking(move || {
+            oracle::Connection::connect(&user, &pass, &conn_str)
+                .and_then(|conn| conn.query_row_as::<u32>("SELECT 1 FROM DUAL", &[]).map(|_| ()))
+        }),
+    )
+    .await
+    {
+        Ok(Ok(Ok(()))) => OracleStatus::Ready,
+        Ok(Ok(Err(e))) => OracleStatus::Unreachable(e.to_string()),
+        Ok(Err(e)) => OracleStatus::Unreachable(format!("oracle readiness task failed: {e}")),
+        Err(_) => OracleStatus::Timeout,
+    }
+}
+
+fn read_oracle_password(config: &Config) -> Result<String, String> {
+    if let Some(pass) = config.oracle_pass.clone().filter(|s| !s.trim().is_empty()) {
+        return Ok(pass);
+    }
+
+    if config.oracle_pass_file.trim().is_empty() {
+        return Err("ORACLE_PASS/ORACLE_PASS_FILE not set".to_string());
+    }
+
+    let path = Path::new(&config.oracle_pass_file);
+    let password = std::fs::read_to_string(path).map_err(|e| {
+        format!(
+            "unable to read ORACLE_PASS_FILE {}: {}",
+            path.display(),
+            e
+        )
+    })?;
+    let password = password.trim_end_matches(&['\n', '\r'][..]).to_string();
+    if password.is_empty() {
+        return Err(format!("ORACLE_PASS_FILE {} is empty", path.display()));
+    }
+    Ok(password)
+}
+
+fn validate_wallet(config: &Config, conn_str: &str) -> Result<(), OracleStatus> {
+    let Some(tns_admin) = config.tns_admin.as_ref() else {
+        return Err(OracleStatus::Misconfigured("TNS_ADMIN is not set".to_string()));
+    };
+
+    let tns_admin = Path::new(tns_admin);
+    if !tns_admin.is_dir() {
+        return Err(OracleStatus::Misconfigured(format!(
+            "TNS_ADMIN directory not found: {}",
+            tns_admin.display()
+        )));
+    }
+
+    let tnsnames = tns_admin.join("tnsnames.ora");
+    if !tnsnames.is_file() {
+        return Err(OracleStatus::Misconfigured(format!(
+            "missing tnsnames.ora in {}",
+            tns_admin.display()
+        )));
+    }
+
+    if !wallet_artifacts_present(tns_admin) {
+        return Err(OracleStatus::Misconfigured(format!(
+            "missing Oracle wallet artifacts in {}",
+            tns_admin.display()
+        )));
+    }
+
+    if is_tns_alias(conn_str) {
+        let tnsnames_contents = std::fs::read_to_string(&tnsnames).map_err(|e| {
+            OracleStatus::Misconfigured(format!(
+                "unable to read {}: {}",
+                tnsnames.display(),
+                e
+            ))
+        })?;
+        if !tns_alias_exists(&tnsnames_contents, conn_str) {
+            return Err(OracleStatus::Misconfigured(format!(
+                "TNS alias {} not found in {}",
+                conn_str,
+                tnsnames.display()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn wallet_artifacts_present(tns_admin: &Path) -> bool {
+    [
+        "cwallet.sso",
+        "ewallet.p12",
+        "keystore.jks",
+        "truststore.jks",
+        "sqlnet.ora",
+    ]
+    .iter()
+    .any(|name| tns_admin.join(name).is_file())
+}
+
+fn is_tns_alias(conn_str: &str) -> bool {
+    !conn_str.is_empty()
+        && conn_str.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
+        })
+}
+
+fn tns_alias_exists(tnsnames_contents: &str, alias: &str) -> bool {
+    tnsnames_contents.lines().any(|line| {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('!') {
+            return false;
+        }
+
+        let Some((candidate, _)) = trimmed.split_once('=') else {
+            return false;
+        };
+        candidate.trim().eq_ignore_ascii_case(alias)
+    })
 }
 
 /// Spawn the single writer task.  Returns the sender handle to store in AppState.
@@ -235,7 +428,7 @@ pub fn spawn_writer(
         }
     });
 
-    EventSender(tx)
+    EventSender(Some(tx))
 }
 
 fn event_kind(ev: &DbEvent) -> &'static str {

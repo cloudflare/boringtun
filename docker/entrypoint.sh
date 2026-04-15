@@ -11,6 +11,7 @@ WG_SERVER_PUBLIC_KEY_FILE="${WG_SERVER_PUBLIC_KEY_FILE:-/config/server/publickey
 WG_PEER_CONFIG_PATH="${WG_PEER_CONFIG_PATH:-/config/peer1/peer1.conf}"
 WG_PEER_PUBLIC_KEY_FILE="${WG_PEER_PUBLIC_KEY_FILE:-/config/peer1/publickey-peer1}"
 WG_PEER_PRESHARED_KEY_FILE="${WG_PEER_PRESHARED_KEY_FILE:-/config/peer1/presharedkey-peer1}"
+WG_SERVER_ADDRESS="${WG_SERVER_ADDRESS:-10.13.13.1/24}"
 WG_LISTEN_PORT="${WG_LISTEN_PORT:-443}"
 WG_MTU="${WG_MTU:-1280}"
 WG_PEER_ALLOWED_IPS="${WG_PEER_ALLOWED_IPS:-}"
@@ -116,31 +117,6 @@ resolve_wan_interface() {
     WG_WAN_INTERFACE="$resolved"
 }
 
-normalize_csv_unique() {
-    local input="$1"
-    awk -v input="$input" '
-        function trim(s) {
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
-            return s
-        }
-        BEGIN {
-            n = split(input, parts, ",")
-            out = ""
-            for (i = 1; i <= n; i++) {
-                item = trim(parts[i])
-                if (item == "") {
-                    continue
-                }
-                if (!(item in seen)) {
-                    seen[item] = 1
-                    out = (out == "" ? item : out "," item)
-                }
-            }
-            print out
-        }
-    '
-}
-
 resolve_peer_public_key() {
     local peer_public_key=""
     local legacy_peer_public_key_file=""
@@ -155,9 +131,9 @@ resolve_peer_public_key() {
     legacy_peer_public_key_file="$(dirname "$WG_PEER_PUBLIC_KEY_FILE")/pubickey-peer1"
     peer_public_key="$(try_read_trimmed_file "$legacy_peer_public_key_file" || true)"
     if [ -n "$peer_public_key" ]; then
-        echo "[#] Using legacy peer public key file: $legacy_peer_public_key_file" >&2
+        echo "[#] Using legacy peer public key file: $legacy_peer_public_key_file"
         write_trimmed_file "$WG_PEER_PUBLIC_KEY_FILE" "$peer_public_key" 644
-        echo "[#] Synced peer public key to $WG_PEER_PUBLIC_KEY_FILE" >&2
+        echo "[#] Synced peer public key to $WG_PEER_PUBLIC_KEY_FILE"
         printf '%s' "$peer_public_key"
         return 0
     fi
@@ -165,9 +141,9 @@ resolve_peer_public_key() {
     peer_private_key="$(trim "$(extract_ini_value "$WG_PEER_CONFIG_PATH" "Interface" "PrivateKey")")"
     if [ -n "$peer_private_key" ]; then
         peer_public_key="$(printf '%s\n' "$peer_private_key" | wg pubkey)"
-        echo "[#] Derived peer public key from $WG_PEER_CONFIG_PATH" >&2
+        echo "[#] Derived peer public key from $WG_PEER_CONFIG_PATH"
         write_trimmed_file "$WG_PEER_PUBLIC_KEY_FILE" "$peer_public_key" 644
-        echo "[#] Wrote derived peer public key to $WG_PEER_PUBLIC_KEY_FILE" >&2
+        echo "[#] Wrote derived peer public key to $WG_PEER_PUBLIC_KEY_FILE"
         printf '%s' "$peer_public_key"
         return 0
     fi
@@ -299,7 +275,6 @@ render_wireguard_config() {
     local peer_public_key
     local peer_preshared_key
     local peer_address
-    local normalized_server_address
     local escaped_server_private_key
     local escaped_peer_public_key
     local escaped_peer_preshared_key
