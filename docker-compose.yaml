@@ -38,6 +38,9 @@ services:
       - WG_SERVER_ADDRESS=10.13.13.1/24
       - WG_LISTEN_PORT=443
       - WG_MTU=1280
+      - WG_WAN_INTERFACE=auto
+      - WG_SYSCTL_RETRIES=3
+      - WG_SYSCTL_RETRY_DELAY_MS=200
       - WG_SERVER_PRIVATE_KEY_FILE=/config/server/privatekey-server
       - WG_PEER_CONFIG_PATH=/config/peer1/peer1.conf
       - WG_PEER_PUBLIC_KEY_FILE=/config/peer1/publickey-peer1

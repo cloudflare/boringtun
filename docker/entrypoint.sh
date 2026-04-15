@@ -15,6 +15,9 @@ WG_SERVER_ADDRESS="${WG_SERVER_ADDRESS:-10.13.13.1/24}"
 WG_LISTEN_PORT="${WG_LISTEN_PORT:-443}"
 WG_MTU="${WG_MTU:-1280}"
 WG_PEER_ALLOWED_IPS="${WG_PEER_ALLOWED_IPS:-}"
+WG_WAN_INTERFACE="${WG_WAN_INTERFACE:-auto}"
+WG_SYSCTL_RETRIES="${WG_SYSCTL_RETRIES:-3}"
+WG_SYSCTL_RETRY_DELAY_MS="${WG_SYSCTL_RETRY_DELAY_MS:-200}"
 
 cmd() {
     echo "[#] $*"
@@ -83,6 +86,27 @@ normalize_allowed_ips() {
     else
         printf '%s/32' "$address"
     fi
+}
+
+detect_wan_interface() {
+    ip route show default 2>/dev/null | awk '/default/ {print $5; exit}'
+}
+
+resolve_wan_interface() {
+    local resolved
+    if [ "$WG_WAN_INTERFACE" != "auto" ] && [ -n "$WG_WAN_INTERFACE" ]; then
+        resolved="$WG_WAN_INTERFACE"
+    else
+        resolved="$(detect_wan_interface)"
+    fi
+
+    resolved="$(trim "$resolved")"
+    if [ -z "$resolved" ]; then
+        echo "unable to determine WAN interface: set WG_WAN_INTERFACE explicitly" >&2
+        exit 1
+    fi
+
+    WG_WAN_INTERFACE="$resolved"
 }
 
 sync_peer_server_public_key() {
@@ -161,6 +185,9 @@ render_wireguard_config() {
     local escaped_listen_port
     local escaped_mtu
     local escaped_peer_allowed_ips
+    local escaped_wan_interface
+    local escaped_sysctl_retries
+    local escaped_sysctl_retry_delay_ms
 
     if [ ! -f "$WG_TEMPLATE_PATH" ]; then
         echo "missing WireGuard template: $WG_TEMPLATE_PATH" >&2
@@ -203,6 +230,12 @@ render_wireguard_config() {
     escaped_mtu="${escaped_mtu//&/\\&}"
     escaped_peer_allowed_ips="${WG_PEER_ALLOWED_IPS//\\/\\\\}"
     escaped_peer_allowed_ips="${escaped_peer_allowed_ips//&/\\&}"
+    escaped_wan_interface="${WG_WAN_INTERFACE//\\/\\\\}"
+    escaped_wan_interface="${escaped_wan_interface//&/\\&}"
+    escaped_sysctl_retries="${WG_SYSCTL_RETRIES//\\/\\\\}"
+    escaped_sysctl_retries="${escaped_sysctl_retries//&/\\&}"
+    escaped_sysctl_retry_delay_ms="${WG_SYSCTL_RETRY_DELAY_MS//\\/\\\\}"
+    escaped_sysctl_retry_delay_ms="${escaped_sysctl_retry_delay_ms//&/\\&}"
 
     sed \
         -e "s|__WG_SERVER_ADDRESS__|$escaped_server_address|g" \
@@ -212,6 +245,9 @@ render_wireguard_config() {
         -e "s|__WG_PEER_PUBLIC_KEY__|$escaped_peer_public_key|g" \
         -e "s|__WG_PEER_PRESHARED_KEY__|$escaped_peer_preshared_key|g" \
         -e "s|__WG_PEER_ALLOWED_IPS__|$escaped_peer_allowed_ips|g" \
+        -e "s|__WG_WAN_INTERFACE__|$escaped_wan_interface|g" \
+        -e "s|__WG_SYSCTL_RETRIES__|$escaped_sysctl_retries|g" \
+        -e "s|__WG_SYSCTL_RETRY_DELAY_MS__|$escaped_sysctl_retry_delay_ms|g" \
         "$WG_TEMPLATE_PATH" >"$WG_CONFIG_PATH"
 
     chmod 600 "$WG_CONFIG_PATH"
@@ -254,6 +290,8 @@ shutdown() {
 trap shutdown TERM
 
 ensure_wireguard_server_keys
+resolve_wan_interface
+echo "[#] Using WAN interface: $WG_WAN_INTERFACE"
 render_wireguard_config
 echo "starting WireGuard interface $WG_INTERFACE_NAME: $WG_CONFIG_PATH"
 cmd wg-quick up "$WG_CONFIG_PATH"
