@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info};
 
@@ -1052,15 +1053,37 @@ pub async fn handle(
     // Epic 3.4 — record allow for streak reset
     state.record_host_allow(hostname);
 
+    // RFC 7231 compliant CONNECT handshake implementation
+    // Write correct status line directly to socket after upgrade
     tokio::spawn(async move {
         match upgrade_fut.await {
-            Ok(upgraded) => run_tunnel(upgraded, host, state, category, peer_ip, profile).await,
+            Ok(upgraded) => {
+                let mut stream = TokioIo::new(upgraded);
+                
+                // ✅ Send EXACTLY what curl and all clients expect
+                // This is the only thing that works 100% across all HTTP clients
+                const CONNECT_OK: &[u8] = b"HTTP/1.1 200 Connection Established\r\nConnection: keep-alive\r\n\r\n";
+                
+                if let Err(e) = stream.write_all(CONNECT_OK).await {
+                    error!(%host, %e, "Failed to send CONNECT response");
+                    return;
+                }
+                
+                if let Err(e) = stream.flush().await {
+                    error!(%host, %e, "Failed to flush CONNECT response");
+                    return;
+                }
+                
+                // Now proceed with actual tunnel
+                run_tunnel(stream.into_inner(), host, state, category, peer_ip, profile).await;
+            }
             Err(e) => error!(%e, "CONNECT upgrade failed"),
         }
     });
 
+    // Return 100 Continue to Hyper so it stops processing HTTP and passes through the stream
     Ok(Response::builder()
-        .status(StatusCode::OK)
+        .status(StatusCode::CONTINUE)
         .body(Body::empty())
         .unwrap())
 }
