@@ -11,65 +11,111 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-cleanup
+wait_for_health() {
+    echo "⏳ Waiting for admin liveness and WireGuard health (timeout 60s)"
+    for i in {1..60}; do
+        if curl -f -s http://127.0.0.1:3002/health >/dev/null 2>&1 \
+            && docker compose exec -T ssl-proxy wg show wg0 >/dev/null 2>&1; then
+            echo "✅ Admin liveness and WireGuard checks passed"
+            return 0
+        fi
+        if [ "$i" = 60 ]; then
+            echo "❌ Timeout waiting for service to become healthy"
+            docker compose logs
+            exit 1
+        fi
+        sleep 1
+    done
+}
 
-echo "🚀 Bringing up stack"
-docker compose up -d
-
-echo "⏳ Waiting for health check to pass (timeout 60s)"
-for i in {1..60}; do
-    if docker compose exec -T ssl-proxy curl -f -s http://localhost:3000/health >/dev/null 2>&1; then
-        echo "✅ HTTP health check passed"
-        break
+expected_ready_status() {
+    if [ -f wallet/tnsnames.ora ] \
+        && grep -Eiq '^[[:space:]]*mainerc_tp[[:space:]]*=' wallet/tnsnames.ora \
+        && { [ -f wallet/cwallet.sso ] || [ -f wallet/ewallet.p12 ] || [ -f wallet/sqlnet.ora ]; }; then
+        echo "200"
+    else
+        echo "503"
     fi
-    if [ "$i" = 60 ]; then
-        echo "❌ Timeout waiting for service to become healthy"
+}
+
+assert_ready_status() {
+    local expected="$1"
+    local ready_body
+    local ready_code
+
+    ready_body="$(mktemp)"
+    ready_code="$(curl -s -o "$ready_body" -w "%{http_code}" http://127.0.0.1:3002/ready || true)"
+
+    if [ "$ready_code" != "$expected" ]; then
+        echo "❌ Unexpected /ready status: expected $expected got $ready_code"
+        echo "Body:"
+        cat "$ready_body"
+        rm -f "$ready_body"
         docker compose logs
         exit 1
     fi
-    sleep 1
-done
 
-echo "🔍 Checking WireGuard interface status"
-WG_OUTPUT=$(docker compose exec -T ssl-proxy wg show wg0)
-echo "$WG_OUTPUT"
+    echo "✅ /ready returned expected status $ready_code"
+    rm -f "$ready_body"
+}
 
-if echo "$WG_OUTPUT" | grep -q "peer:" && echo "$WG_OUTPUT" | grep -q "latest handshake"; then
-    echo "✅ WireGuard interface is active with connected peers"
-else
-    echo "⚠️ WireGuard interface exists but has no active peers"
-    echo "Full wg output:"
-    echo "$WG_OUTPUT"
-fi
+assert_wg_interface() {
+    local wg_output
 
-echo "🔌 Testing CONNECT proxy request"
-echo "Using proxy health endpoint for reliable testing"
-# Proxy a request to a known external endpoint
-CURL_OUTPUT=$(curl -v --proxy http://localhost:3000 --connect-timeout 10 --max-time 15 http://httpbin.org/get 2>&1) || CURL_EXIT=$?
+    echo "🔍 Checking WireGuard interface status"
+    wg_output="$(docker compose exec -T ssl-proxy wg show wg0)"
+    echo "$wg_output"
 
-# Accept successful connection (even if health endpoint returns anything)
-if [ "${CURL_EXIT:-0}" -ne 0 ] && [ "${CURL_EXIT:-0}" -ne 56 ] && [ "${CURL_EXIT:-0}" -ne 35 ]; then
-    echo "⚠️ Curl request failed with exit code ${CURL_EXIT:-0}"
-    echo "Curl output:"
-    echo "$CURL_OUTPUT"
-    echo "Proxy logs:"
-    docker compose logs ssl-proxy | tail -20
-    exit 1
-fi
+    if echo "$wg_output" | grep -q "interface: wg0"; then
+        echo "✅ WireGuard interface is active"
+    else
+        echo "❌ WireGuard interface output was unexpected"
+        exit 1
+    fi
+}
 
-echo "🔍 Verifying request was logged"
-sleep 2
-LOGS=$(docker compose logs ssl-proxy)
+assert_unique_server_address() {
+    local count
 
-if echo "$LOGS" | grep -q "httpbin.org"; then
-    echo "✅ Proxy request successfully logged"
-else
-    echo "❌ Proxy request not found in logs"
-    echo "Full logs:"
-    echo "$LOGS"
-    exit 1
-fi
+    count="$(docker compose exec -T ssl-proxy sh -lc "grep -c '^Address = 10.13.13.1/24$' /run/wireguard/wg0.conf")"
+    if [ "$count" -ne 1 ]; then
+        echo "❌ Expected exactly one rendered server address, found $count"
+        docker compose exec -T ssl-proxy sh -lc 'nl -ba /run/wireguard/wg0.conf'
+        exit 1
+    fi
+
+    if docker compose logs ssl-proxy | grep -q "Address already assigned"; then
+        echo "❌ Duplicate address regression detected in container logs"
+        docker compose logs ssl-proxy
+        exit 1
+    fi
+
+    echo "✅ Rendered WireGuard config contains one unique server address"
+}
+
+run_default_scenario() {
+    echo "🚀 Bringing up default stack"
+    cleanup
+    docker compose up -d --build
+    wait_for_health
+    assert_ready_status "$(expected_ready_status)"
+    assert_wg_interface
+    assert_unique_server_address
+}
+
+run_duplicate_address_scenario() {
+    echo "🚀 Re-running with duplicated WG_SERVER_ADDRESS input"
+    cleanup
+    WG_SERVER_ADDRESS="10.13.13.1/24,10.13.13.1/24" docker compose up -d --build
+    wait_for_health
+    assert_ready_status "$(expected_ready_status)"
+    assert_wg_interface
+    assert_unique_server_address
+}
+
+run_default_scenario
+run_duplicate_address_scenario
 
 echo ""
+echo "ℹ️ Skipping explicit proxy request test because default compose uses transparent-only mode."
 echo "✅ All smoke tests passed successfully!"
-exit 0

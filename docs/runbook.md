@@ -73,6 +73,8 @@ docker compose restart ssl-proxy
 ### 4. Oracle ADB Connection & Views
 
 1. **Place Oracle wallet files in `./wallet/` directory**
+   - Restart the container after adding the wallet so the startup preflight can enable Oracle persistence.
+   - `GET /ready` on `http://127.0.0.1:3002/ready` stays `503` until the wallet contains the `mainerc_tp` alias and the required wallet artifacts.
 
 2. **Connect using SQL*Plus:**
    ```bash

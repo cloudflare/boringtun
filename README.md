@@ -27,8 +27,11 @@ A privacy-first WireGuard gateway with transparent policy enforcement, legacy op
 # Start the privacy-first WireGuard stack
 docker compose up -d --build
 
-# Verify the internal admin surface locally
+# Verify liveness for the internal admin surface locally
 curl -i http://127.0.0.1:3002/health
+
+# Verify dependency readiness (returns 503 until the Oracle wallet is mounted)
+curl -i http://127.0.0.1:3002/ready
 
 # Or use the setup script (installs Docker if needed)
 sudo ./setup-ubuntu.sh
@@ -39,6 +42,7 @@ The container renders its runtime server config to `/run/wireguard/wg0.conf` fro
 If `config/server/privatekey-server` is missing on first boot, the entrypoint generates a new server keypair and syncs the derived public key into `config/server/publickey-server` and `config/peer1/peer1.conf`.
 WireGuard firewall/NAT rules use `WG_WAN_INTERFACE` (default `auto`), which resolves from the host default route (for this machine, expected `wlp3s0`).
 Sysctl hooks remain available in `PostUp`, but can be disabled with `WG_RUNTIME_SYSCTLS=0` when the runtime blocks `sysctl -w` (for example, restricted Docker hosts).
+`/health` now reports only core service liveness; `/ready` reports Oracle readiness and stays `503` until a valid wallet and TNS alias are present under `./wallet/`.
 
 ```mermaid
 flowchart LR
@@ -64,7 +68,8 @@ cargo build --release --features oracle-db
 ### Testing
 
 ```bash
-cargo test
+cargo test --bin ssl-proxy
+cargo test --features oracle-db --bin ssl-proxy
 ```
 
 ## Project Structure
@@ -105,6 +110,7 @@ All configuration is via environment variables. Key settings:
 | `WG_SYSCTL_RETRIES` | `3` | Retry count for WireGuard `PostUp` sysctl writes |
 | `WG_SYSCTL_RETRY_DELAY_MS` | `200` | Delay between sysctl retries (milliseconds) |
 | `WG_RUNTIME_SYSCTLS` | `1` | Set to `0` to skip runtime `sysctl -w` calls in WireGuard `PostUp` hooks |
+| `TNS_ADMIN` | — | Oracle wallet directory; required for `/ready` to pass when `oracle-db` is enabled |
 | `RUST_LOG` | — | Log level filter |
 | `LOG_FORMAT` | `text` | `json` for structured logging |
 | `TLS_CERT_PATH` | — | TLS certificate for explicit proxy listener |
@@ -118,10 +124,17 @@ All configuration is via environment variables. Key settings:
 - The generated or existing server public key is written to `config/server/publickey-server`.
 - The compose stack renders the server interface config from `config/templates/server.conf` at startup.
 - WireGuard ingress/NAT rules target `WG_WAN_INTERFACE`; default `auto` resolves the host default-route interface.
+- Rendered WireGuard interface addresses are normalized and duplicate addresses cause startup to fail before `wg-quick up`.
 - Sysctl hooks in WireGuard `PostUp` are best-effort: they retry and log warnings if denied, then continue startup. Set `WG_RUNTIME_SYSCTLS=0` to suppress runtime writes entirely.
 - The checked-in peer config `config/peer1/peer1.conf` uses tunnel IP `10.13.13.2/32`, DNS `10.13.13.1`, and endpoint `192.168.1.221:443`.
 - When a new server keypair is generated, redistribute the updated `config/peer1/peer1.conf` to clients before connecting.
 - The peer endpoint must be the Docker host’s LAN or public IP, not the container’s bridge IP.
+
+## Health Endpoints
+
+- `GET /health` returns `200 ok` when the admin listener is alive.
+- `GET /ready` returns `200 ok` only when Oracle wallet preflight passes and a DB ping succeeds.
+- Local compose keeps the container healthy without Oracle, but `/ready` remains `503 oracle misconfigured` until `./wallet/` contains a valid wallet with the `mainerc_tp` alias.
 
 ## Legacy Explicit Proxy Mode
 

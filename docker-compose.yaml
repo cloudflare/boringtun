@@ -35,7 +35,7 @@ services:
       - WG_INTERFACE_NAME=wg0
       - WG_TEMPLATE_PATH=/config/templates/server.conf
       - WG_CONFIG_PATH=/run/wireguard/wg0.conf
-      - WG_SERVER_ADDRESS=10.13.13.1/24
+      - WG_SERVER_ADDRESS=${WG_SERVER_ADDRESS:-10.13.13.1/24}
       - WG_LISTEN_PORT=443
       - WG_MTU=1280
       - WG_WAN_INTERFACE=auto
