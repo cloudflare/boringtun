@@ -33,7 +33,7 @@ use std::net::SocketAddr;
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
-use tower::ServiceExt;
+use tower::Service;
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
@@ -389,7 +389,8 @@ async fn main() {
                                     if req.method() == Method::CONNECT {
                                         tunnel::handle(req, state, Some(peer.ip().to_string())).await
                                     } else {
-                                        router.oneshot(req).await.map_err(|e| match e {})
+                                        let mut router = router.clone();
+                                        router.call(req).await.map_err(|e| match e {})
                                     }
                                 }
                             });
