@@ -210,7 +210,6 @@ pub async fn handler(
 
     req.headers_mut().remove("connection");
     req.headers_mut().remove("keep-alive");
-    req.headers_mut().remove("proxy-authorization");
     req.headers_mut().remove("te");
     req.headers_mut().remove("trailers");
     req.headers_mut().remove("transfer-encoding");
@@ -330,8 +329,6 @@ pub async fn handler(
             for h in &[
                 "connection",
                 "keep-alive",
-                "proxy-authenticate",
-                "proxy-authorization",
                 "proxy-connection",
                 "te",
                 "trailer",

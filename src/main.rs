@@ -395,21 +395,20 @@ async fn main() {
                                     let is_proxy_request = req.method() == Method::CONNECT
                                         || req.uri().scheme().is_some();
 
-                                    // TEMPORARILY DISABLED FOR iOS TESTING
-                                    // if is_proxy_request {
-                                    //     if let Some(ref c) = creds {
-                                    //         if !check_proxy_auth(&req, &c.0, &c.1) {
-                                    //             return Ok(Response::builder()
-                                    //                 .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
-                                    //                 .header(
-                                    //                     "Proxy-Authenticate",
-                                    //                     "Basic realm=\"proxy\"",
-                                    //                 )
-                                    //                 .body(Body::empty())
-                                    //                 .unwrap());
-                                    //         }
-                                    //     }
-                                    // }
+                                    if is_proxy_request {
+                                        if let Some(ref c) = creds {
+                                            if !check_proxy_auth(&req, &c.0, &c.1) {
+                                                return Ok(Response::builder()
+                                                    .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+                                                    .header(
+                                                        "Proxy-Authenticate",
+                                                        "Basic realm=\"Proxy Access\"",
+                                                    )
+                                                    .body(Body::empty())
+                                                    .unwrap());
+                                            }
+                                        }
+                                    }
 
                                     if req.method() == Method::CONNECT {
                                         tunnel::handle(req, state, Some(peer.ip().to_string())).await
