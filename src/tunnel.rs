@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
+use std::error::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info};
