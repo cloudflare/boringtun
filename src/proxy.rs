@@ -40,12 +40,12 @@ fn emit_full(
     state: &SharedState,
     event: &str,
     host: &str,
-    peer_ip: Option<String>,
-    bytes_up: u64,
-    bytes_down: u64,
-    status_code: Option<u16>,
-    blocked: bool,
-    obfuscation_profile: Option<String>,
+    _peer_ip: Option<String>,
+    _bytes_up: u64,
+    _bytes_down: u64,
+    _status_code: Option<u16>,
+    _blocked: bool,
+    _obfuscation_profile: Option<String>,
     extra: serde_json::Value,
 ) {
     let mut v = serde_json::json!({
@@ -131,6 +131,7 @@ pub async fn handler(
             .get("content-length")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse().ok());
+        state.record_host_block(&hostname, req_content_length.unwrap_or(0), "http");
         // Epic 1.2a — interesting header inventory
         let interesting = [
             "content-type",
@@ -182,6 +183,10 @@ pub async fn handler(
         return Err(StatusCode::FORBIDDEN);
     }
 
+    // Host allowed - reset block streak and count
+    state.record_host_allow(&hostname);
+    state.record_allowed();
+
     // Classify obfuscation profile after blocklist check
     let profile = obfuscation::classify_obfuscation(&hostname, &state.config);
 
@@ -211,7 +216,7 @@ pub async fn handler(
     req.headers_mut().remove("te");
     req.headers_mut().remove("trailers");
     req.headers_mut().remove("transfer-encoding");
-    req.headers_mut().remove("upgrade");
+    // DO NOT REMOVE upgrade header - required for WebSocket handshake
 
     // Full global header scrubbing - remove ALL identifying headers
     {

@@ -311,13 +311,13 @@ async fn handle_h3_request(
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
                 error!(%host, %e, "QUIC: failed to connect to tunnel target");
-                let _ = stream.reset(h3::error::Code::H3_INTERNAL_ERROR);
+                let _ = stream.stop_sending(h3::error::Code::H3_INTERNAL_ERROR);
                 stream.finish().await.ok();
                 return;
             }
             Err(_) => {
                 error!(%host, "QUIC: tunnel connect timed out");
-                let _ = stream.reset(h3::error::Code::H3_INTERNAL_ERROR);
+                let _ = stream.stop_sending(h3::error::Code::H3_INTERNAL_ERROR);
                 stream.finish().await.ok();
                 return;
             }
@@ -390,18 +390,7 @@ async fn handle_h3_request(
         total
     };
 
-    let (up, down) = tokio::select! {
-        up_res = h3_to_upstream => {
-            // Cancel the other direction when upstream completes
-            upstream_read.shutdown(std::net::Shutdown::Both).ok();
-            (up_res, upstream_to_h3.await)
-        }
-        down_res = upstream_to_h3 => {
-            // Cancel the other direction when downstream completes
-            h3_recv.stop_sending(h3::error::Code::H3_NO_ERROR);
-            (h3_to_upstream.await, down_res)
-        }
-    };
+    let (up, down) = tokio::join!(h3_to_upstream, upstream_to_h3);
     state.record_tunnel_close(up, down);
 
     info!(

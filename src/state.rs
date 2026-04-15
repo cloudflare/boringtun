@@ -8,6 +8,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::{broadcast, RwLock};
+use tracing::warn;
 
 use crate::blocklist::SEED;
 
@@ -210,6 +211,7 @@ pub struct AppState {
     pub active_tunnels: AtomicU64,
     pub tunnels_opened: AtomicU64,
     pub blocked_count: AtomicU64,
+    pub allowed_count: AtomicU64,
     pub obfuscated_count: AtomicU64,
     pub host_stats_dropped: AtomicU64,
     pub blocklist: RwLock<HashSet<String>>,
@@ -264,6 +266,7 @@ impl AppState {
             active_tunnels: AtomicU64::new(0),
             tunnels_opened: AtomicU64::new(0),
             blocked_count: AtomicU64::new(0),
+            allowed_count: AtomicU64::new(0),
             obfuscated_count: AtomicU64::new(0),
             host_stats_dropped: AtomicU64::new(0),
             blocklist: RwLock::new(seed),
@@ -298,6 +301,10 @@ impl AppState {
 
     pub fn record_blocked(&self) {
         self.blocked_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_allowed(&self) {
+        self.allowed_count.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Update per-host heuristic counters for a blocked connection.
