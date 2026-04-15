@@ -237,15 +237,26 @@ pub async fn handler(
         headers.remove("x-cloud-trace-context");
         headers.remove("via");
 
-        // Remove ANY header starting with x- that is not explicitly whitelisted
+        // Remove identifying x-* headers, but keep app/API critical ones.
         let x_headers: Vec<_> = headers
             .keys()
             .filter(|k| {
                 let name = k.as_str();
-                name.starts_with("x-") && 
-                // Whitelist only safe headers here
-                !name.eq("x-amz-target") &&
-                !name.eq("x-client-data")
+                name.starts_with("x-")
+                    && !matches!(
+                        name,
+                        "x-amz-target"
+                            | "x-client-data"
+                            | "x-ig-app-id"
+                            | "x-ig-www-claim"
+                            | "x-instagram-ajax"
+                            | "x-csrftoken"
+                            | "x-requested-with"
+                            | "x-youtube-client-name"
+                            | "x-youtube-client-version"
+                            | "x-goog-api-key"
+                            | "x-goog-visitor-id"
+                    )
             })
             .map(|k| k.clone())
             .collect();
@@ -253,22 +264,6 @@ pub async fn handler(
         for name in x_headers {
             headers.remove(name);
         }
-
-        // Rotating pool of modern Chrome User Agents matching TLS fingerprint
-        static USER_AGENTS: &[&str] = &[
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        ];
-        // Simple deterministic rotation without requiring Hasher trait import
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let ua = USER_AGENTS[ts as usize % USER_AGENTS.len()];
-        headers.insert("user-agent", ua.parse().unwrap());
     }
 
     // Apply request header obfuscation for Fox profiles
@@ -365,7 +360,6 @@ pub async fn handler(
                 "trailer",
                 "trailers",
                 "transfer-encoding",
-                "upgrade",
             ] {
                 res.headers_mut().remove(*h);
             }

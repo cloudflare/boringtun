@@ -3,6 +3,7 @@ use axum::{
     http::{Request, Response, StatusCode},
 };
 use hyper_util::rt::TokioIo;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -15,6 +16,129 @@ use crate::{blocklist, obfuscation, state::SharedState};
 
 /// Maximum time a single tarpit connection is held open.
 const MAX_TARPIT_MS: u64 = 10_000; // 10 seconds
+const DNS_RESOLVE_TIMEOUT_SECS: u64 = 5;
+const CONNECT_TIMEOUT_SECS: u64 = 10;
+
+#[derive(Debug)]
+enum UpstreamDialError {
+    ResolveTimeout,
+    ResolveFailed(String),
+    NoAddresses,
+    ConnectTimeout,
+    ConnectFailed(io::Error),
+}
+
+impl UpstreamDialError {
+    fn class(&self) -> &'static str {
+        match self {
+            Self::ResolveTimeout => "resolve_timeout",
+            Self::ResolveFailed(_) => "resolve_failed",
+            Self::NoAddresses => "resolve_empty",
+            Self::ConnectTimeout => "connect_timeout",
+            Self::ConnectFailed(_) => "connect_failed",
+        }
+    }
+
+    fn detail(&self) -> String {
+        match self {
+            Self::ResolveTimeout => "resolver timeout".to_string(),
+            Self::ResolveFailed(err) => format!("resolver error: {err}"),
+            Self::NoAddresses => "resolver returned no addresses".to_string(),
+            Self::ConnectTimeout => "upstream connect timeout".to_string(),
+            Self::ConnectFailed(err) => format!("upstream connect error: {err}"),
+        }
+    }
+}
+
+fn parse_host_port(authority: &str) -> (String, u16) {
+    if authority.contains(']') {
+        if let Some(bracket_end) = authority.find(']') {
+            let hostname = authority[1..bracket_end].to_string();
+            let port =
+                if bracket_end + 1 < authority.len() && authority.as_bytes()[bracket_end + 1] == b':' {
+                    authority[bracket_end + 2..].parse().unwrap_or(443)
+                } else {
+                    443
+                };
+            return (hostname, port);
+        }
+    }
+    if authority.chars().filter(|&c| c == ':').count() > 1 {
+        return (authority.to_string(), 443);
+    }
+    authority
+        .rsplit_once(':')
+        .and_then(|(h, p)| p.parse::<u16>().ok().map(|port| (h.to_string(), port)))
+        .unwrap_or_else(|| (authority.to_string(), 443))
+}
+
+fn is_cert_pinned_host(hostname: &str) -> bool {
+    let normalized = hostname.trim_end_matches('.').to_ascii_lowercase();
+    let pinned_suffixes = [
+        "facebook.com",
+        "fbcdn.net",
+        "instagram.com",
+        "cdninstagram.com",
+        "instagramstatic.com",
+        "youtube.com",
+        "googlevideo.com",
+        "ytimg.com",
+        "ggpht.com",
+        "gvt1.com",
+        "apple.com",
+    ];
+    pinned_suffixes
+        .iter()
+        .any(|suffix| normalized == *suffix || normalized.ends_with(&format!(".{suffix}")))
+}
+
+async fn dial_upstream_with_resolver(
+    state: &SharedState,
+    authority: &str,
+) -> Result<(tokio::net::TcpStream, Vec<String>, String), UpstreamDialError> {
+    let (hostname, port) = parse_host_port(authority);
+    let hostname = hostname.trim_start_matches('[').trim_end_matches(']').to_string();
+
+    let addrs = tokio::time::timeout(
+        tokio::time::Duration::from_secs(DNS_RESOLVE_TIMEOUT_SECS),
+        state.resolver.lookup_ip(hostname.as_str()),
+    )
+    .await
+    .map_err(|_| UpstreamDialError::ResolveTimeout)?
+    .map_err(|e| UpstreamDialError::ResolveFailed(e.to_string()))?;
+
+    let ips: Vec<std::net::IpAddr> = addrs.iter().collect();
+    let resolved_ips: Vec<String> = ips.iter().map(ToString::to_string).collect();
+    if ips.is_empty() {
+        return Err(UpstreamDialError::NoAddresses);
+    }
+
+    let connect = async {
+        let mut last_err = io::Error::new(io::ErrorKind::NotFound, "No connect candidates");
+        for ip in &ips {
+            match tokio::net::TcpStream::connect((*ip, port)).await {
+                Ok(stream) => return Ok(stream),
+                Err(e) => last_err = e,
+            }
+        }
+        Err(last_err)
+    };
+
+    let upstream = tokio::time::timeout(
+        tokio::time::Duration::from_secs(CONNECT_TIMEOUT_SECS),
+        connect,
+    )
+    .await
+    .map_err(|_| UpstreamDialError::ConnectTimeout)?
+    .map_err(UpstreamDialError::ConnectFailed)?;
+
+    let selected_ip = upstream
+        .peer_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "-".to_string());
+
+    Ok((upstream, resolved_ips, selected_ip))
+}
 
 /// Process-wide semaphore — initialised once, shared via Arc in AppState.
 pub fn tarpit_semaphore(max_tarpit: usize) -> Arc<Semaphore> {
@@ -336,15 +460,8 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
     }
 
     // Certificate Pinning Bypass: Pass through domains with hardcoded certificate pins
-    let bypass_list = [
-        "graph.facebook.com",
-        "graph.instagram.com",
-        "googlevideo.com",
-        "s.youtube.com",
-    ];
-
     if let Some(ref name) = hostname {
-        if bypass_list.iter().any(|&domain| name.contains(domain)) {
+        if is_cert_pinned_host(name) {
             // Raw TCP pass-through - no obfuscation, no TLS termination
             info!(
                 target: "audit",
@@ -1064,13 +1181,7 @@ pub async fn handle(
     }
 
     // EPISODIC FIX: The Meta/Google Surgical Bypass - Certificate Pinning Domains
-    let is_pinned_app = hostname.contains("facebook.com")
-        || hostname.contains("instagram.com")
-        || hostname.contains("googlevideo.com")
-        || hostname.contains("apple.com")
-        || hostname.contains("youtube.com")
-        || hostname.contains("fbcdn.net")
-        || hostname.contains("instagramstatic.com");
+    let is_pinned_app = is_cert_pinned_host(hostname);
 
     if is_pinned_app {
         let start = Instant::now();
@@ -1094,7 +1205,8 @@ pub async fn handle(
             let mut client_io = TokioIo::new(upgraded);
 
             // 2. Raw TCP connection to upstream - NO MITM, NO OBFUSCATION
-            if let Ok(mut upstream) = tokio::net::TcpStream::connect(&host).await {
+            match dial_upstream_with_resolver(&state, &host).await {
+                Ok((mut upstream, resolved_ips, selected_ip)) => {
                 set_keepalive(&upstream);
                 state.record_tunnel_open();
                 info!(
@@ -1103,6 +1215,8 @@ pub async fn handle(
                     kind = "bypass",
                     host = %host,
                     category = category,
+                    resolved_ips = ?resolved_ips,
+                    selected_ip = %selected_ip,
                     obfuscation_profile = "none",
                     reason = "certificate_pinning",
                     "bypass tunnel established"
@@ -1119,6 +1233,8 @@ pub async fn handle(
                     serde_json::json!({
                         "kind":                "bypass",
                         "category":            category,
+                        "resolved_ips":        resolved_ips,
+                        "selected_ip":         selected_ip,
                         "obfuscation_profile": "none",
                         "bypass_reason":       "certificate_pinning",
                     }),
@@ -1159,12 +1275,21 @@ pub async fn handle(
                         "bytes_up":            bytes_up,
                         "bytes_down":          bytes_down,
                         "duration_ms":         start.elapsed().as_millis(),
+                        "selected_ip":         selected_ip,
                         "obfuscation_profile": "none",
                         "bypass_reason":       "certificate_pinning",
                     }),
                 );
-            } else {
-                error!(%host, "bypass tunnel connect failed");
+                }
+                Err(e) => {
+                    error!(
+                        %host,
+                        failure_class = e.class(),
+                        error = %e.detail(),
+                        "bypass tunnel connect failed"
+                    );
+                    let _ = client_io.shutdown().await;
+                }
             }
         });
 
@@ -1224,20 +1349,9 @@ async fn run_tunnel(
     peer_ip: Option<String>,
     profile: crate::obfuscation::Profile,
 ) {
-    let (name, port) = host
-        .rsplit_once(':')
-        .and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h, p)))
-        .unwrap_or((&host, 443));
-    let name = name.trim_start_matches('[').trim_end_matches(']');
-
-    // Always use system DNS resolution through WireGuard tunnel
-    // Fixes anycast CDN IP mismatch for Instagram/YouTube and all other domains
-    let connect = async {
-        tokio::net::TcpStream::connect(&host).await
-    };
-
-    match tokio::time::timeout(tokio::time::Duration::from_secs(10), connect).await {
-        Ok(Ok(mut upstream)) => {
+    let mut client = TokioIo::new(upgraded);
+    match dial_upstream_with_resolver(&state, &host).await {
+        Ok((mut upstream, resolved_ips, selected_ip)) => {
             let start = Instant::now();
             info!(
                 target: "audit",
@@ -1245,6 +1359,8 @@ async fn run_tunnel(
                 kind = "connect",
                 host = %host,
                 category = category,
+                resolved_ips = ?resolved_ips,
+                selected_ip = %selected_ip,
                 "tunnel established"
             );
 
@@ -1274,11 +1390,12 @@ async fn run_tunnel(
                 serde_json::json!({
                     "kind":             "connect",
                     "category":         category,
+                    "resolved_ips":     resolved_ips,
+                    "selected_ip":      selected_ip,
                     "obfuscation_profile": profile.as_str(),
                 }),
             );
             state.record_tunnel_open();
-            let mut client = TokioIo::new(upgraded);
             match tokio::io::copy_bidirectional(&mut client, &mut upstream).await {
                 Ok((up, down)) => {
                     state.record_tunnel_close(up, down);
@@ -1317,14 +1434,14 @@ async fn run_tunnel(
                 }
             }
         }
-        Ok(Err(e)) => {
+        Err(e) => {
             error!(
                 %host,
-                %e,
-                kind = ?e.kind(),
+                failure_class = e.class(),
+                error = %e.detail(),
                 "failed to connect to tunnel target"
             );
+            let _ = client.shutdown().await;
         }
-        Err(_) => error!(%host, "tunnel connect timed out"),
     }
 }
