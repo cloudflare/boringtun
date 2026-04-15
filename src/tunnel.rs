@@ -976,7 +976,8 @@ pub async fn handle(
             }
 
             return Ok(Response::builder()
-                .status(StatusCode::OK)
+                .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+                .header("Proxy-Authenticate", "Basic realm=\"Proxy Access\"")
                 .body(Body::empty())
                 .unwrap());
         } else {
@@ -995,7 +996,8 @@ pub async fn handle(
             });
 
             return Ok(Response::builder()
-                .status(StatusCode::OK)
+                .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+                .header("Proxy-Authenticate", "Basic realm=\"Proxy Access\"")
                 .body(Body::empty())
                 .unwrap());
         }

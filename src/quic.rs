@@ -39,8 +39,8 @@ fn build_rustls_config(config: &Config) -> Arc<rustls::ServerConfig> {
         .with_single_cert(certs, key)
         .expect("invalid TLS config for QUIC");
 
-    // Enable HTTP/3 ALPN
-    tls_config.alpn_protocols = vec![b"h3".to_vec()];
+    // Enable HTTP/3 ALPN with draft fallback for browser compatibility
+    tls_config.alpn_protocols = vec![b"h3".to_vec(), b"h3-29".to_vec()];
 
     Arc::new(tls_config)
 }

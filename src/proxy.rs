@@ -206,6 +206,7 @@ pub async fn handler(
     // Capture display values before req is consumed by the upstream call.
     let method = req.method().clone();
     let scrubbed_uri = scrub_uri(req.uri());
+    let is_https = req.uri().scheme_str() == Some("https");
 
     req.headers_mut().remove("connection");
     req.headers_mut().remove("keep-alive");
@@ -253,8 +254,21 @@ pub async fn handler(
             headers.remove(name);
         }
 
-        // Replace User-Agent with generic value
-        headers.insert("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse().unwrap());
+        // Rotating pool of modern Chrome User Agents matching TLS fingerprint
+        static USER_AGENTS: &[&str] = &[
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        ];
+        // Simple deterministic rotation without requiring Hasher trait import
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let ua = USER_AGENTS[ts as usize % USER_AGENTS.len()];
+        headers.insert("user-agent", ua.parse().unwrap());
     }
 
     // Apply request header obfuscation for Fox profiles
@@ -319,6 +333,19 @@ pub async fn handler(
                 }),
             );
             let mut res = res.map(Body::new);
+
+            // Add CDN-like standard security headers for HTTPS responses
+            if is_https {
+                res.headers_mut().insert(
+                    "Strict-Transport-Security",
+                    "max-age=31536000; includeSubDomains".parse().unwrap()
+                );
+                res.headers_mut().insert(
+                    "Alt-Svc",
+                    "h3=\":443\"; ma=86400, h3-29=\":443\"; ma=86400".parse().unwrap()
+                );
+            }
+
             // Collect any header names listed in the Connection header value.
             let conn_headers: Vec<String> = res
                 .headers()
