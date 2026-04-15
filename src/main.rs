@@ -20,7 +20,7 @@ use axum::{
 };
 use base64::Engine;
 use hickory_resolver::{
-    config::{ResolverConfig, ResolverOpts},
+    config::{NameServerConfigGroup, ResolverConfig, ResolverOpts},
     TokioAsyncResolver,
 };
 use hyper::service::service_fn;
@@ -97,9 +97,24 @@ async fn main() {
 
     let mut opts = ResolverOpts::default();
     opts.cache_size = 1024;
-    // Use IPv4 only!!!! extrictly and without fallback to IPv6, because IPv6 lookups can be very slow and cause timeouts in the proxy
-    opts.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4Only;
-    let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare_https(), opts);
+    // Prefer IPv4 first to avoid "Network unreachable" errors when IPv6 is not configured
+    opts.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4thenIpv6;
+
+    let cloudflare_ips = [
+        "1.1.1.1".parse().unwrap(),
+        "1.0.0.1".parse().unwrap(),
+    ];
+    let resolver_config = ResolverConfig::from_parts(
+        None,
+        Vec::new(),
+        NameServerConfigGroup::from_ips_https(
+            &cloudflare_ips,
+            443,
+            "cloudflare-dns.com".to_string(),
+            true,
+        ),
+    );
+    let resolver = TokioAsyncResolver::tokio(resolver_config, opts);
 
     let (stats_tx, _) = broadcast::channel(64);
     let (events_tx, _) = broadcast::channel(256);
