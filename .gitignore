@@ -3,6 +3,7 @@
 .vscode/
 .env
 /wallet
+/lib/
 # Ignore secret/credential config files but allow templates
 /config/**/privatekey-*
 /config/**/presharedkey-*
