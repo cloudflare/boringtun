@@ -1077,7 +1077,33 @@ pub async fn handle(
                 // Now proceed with actual tunnel
                 run_tunnel(stream.into_inner(), host, state, category, peer_ip, profile).await;
             }
-            Err(e) => error!(%e, "CONNECT upgrade failed"),
+            Err(e) => {
+                let error_kind = if e.is::<hyper::Error>() && e.to_string().contains("operation was canceled") {
+                    if let Some(source) = e.source() {
+                        if source.to_string().contains("connection closed before message completed") {
+                            "client_disconnected"
+                        } else if source.to_string().contains("canceled") {
+                            "request_aborted"
+                        } else {
+                            "operation_canceled"
+                        }
+                    } else {
+                        "operation_canceled"
+                    }
+                } else {
+                    "unknown"
+                };
+
+                error!(
+                    %host,
+                    peer_ip = %peer_ip.as_deref().unwrap_or("-"),
+                    user_agent = %connect_ua.as_deref().unwrap_or("-"),
+                    %category,
+                    error_kind,
+                    %e,
+                    "CONNECT upgrade failed"
+                );
+            }
         }
     });
 
