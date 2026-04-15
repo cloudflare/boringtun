@@ -109,6 +109,60 @@ resolve_wan_interface() {
     WG_WAN_INTERFACE="$resolved"
 }
 
+format_handshake_timestamp() {
+    local epoch="$1"
+    local rendered
+    if [ -z "$epoch" ] || [ "$epoch" = "0" ]; then
+        printf '%s' "never"
+        return
+    fi
+
+    # Prefer GNU date formatting when available, fall back to raw epoch.
+    rendered="$(date -u -d "@$epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
+    if [ -n "$rendered" ]; then
+        printf '%s' "$rendered"
+    else
+        printf '%s' "epoch:$epoch"
+    fi
+}
+
+log_wireguard_peer_status() {
+    local dump
+    local peer_count
+    local public_key
+    local _preshared_key
+    local endpoint
+    local allowed_ips
+    local latest_handshake
+    local transfer_rx
+    local transfer_tx
+    local persistent_keepalive
+    local handshake_readable
+
+    if ! dump="$(wg show "$WG_INTERFACE_NAME" dump 2>/dev/null)"; then
+        echo "[wg] warning: unable to read peer status for interface $WG_INTERFACE_NAME" >&2
+        return 0
+    fi
+
+    peer_count="$(printf '%s\n' "$dump" | awk 'NR > 1 {count++} END {print count + 0}')"
+    echo "[wg] interface $WG_INTERFACE_NAME is up; peer_count=$peer_count"
+
+    if [ "$peer_count" -eq 0 ]; then
+        echo "[wg] no peers configured on $WG_INTERFACE_NAME"
+        return 0
+    fi
+
+    while IFS=$'\t' read -r public_key _preshared_key endpoint allowed_ips latest_handshake transfer_rx transfer_tx persistent_keepalive; do
+        [ -n "$public_key" ] || continue
+        handshake_readable="$(format_handshake_timestamp "$latest_handshake")"
+        [ -n "$endpoint" ] || endpoint="(none)"
+        [ -n "$allowed_ips" ] || allowed_ips="(none)"
+        [ -n "$persistent_keepalive" ] || persistent_keepalive="off"
+
+        echo "[wg] peer=$public_key endpoint=$endpoint allowed_ips=$allowed_ips last_handshake=$handshake_readable rx_bytes=$transfer_rx tx_bytes=$transfer_tx keepalive_s=$persistent_keepalive"
+    done < <(printf '%s\n' "$dump" | awk 'NR > 1')
+}
+
 sync_peer_server_public_key() {
     local public_key="$1"
     local peer_config="$2"
@@ -296,6 +350,7 @@ render_wireguard_config
 echo "starting WireGuard interface $WG_INTERFACE_NAME: $WG_CONFIG_PATH"
 cmd wg-quick up "$WG_CONFIG_PATH"
 WG_UP=1
+log_wireguard_peer_status
 
 echo "starting CoreDNS: $COREDNS_CONFIG"
 cmd /usr/local/bin/coredns -conf "$COREDNS_CONFIG" &
