@@ -97,6 +97,8 @@ async fn main() {
 
     let mut opts = ResolverOpts::default();
     opts.cache_size = 1024;
+    // Prefer IPv4 first to avoid "Network unreachable" errors when IPv6 is not configured
+    opts.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4thenIpv6;
     let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare_https(), opts);
 
     let (stats_tx, _) = broadcast::channel(64);
