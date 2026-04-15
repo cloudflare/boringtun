@@ -38,7 +38,7 @@ Supported client onboarding is WireGuard profile import from `config/peer1/peer1
 The container renders its runtime server config to `/run/wireguard/wg0.conf` from `config/templates/server.conf`, the server keypair under `config/server/`, and the checked-in peer metadata.
 If `config/server/privatekey-server` is missing on first boot, the entrypoint generates a new server keypair and syncs the derived public key into `config/server/publickey-server` and `config/peer1/peer1.conf`.
 WireGuard firewall/NAT rules use `WG_WAN_INTERFACE` (default `auto`), which resolves from the host default route (for this machine, expected `wlp3s0`).
-Sysctl hooks remain enabled in `PostUp`, but they now retry and warn-continue on permission denial so container startup does not fail if runtime sysctl writes are blocked.
+Sysctl hooks remain available in `PostUp`, but can be disabled with `WG_RUNTIME_SYSCTLS=0` when the runtime blocks `sysctl -w` (for example, restricted Docker hosts).
 
 ```mermaid
 flowchart LR
@@ -104,6 +104,7 @@ All configuration is via environment variables. Key settings:
 | `WG_WAN_INTERFACE` | `auto` | Uplink interface for WireGuard INPUT/MASQUERADE rules (`auto` resolves from default route) |
 | `WG_SYSCTL_RETRIES` | `3` | Retry count for WireGuard `PostUp` sysctl writes |
 | `WG_SYSCTL_RETRY_DELAY_MS` | `200` | Delay between sysctl retries (milliseconds) |
+| `WG_RUNTIME_SYSCTLS` | `1` | Set to `0` to skip runtime `sysctl -w` calls in WireGuard `PostUp` hooks |
 | `RUST_LOG` | — | Log level filter |
 | `LOG_FORMAT` | `text` | `json` for structured logging |
 | `TLS_CERT_PATH` | — | TLS certificate for explicit proxy listener |
@@ -117,7 +118,7 @@ All configuration is via environment variables. Key settings:
 - The generated or existing server public key is written to `config/server/publickey-server`.
 - The compose stack renders the server interface config from `config/templates/server.conf` at startup.
 - WireGuard ingress/NAT rules target `WG_WAN_INTERFACE`; default `auto` resolves the host default-route interface.
-- Sysctl hooks in WireGuard `PostUp` are best-effort: they retry and log warnings if denied, then continue startup.
+- Sysctl hooks in WireGuard `PostUp` are best-effort: they retry and log warnings if denied, then continue startup. Set `WG_RUNTIME_SYSCTLS=0` to suppress runtime writes entirely.
 - The checked-in peer config `config/peer1/peer1.conf` uses tunnel IP `10.13.13.2/32`, DNS `10.13.13.1`, and endpoint `192.168.1.221:443`.
 - When a new server keypair is generated, redistribute the updated `config/peer1/peer1.conf` to clients before connecting.
 - The peer endpoint must be the Docker host’s LAN or public IP, not the container’s bridge IP.

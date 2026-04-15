@@ -41,6 +41,7 @@ services:
       - WG_WAN_INTERFACE=auto
       - WG_SYSCTL_RETRIES=3
       - WG_SYSCTL_RETRY_DELAY_MS=200
+      - WG_RUNTIME_SYSCTLS=0
       - WG_SERVER_PRIVATE_KEY_FILE=/config/server/privatekey-server
       - WG_PEER_CONFIG_PATH=/config/peer1/peer1.conf
       - WG_PEER_PUBLIC_KEY_FILE=/config/peer1/publickey-peer1
@@ -67,6 +68,7 @@ services:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
       - net.ipv4.conf.all.rp_filter=0
+      - net.ipv4.conf.default.rp_filter=0
 
 secrets:
   oracle_password:
