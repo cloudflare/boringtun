@@ -42,6 +42,7 @@ pub const SEED: &[&str] = &[
 pub fn spawn_refresh_task(state: SharedState, token: tokio_util::sync::CancellationToken) {
     tokio::spawn(async move {
         loop {
+            let started = std::time::Instant::now();
             match fetch().await {
                 Ok(remote) => {
                     let mut bl = state.blocklist.write().await;
@@ -49,10 +50,23 @@ pub fn spawn_refresh_task(state: SharedState, token: tokio_util::sync::Cancellat
                     bl.clear();
                     bl.extend(SEED.iter().map(|s| s.to_string()));
                     bl.extend(remote);
+                    let loaded = bl.len() as i64;
                     info!(
                         entries = bl.len(),
                         previous = old_len,
                         "blocklist refreshed"
+                    );
+                    #[cfg(feature = "oracle-db")]
+                    crate::db::insert_blocklist_audit_event(
+                        state.db.clone(),
+                        crate::db::BlocklistAuditEvent {
+                            source_url: Some(BLOCKLIST_URL.to_string()),
+                            entries_loaded: Some(loaded),
+                            seed_entries: Some(SEED.len() as i64),
+                            success: true,
+                            error_msg: None,
+                            duration_ms: Some(started.elapsed().as_millis() as i64),
+                        },
                     );
                 }
                 Err(e) => {
@@ -62,6 +76,18 @@ pub fn spawn_refresh_task(state: SharedState, token: tokio_util::sync::Cancellat
                         bl.extend(SEED.iter().map(|s| s.to_string()));
                         info!(entries = bl.len(), "loaded seed blocklist as fallback");
                     }
+                    #[cfg(feature = "oracle-db")]
+                    crate::db::insert_blocklist_audit_event(
+                        state.db.clone(),
+                        crate::db::BlocklistAuditEvent {
+                            source_url: Some(BLOCKLIST_URL.to_string()),
+                            entries_loaded: None,
+                            seed_entries: Some(SEED.len() as i64),
+                            success: false,
+                            error_msg: Some(e.to_string().chars().take(512).collect()),
+                            duration_ms: Some(started.elapsed().as_millis() as i64),
+                        },
+                    );
                 }
             }
             tokio::select! {

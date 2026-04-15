@@ -245,6 +245,87 @@ fn set_keepalive(stream: &tokio::net::TcpStream) {
     let _ = socket2::SockRef::from(stream).set_tcp_keepalive(&ka);
 }
 
+#[cfg(feature = "oracle-db")]
+fn db_session_open(
+    state: &SharedState,
+    session_id: &str,
+    host: &str,
+    peer_ip: Option<String>,
+    tunnel_kind: &str,
+    blocked: bool,
+    tarpitted: bool,
+    verdict: Option<String>,
+    category: Option<String>,
+    obfuscation_profile: Option<String>,
+    tls_ver: Option<String>,
+    alpn: Option<String>,
+    ja3_lite: Option<String>,
+    resolved_ip: Option<String>,
+    asn_org: Option<String>,
+) {
+    crate::db::insert_connection_session_open_event(
+        state.db.clone(),
+        crate::db::ConnectionSessionOpenEvent {
+            session_id: session_id.to_string(),
+            correlation_id: None,
+            host: host.to_string(),
+            peer_ip,
+            tunnel_kind: tunnel_kind.to_string(),
+            blocked,
+            tarpitted,
+            verdict,
+            category,
+            obfuscation_profile,
+            tls_ver,
+            alpn,
+            ja3_lite,
+            resolved_ip,
+            asn_org,
+        },
+    );
+}
+
+#[cfg(feature = "oracle-db")]
+fn db_session_close(
+    state: &SharedState,
+    session_id: &str,
+    duration_ms: Option<i64>,
+    bytes_up: u64,
+    bytes_down: u64,
+    blocked: bool,
+    tarpitted: bool,
+    tarpit_held_ms: Option<i64>,
+    verdict: Option<String>,
+    category: Option<String>,
+    obfuscation_profile: Option<String>,
+    tls_ver: Option<String>,
+    alpn: Option<String>,
+    ja3_lite: Option<String>,
+    resolved_ip: Option<String>,
+    asn_org: Option<String>,
+) {
+    crate::db::update_connection_session_close_event(
+        state.db.clone(),
+        crate::db::ConnectionSessionCloseEvent {
+            session_id: session_id.to_string(),
+            duration_ms,
+            bytes_up,
+            bytes_down,
+            blocked,
+            tarpitted,
+            tarpit_held_ms,
+            verdict,
+            category,
+            obfuscation_profile,
+            tls_ver,
+            alpn,
+            ja3_lite,
+            resolved_ip,
+            asn_org,
+        },
+    );
+}
+
 fn emit_full(
     state: &SharedState,
     event: &str,
@@ -315,9 +396,23 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
         orig_dst.port(),
         tls.alpn.as_deref(),
     );
+    #[cfg(feature = "oracle-db")]
+    if let Some(ref ja3) = tls.ja3_lite {
+        crate::db::upsert_tls_fingerprint_event(
+            state.db.clone(),
+            crate::db::TlsFingerprintEvent {
+                ja3_lite: ja3.clone(),
+                tls_ver: tls.tls_ver.clone(),
+                alpn: tls.alpn.clone(),
+                cipher_count: tls.cipher_suites_count.map(i32::from),
+                verdict_hint: Some("ALLOWED".to_string()),
+            },
+        );
+    }
 
     if let Some(ref name) = hostname {
         if blocklist::is_blocked(name, &state).await {
+            let blocked_session_id = uuid::Uuid::new_v4().to_string();
             state.record_blocked();
             let approx_bytes = (50 + name.len()) as u64;
             // Epic 4.1 — store TLS fingerprint before block counters
@@ -426,24 +521,55 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
             let raw = event.to_string();
             let _ = state.events_tx.send(raw.clone());
             #[cfg(feature = "oracle-db")]
-            crate::db::insert_proxy_event(
-                state.db.clone(),
-                crate::db::ProxyEvent {
-                    obfuscation_profile: None,
-                    event_type: "block".to_string(),
-                    host: name.clone(),
-                    peer_ip: peer_ip.clone(),
-                    bytes_up: 0,
-                    bytes_down: 0,
-                    status_code: None,
-                    blocked: true,
-                    correlation_id: None,
-                    parent_event_id: None,
-                    event_sequence: None,
-                    duration_ms: None,
-                    raw_json: raw,
-                },
-            );
+            {
+                crate::db::insert_proxy_event(
+                    state.db.clone(),
+                    crate::db::ProxyEvent {
+                        obfuscation_profile: None,
+                        event_type: "block".to_string(),
+                        host: name.clone(),
+                        peer_ip: peer_ip.clone(),
+                        bytes_up: 0,
+                        bytes_down: 0,
+                        status_code: None,
+                        blocked: true,
+                        correlation_id: None,
+                        parent_event_id: None,
+                        event_sequence: None,
+                        duration_ms: None,
+                        raw_json: raw,
+                    },
+                );
+                if let Some(ref ja3) = tls.ja3_lite {
+                    crate::db::upsert_tls_fingerprint_event(
+                        state.db.clone(),
+                        crate::db::TlsFingerprintEvent {
+                            ja3_lite: ja3.clone(),
+                            tls_ver: tls.tls_ver.clone(),
+                            alpn: tls.alpn.clone(),
+                            cipher_count: tls.cipher_suites_count.map(i32::from),
+                            verdict_hint: Some(verdict.to_string()),
+                        },
+                    );
+                }
+                db_session_open(
+                    &state,
+                    &blocked_session_id,
+                    name,
+                    peer_ip.clone(),
+                    "transparent",
+                    true,
+                    verdict == "TARPIT",
+                    Some(verdict.to_string()),
+                    Some(category.to_string()),
+                    None,
+                    tls.tls_ver.clone(),
+                    tls.alpn.clone(),
+                    tls.ja3_lite.clone(),
+                    None,
+                    None,
+                );
+            }
             if verdict == "TARPIT" {
                 if let Ok(_permit) = state.tarpit_sem.clone().try_acquire_owned() {
                     let tarpit_start = Instant::now();
@@ -452,10 +578,49 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
                         tokio::io::copy(&mut stream, &mut tokio::io::sink()),
                     )
                     .await;
-                    state.record_tarpit_held(name, tarpit_start.elapsed().as_millis() as u64);
+                    let held_ms = tarpit_start.elapsed().as_millis() as u64;
+                    state.record_tarpit_held(name, held_ms);
+                    #[cfg(feature = "oracle-db")]
+                    db_session_close(
+                        &state,
+                        &blocked_session_id,
+                        Some(held_ms as i64),
+                        0,
+                        0,
+                        true,
+                        true,
+                        Some(held_ms as i64),
+                        Some(verdict.to_string()),
+                        Some(category.to_string()),
+                        None,
+                        tls.tls_ver.clone(),
+                        tls.alpn.clone(),
+                        tls.ja3_lite.clone(),
+                        None,
+                        None,
+                    );
                 }
                 return;
             }
+            #[cfg(feature = "oracle-db")]
+            db_session_close(
+                &state,
+                &blocked_session_id,
+                Some(0),
+                0,
+                0,
+                true,
+                false,
+                None,
+                Some(verdict.to_string()),
+                Some(category.to_string()),
+                None,
+                tls.tls_ver.clone(),
+                tls.alpn.clone(),
+                tls.ja3_lite.clone(),
+                None,
+                None,
+            );
         }
     }
 
@@ -812,7 +977,7 @@ fn original_dst(stream: &tokio::net::TcpStream) -> std::io::Result<SocketAddr> {
 }
 
 async fn run_transparent(
-    mut client: tokio::net::TcpStream,
+    client: tokio::net::TcpStream,
     orig_dst: SocketAddr,
     host: String,
     state: SharedState,
@@ -829,8 +994,9 @@ async fn run_transparent(
     )
     .await
     {
-        Ok(Ok(mut upstream)) => {
+        Ok(Ok(upstream)) => {
             let start = Instant::now();
+            let session_id = uuid::Uuid::new_v4().to_string();
             info!(
                 target: "audit",
                 event = "tunnel_open",
@@ -869,6 +1035,28 @@ async fn run_transparent(
                     "tls_ver":          tls.tls_ver,
                     "obfuscation_profile": profile.as_str(),
                 }),
+            );
+            #[cfg(feature = "oracle-db")]
+            db_session_open(
+                &state,
+                &session_id,
+                &host,
+                peer_ip.clone(),
+                "transparent",
+                false,
+                false,
+                Some("ALLOWED".to_string()),
+                Some(category.to_string()),
+                if matches!(profile, crate::obfuscation::Profile::None) {
+                    None
+                } else {
+                    Some(profile.as_str().to_string())
+                },
+                tls.tls_ver.clone(),
+                tls.alpn.clone(),
+                tls.ja3_lite.clone(),
+                None,
+                None,
             );
             state.record_tunnel_open();
             
@@ -947,7 +1135,7 @@ async fn run_transparent(
                         &state,
                         "tunnel_close",
                         &host,
-                        peer_ip,
+                        peer_ip.clone(),
                         up,
                         down,
                         None,
@@ -961,10 +1149,104 @@ async fn run_transparent(
                             "payload_preview": payload_preview,
                         }),
                     );
+                    #[cfg(feature = "oracle-db")]
+                    {
+                        db_session_close(
+                            &state,
+                            &session_id,
+                            Some(start.elapsed().as_millis() as i64),
+                            up,
+                            down,
+                            false,
+                            false,
+                            None,
+                            Some("ALLOWED".to_string()),
+                            Some(category.to_string()),
+                            if matches!(profile, crate::obfuscation::Profile::None) {
+                                None
+                            } else {
+                                Some(profile.as_str().to_string())
+                            },
+                            tls.tls_ver.clone(),
+                            tls.alpn.clone(),
+                            tls.ja3_lite.clone(),
+                            None,
+                            None,
+                        );
+                        let up_b64 = base64::Engine::encode(
+                            &base64::engine::general_purpose::STANDARD,
+                            &up_buf,
+                        );
+                        crate::db::insert_payload_audit_event(
+                            state.db.clone(),
+                            crate::db::PayloadAuditEvent {
+                                correlation_id: session_id.clone(),
+                                host: host.clone(),
+                                direction: "UP".to_string(),
+                                byte_offset: 0,
+                                payload_bytes: up_buf.clone(),
+                                payload_b64: Some(up_b64),
+                                content_type: None,
+                                http_method: None,
+                                http_status: None,
+                                http_path: None,
+                                is_encrypted: true,
+                                truncated: up > PAYLOAD_PREVIEW_LIMIT as u64,
+                                peer_ip: peer_ip.clone(),
+                                notes: Some("transparent tunnel preview".to_string()),
+                            },
+                        );
+                        let down_b64 = base64::Engine::encode(
+                            &base64::engine::general_purpose::STANDARD,
+                            &down_buf,
+                        );
+                        crate::db::insert_payload_audit_event(
+                            state.db.clone(),
+                            crate::db::PayloadAuditEvent {
+                                correlation_id: session_id.clone(),
+                                host: host.clone(),
+                                direction: "DOWN".to_string(),
+                                byte_offset: 0,
+                                payload_bytes: down_buf.clone(),
+                                payload_b64: Some(down_b64),
+                                content_type: None,
+                                http_method: None,
+                                http_status: None,
+                                http_path: None,
+                                is_encrypted: true,
+                                truncated: down > PAYLOAD_PREVIEW_LIMIT as u64,
+                                peer_ip: peer_ip.clone(),
+                                notes: Some("transparent tunnel preview".to_string()),
+                            },
+                        );
+                    }
                 }
                 Err(e) => {
                     state.record_tunnel_close(0, 0);
                     debug!(%host, %e, "transparent tunnel closed by peer");
+                    #[cfg(feature = "oracle-db")]
+                    db_session_close(
+                        &state,
+                        &session_id,
+                        Some(start.elapsed().as_millis() as i64),
+                        0,
+                        0,
+                        false,
+                        false,
+                        None,
+                        Some("ALLOWED".to_string()),
+                        Some(category.to_string()),
+                        if matches!(profile, crate::obfuscation::Profile::None) {
+                            None
+                        } else {
+                            Some(profile.as_str().to_string())
+                        },
+                        tls.tls_ver.clone(),
+                        tls.alpn.clone(),
+                        tls.ja3_lite.clone(),
+                        None,
+                        None,
+                    );
                 }
             }
         }
@@ -1022,6 +1304,7 @@ pub async fn handle(
     let hostname = hostname_owned.as_str();
 
     if blocklist::is_blocked(hostname, &state).await {
+        let blocked_session_id = uuid::Uuid::new_v4().to_string();
         state.record_blocked();
         let approx_bytes = (50 + hostname.len()) as u64;
         let verdict_change = state.record_host_block(hostname, approx_bytes, category);
@@ -1116,24 +1399,43 @@ pub async fn handle(
         let raw = event.to_string();
         let _ = state.events_tx.send(raw.clone());
         #[cfg(feature = "oracle-db")]
-        crate::db::insert_proxy_event(
-            state.db.clone(),
-            crate::db::ProxyEvent {
-                obfuscation_profile: None,
-                event_type: "block".to_string(),
-                host: hostname.to_string(),
-                peer_ip: peer_ip.clone(),
-                bytes_up: 0,
-                bytes_down: 0,
-                status_code: None,
-                blocked: true,
-                correlation_id: None,
-                parent_event_id: None,
-                event_sequence: None,
-                duration_ms: None,
-                raw_json: raw,
-            },
-        );
+        {
+            crate::db::insert_proxy_event(
+                state.db.clone(),
+                crate::db::ProxyEvent {
+                    obfuscation_profile: None,
+                    event_type: "block".to_string(),
+                    host: hostname.to_string(),
+                    peer_ip: peer_ip.clone(),
+                    bytes_up: 0,
+                    bytes_down: 0,
+                    status_code: None,
+                    blocked: true,
+                    correlation_id: None,
+                    parent_event_id: None,
+                    event_sequence: None,
+                    duration_ms: None,
+                    raw_json: raw,
+                },
+            );
+            db_session_open(
+                &state,
+                &blocked_session_id,
+                hostname,
+                peer_ip.clone(),
+                "connect",
+                true,
+                verdict == "TARPIT",
+                Some(verdict.to_string()),
+                Some(category.to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+        }
 
         if verdict == "TARPIT" {
             // Acquire a permit; fall back to fast drop if at capacity.
@@ -1151,6 +1453,25 @@ pub async fn handle(
                     }
                 });
             }
+            #[cfg(feature = "oracle-db")]
+            db_session_close(
+                &state,
+                &blocked_session_id,
+                Some(0),
+                0,
+                0,
+                true,
+                true,
+                None,
+                Some(verdict.to_string()),
+                Some(category.to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
 
             return Ok(Response::builder()
                 .status(StatusCode::FORBIDDEN)
@@ -1158,6 +1479,25 @@ pub async fn handle(
                 .body(Body::from("Access denied"))
                 .unwrap());
         } else {
+            #[cfg(feature = "oracle-db")]
+            db_session_close(
+                &state,
+                &blocked_session_id,
+                Some(0),
+                0,
+                0,
+                true,
+                false,
+                None,
+                Some(verdict.to_string()),
+                Some(category.to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
             // Graceful half-close: properly complete TCP FIN handshake before dropping
             tokio::spawn(async move {
                 if let Ok(upgraded) = upgrade_fut.await {
@@ -1207,6 +1547,7 @@ pub async fn handle(
             // 2. Raw TCP connection to upstream - NO MITM, NO OBFUSCATION
             match dial_upstream_with_resolver(&state, &host).await {
                 Ok((mut upstream, resolved_ips, selected_ip)) => {
+                let session_id = uuid::Uuid::new_v4().to_string();
                 set_keepalive(&upstream);
                 state.record_tunnel_open();
                 info!(
@@ -1238,6 +1579,24 @@ pub async fn handle(
                         "obfuscation_profile": "none",
                         "bypass_reason":       "certificate_pinning",
                     }),
+                );
+                #[cfg(feature = "oracle-db")]
+                db_session_open(
+                    &state,
+                    &session_id,
+                    &host,
+                    peer_ip.clone(),
+                    "bypass",
+                    false,
+                    false,
+                    Some("ALLOWED".to_string()),
+                    Some(category.to_string()),
+                    Some("none".to_string()),
+                    None,
+                    None,
+                    None,
+                    Some(selected_ip.clone()),
+                    None,
                 );
 
                 let (bytes_up, bytes_down) =
@@ -1279,6 +1638,25 @@ pub async fn handle(
                         "obfuscation_profile": "none",
                         "bypass_reason":       "certificate_pinning",
                     }),
+                );
+                #[cfg(feature = "oracle-db")]
+                db_session_close(
+                    &state,
+                    &session_id,
+                    Some(start.elapsed().as_millis() as i64),
+                    bytes_up,
+                    bytes_down,
+                    false,
+                    false,
+                    None,
+                    Some("ALLOWED".to_string()),
+                    Some(category.to_string()),
+                    Some("none".to_string()),
+                    None,
+                    None,
+                    None,
+                    Some(selected_ip),
+                    None,
                 );
                 }
                 Err(e) => {
@@ -1353,6 +1731,7 @@ async fn run_tunnel(
     match dial_upstream_with_resolver(&state, &host).await {
         Ok((mut upstream, resolved_ips, selected_ip)) => {
             let start = Instant::now();
+            let session_id = uuid::Uuid::new_v4().to_string();
             info!(
                 target: "audit",
                 event = "tunnel_open",
@@ -1395,6 +1774,28 @@ async fn run_tunnel(
                     "obfuscation_profile": profile.as_str(),
                 }),
             );
+            #[cfg(feature = "oracle-db")]
+            db_session_open(
+                &state,
+                &session_id,
+                &host,
+                peer_ip.clone(),
+                "connect",
+                false,
+                false,
+                Some("ALLOWED".to_string()),
+                Some(category.to_string()),
+                if matches!(profile, crate::obfuscation::Profile::None) {
+                    None
+                } else {
+                    Some(profile.as_str().to_string())
+                },
+                None,
+                None,
+                None,
+                Some(selected_ip.clone()),
+                None,
+            );
             state.record_tunnel_open();
             match tokio::io::copy_bidirectional(&mut client, &mut upstream).await {
                 Ok((up, down)) => {
@@ -1427,10 +1828,56 @@ async fn run_tunnel(
                             "duration_ms": start.elapsed().as_millis(),
                         }),
                     );
+                    #[cfg(feature = "oracle-db")]
+                    db_session_close(
+                        &state,
+                        &session_id,
+                        Some(start.elapsed().as_millis() as i64),
+                        up,
+                        down,
+                        false,
+                        false,
+                        None,
+                        Some("ALLOWED".to_string()),
+                        Some(category.to_string()),
+                        if matches!(profile, crate::obfuscation::Profile::None) {
+                            None
+                        } else {
+                            Some(profile.as_str().to_string())
+                        },
+                        None,
+                        None,
+                        None,
+                        Some(selected_ip.clone()),
+                        None,
+                    );
                 }
                 Err(e) => {
                     state.record_tunnel_close(0, 0);
                     debug!(%host, %e, "tunnel closed by peer");
+                    #[cfg(feature = "oracle-db")]
+                    db_session_close(
+                        &state,
+                        &session_id,
+                        Some(start.elapsed().as_millis() as i64),
+                        0,
+                        0,
+                        false,
+                        false,
+                        None,
+                        Some("ALLOWED".to_string()),
+                        Some(category.to_string()),
+                        if matches!(profile, crate::obfuscation::Profile::None) {
+                            None
+                        } else {
+                            Some(profile.as_str().to_string())
+                        },
+                        None,
+                        None,
+                        None,
+                        Some(selected_ip),
+                        None,
+                    );
                 }
             }
         }
