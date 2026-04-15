@@ -46,8 +46,8 @@ echo "starting CoreDNS: $COREDNS_CONFIG"
 cmd /usr/local/bin/coredns -conf "$COREDNS_CONFIG" &
 COREDNS_PID=$!
 
-# Auto-generate self-signed TLS certificate if not provided
-if [ -z "${TLS_CERT_PATH:-}" ] && [ -z "${TLS_KEY_PATH:-}" ]; then
+# Auto-generate self-signed TLS certificate only if explicitly enabled
+if [ "${DISABLE_TLS:-false}" != "true" ] && [ -z "${TLS_CERT_PATH:-}" ] && [ -z "${TLS_KEY_PATH:-}" ]; then
     if [ ! -f "/ssl/tls.crt" ] || [ ! -f "/ssl/tls.key" ]; then
         echo "[#] Generating self-signed TLS certificate for proxy listener"
         mkdir -p /ssl
@@ -67,6 +67,13 @@ if [ -z "${TLS_CERT_PATH:-}" ] && [ -z "${TLS_KEY_PATH:-}" ]; then
         export TLS_CERT_PATH="/ssl/tls.crt"
         export TLS_KEY_PATH="/ssl/tls.key"
     fi
+fi
+
+# Force plaintext mode when DISABLE_TLS is set
+if [ "${DISABLE_TLS:-false}" = "true" ]; then
+    unset TLS_CERT_PATH
+    unset TLS_KEY_PATH
+    echo "[#] TLS disabled - proxy will run in PLAINTEXT mode only"
 fi
 
 echo "starting ssl-proxy"
