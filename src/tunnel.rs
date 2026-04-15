@@ -960,8 +960,9 @@ pub async fn handle(
             // Acquire a permit; fall back to fast drop if at capacity.
             if let Ok(permit) = state.tarpit_sem.clone().try_acquire_owned() {
                 let host_owned = hostname.to_string();
+                let state_clone = state.clone();
                 tokio::spawn(async move {
-                    run_tarpit(upgrade_fut, host_owned, state).await;
+                    run_tarpit(upgrade_fut, host_owned, state_clone).await;
                     drop(permit);
                 });
             } else {
@@ -971,6 +972,11 @@ pub async fn handle(
                     }
                 });
             }
+            
+            return Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())
+                .unwrap());
         } else {
             // Graceful half-close: properly complete TCP FIN handshake before dropping
             tokio::spawn(async move {
@@ -984,11 +990,12 @@ pub async fn handle(
                     // Connection will be dropped gracefully at end of scope
                 }
             });
+            
+            return Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())
+                .unwrap());
         }
-        return Ok(Response::builder()
-            .status(StatusCode::OK)
-            .body(Body::empty())
-            .unwrap());
     }
 
     // EPISODIC FIX: The Meta/Google Surgical Bypass - Certificate Pinning Domains

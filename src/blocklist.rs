@@ -123,11 +123,12 @@ mod tests {
         let (events_tx, _) = broadcast::channel(16);
         let resolver = TokioAsyncResolver::tokio_from_system_conf().unwrap();
 
-        let mut config = crate::config::Config::from_env();
+        let mut config = crate::config::Config::from_env_or_panic();
         config.obfuscation_enabled = true;
 
         AppState::new(
-            crate::proxy::ProxyClient::new(),
+            crate::proxy::ProxyClient::builder(hyper_util::rt::TokioExecutor::new())
+                .build(hyper_util::client::legacy::connect::HttpConnector::new()),
             resolver,
             stats_tx,
             events_tx,

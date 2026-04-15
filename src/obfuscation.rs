@@ -192,6 +192,9 @@ mod tests {
             proxy_username: None,
             proxy_password: None,
             proxy_password_file: String::new(),
+            tunnel_endpoint: None,
+            upstream_proxy: None,
+            enable_dns_lookups: false,
         }
     }
 
