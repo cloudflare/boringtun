@@ -117,6 +117,31 @@ resolve_wan_interface() {
     WG_WAN_INTERFACE="$resolved"
 }
 
+normalize_csv_unique() {
+    local input="$1"
+    awk -v input="$input" '
+        function trim(s) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+            return s
+        }
+        BEGIN {
+            n = split(input, parts, ",")
+            out = ""
+            for (i = 1; i <= n; i++) {
+                item = trim(parts[i])
+                if (item == "") {
+                    continue
+                }
+                if (!(item in seen)) {
+                    seen[item] = 1
+                    out = (out == "" ? item : out "," item)
+                }
+            }
+            print out
+        }
+    '
+}
+
 resolve_peer_public_key() {
     local peer_public_key=""
     local legacy_peer_public_key_file=""
@@ -275,6 +300,7 @@ render_wireguard_config() {
     local peer_public_key
     local peer_preshared_key
     local peer_address
+    local normalized_server_address
     local escaped_server_private_key
     local escaped_peer_public_key
     local escaped_peer_preshared_key
@@ -293,6 +319,16 @@ render_wireguard_config() {
 
     server_private_key="$(read_trimmed_file "$WG_SERVER_PRIVATE_KEY_FILE")"
     peer_public_key="$(resolve_peer_public_key)"
+
+    normalized_server_address="$(normalize_csv_unique "$WG_SERVER_ADDRESS")"
+    if [ -z "$normalized_server_address" ]; then
+        echo "WG_SERVER_ADDRESS resolved to empty value after normalization" >&2
+        exit 1
+    fi
+    if [ "$normalized_server_address" != "$WG_SERVER_ADDRESS" ]; then
+        echo "[#] Normalized WG_SERVER_ADDRESS: $WG_SERVER_ADDRESS -> $normalized_server_address"
+    fi
+    WG_SERVER_ADDRESS="$normalized_server_address"
 
     if [ -f "$WG_PEER_PRESHARED_KEY_FILE" ]; then
         peer_preshared_key="$(read_trimmed_file "$WG_PEER_PRESHARED_KEY_FILE")"
