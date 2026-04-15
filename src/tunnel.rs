@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info};
 
@@ -753,7 +754,56 @@ async fn run_transparent(
                 }),
             );
             state.record_tunnel_open();
-            match tokio::io::copy_bidirectional(&mut client, &mut upstream).await {
+            
+            /// Maximum bytes to capture per direction for payload preview
+            const PAYLOAD_PREVIEW_LIMIT: usize = 4096;
+            
+            // Split streams for bidirectional copy
+            let (mut client_read, mut client_write) = tokio::io::split(client);
+            let (mut upstream_read, mut upstream_write) = tokio::io::split(upstream);
+            
+            let mut up_buf = Vec::with_capacity(PAYLOAD_PREVIEW_LIMIT);
+            let mut down_buf = Vec::with_capacity(PAYLOAD_PREVIEW_LIMIT);
+            
+            // Client -> Upstream copy with tee
+            let up_task = async {
+                let mut buf = [0u8; 8192];
+                let mut total = 0u64;
+                loop {
+                    let n = client_read.read(&mut buf).await?;
+                    if n == 0 { break; }
+                    upstream_write.write_all(&buf[..n]).await?;
+                    total += n as u64;
+                    
+                    // Capture first N bytes only
+                    if up_buf.len() < PAYLOAD_PREVIEW_LIMIT {
+                        let take = (PAYLOAD_PREVIEW_LIMIT - up_buf.len()).min(n);
+                        up_buf.extend_from_slice(&buf[..take]);
+                    }
+                }
+                Ok::<u64, std::io::Error>(total)
+            };
+            
+            // Upstream -> Client copy with tee
+            let down_task = async {
+                let mut buf = [0u8; 8192];
+                let mut total = 0u64;
+                loop {
+                    let n = upstream_read.read(&mut buf).await?;
+                    if n == 0 { break; }
+                    client_write.write_all(&buf[..n]).await?;
+                    total += n as u64;
+                    
+                    // Capture first N bytes only
+                    if down_buf.len() < PAYLOAD_PREVIEW_LIMIT {
+                        let take = (PAYLOAD_PREVIEW_LIMIT - down_buf.len()).min(n);
+                        down_buf.extend_from_slice(&buf[..take]);
+                    }
+                }
+                Ok::<u64, std::io::Error>(total)
+            };
+            
+            match tokio::try_join!(up_task, down_task) {
                 Ok((up, down)) => {
                     state.record_tunnel_close(up, down);
                     info!(
@@ -767,6 +817,15 @@ async fn run_transparent(
                         category = category,
                         "transparent tunnel closed"
                     );
+                    
+                    // Encode captured payloads as base64 for audit log
+                    let payload_preview = serde_json::json!({
+                        "up": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &up_buf),
+                        "down": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &down_buf),
+                        "truncated_up": up > PAYLOAD_PREVIEW_LIMIT as u64,
+                        "truncated_down": down > PAYLOAD_PREVIEW_LIMIT as u64,
+                    });
+                    
                     emit_full(
                         &state,
                         "tunnel_close",
@@ -782,6 +841,7 @@ async fn run_transparent(
                             "bytes_up":    up,
                             "bytes_down":  down,
                             "duration_ms": start.elapsed().as_millis(),
+                            "payload_preview": payload_preview,
                         }),
                     );
                 }

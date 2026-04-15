@@ -329,10 +329,16 @@ async fn handle_h3_request(
     );
     state.record_tunnel_open();
 
+    /// Maximum bytes to capture per direction for payload preview
+    const PAYLOAD_PREVIEW_LIMIT: usize = 4096;
+
     // Bidirectional copy between H3 stream and upstream TCP.
     // Split the H3 bidi stream into send/recv halves and the upstream TCP stream.
     let (mut h3_send, mut h3_recv) = stream.split();
     let (mut upstream_read, mut upstream_write) = upstream.split();
+    
+    let mut up_buf = Vec::with_capacity(PAYLOAD_PREVIEW_LIMIT);
+    let mut down_buf = Vec::with_capacity(PAYLOAD_PREVIEW_LIMIT);
 
     // H3 → upstream: read H3 data chunks and write to TCP
     let h3_to_upstream = async {
@@ -348,6 +354,13 @@ async fn handle_h3_request(
                             return total;
                         }
                         total += len as u64;
+                        
+                        // Capture first N bytes only
+                        if up_buf.len() < PAYLOAD_PREVIEW_LIMIT {
+                            let take = (PAYLOAD_PREVIEW_LIMIT - up_buf.len()).min(len);
+                            up_buf.extend_from_slice(&chunk[..take]);
+                        }
+                        
                         bytes::Buf::advance(&mut buf, len);
                     }
                 }
@@ -375,6 +388,12 @@ async fn handle_h3_request(
                         break;
                     }
                     total += n as u64;
+                    
+                    // Capture first N bytes only
+                    if down_buf.len() < PAYLOAD_PREVIEW_LIMIT {
+                        let take = (PAYLOAD_PREVIEW_LIMIT - down_buf.len()).min(n);
+                        down_buf.extend_from_slice(&buf[..take]);
+                    }
                 }
                 Err(e) => {
                     debug!(%host, %e, "QUIC: upstream read failed");
@@ -389,6 +408,14 @@ async fn handle_h3_request(
     let (up, down) = tokio::join!(h3_to_upstream, upstream_to_h3);
     state.record_tunnel_close(up, down);
 
+    // Encode captured payloads as base64 for audit log2
+    let payload_preview = serde_json::json!({
+        "up": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &up_buf),
+        "down": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &down_buf),
+        "truncated_up": up > PAYLOAD_PREVIEW_LIMIT as u64,
+        "truncated_down": down > PAYLOAD_PREVIEW_LIMIT as u64,
+    });
+
     info!(
         target: "audit",
         event = "tunnel_close",
@@ -398,5 +425,40 @@ async fn handle_h3_request(
         bytes_down = down,
         duration_ms = start.elapsed().as_millis(),
         "QUIC tunnel closed"
+    );
+    
+    // Emit event with payload preview to oracle
+    let event = serde_json::json!({
+        "type":        "tunnel_close",
+        "host":        host,
+        "time":        chrono::Utc::now().to_rfc3339(),
+        "kind":        "quic-h3",
+        "bytes_up":    up,
+        "bytes_down":  down,
+        "duration_ms": start.elapsed().as_millis(),
+        "payload_preview": payload_preview,
+    });
+    
+    let raw = event.to_string();
+    let _ = state.events_tx.send(raw.clone());
+    
+    #[cfg(feature = "oracle-db")]
+    crate::db::insert_proxy_event(
+        state.db.clone(),
+        crate::db::ProxyEvent {
+            obfuscation_profile: None,
+            event_type: "tunnel_close".to_string(),
+            host: host.to_string(),
+            peer_ip: Some(peer.ip().to_string()),
+            bytes_up: up,
+            bytes_down: down,
+            status_code: None,
+            blocked: false,
+            correlation_id: None,
+            parent_event_id: None,
+            event_sequence: None,
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+            raw_json: raw,
+        },
     );
 }
