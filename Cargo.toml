@@ -9,6 +9,7 @@ axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1.40", features = ["full"] }
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "http2", "server", "tokio"] }
+hyper-proxy = "0.9.1"
 http-body-util = "0.1"
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["set-header", "fs", "trace", "cors"] }
