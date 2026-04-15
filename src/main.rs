@@ -197,13 +197,37 @@ async fn main() {
         ))
         .with_state(state.clone());
 
-    let router = Router::new()
+    // Admin / dashboard listener — plaintext, internal only
+    let admin_router = Router::new()
         .route("/ws", get(dashboard::ws_stats))
         .route("/events", get(dashboard::ws_events))
         .route("/health", get(dashboard::health))
         .merge(admin_routes)
-        .fallback(any(proxy::handler))
         .nest_service("/dashboard", ServeDir::new("static"))
+        .layer(TraceLayer::new_for_http())
+        .layer(cors.clone())
+        .with_state(state.clone());
+
+    let admin_addr = SocketAddr::from(([0, 0, 0, 0], config.admin_port));
+    let admin_listener = tokio::net::TcpListener::bind(admin_addr)
+        .await
+        .unwrap_or_else(|e| {
+            error!(%admin_addr, %e, "failed to bind admin listener");
+            std::process::exit(1)
+        });
+    info!(%admin_addr, "admin/dashboard listener active (plaintext)");
+
+    let admin_shutdown = shutdown.clone();
+    tokio::spawn(async move {
+        axum::serve(admin_listener, admin_router)
+            .with_graceful_shutdown(async move { admin_shutdown.cancelled().await })
+            .await
+            .ok();
+    });
+
+    // Main proxy router - only handles proxy traffic
+    let router = Router::new()
+        .fallback(any(proxy::handler))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state.clone());

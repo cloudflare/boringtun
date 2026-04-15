@@ -50,9 +50,9 @@ ENV LD_LIBRARY_PATH=/app/lib \
     WG_CONFIG_PATH=/config/wg_confs/wg0.conf \
     WG_SUDO=1 \
     COREDNS_CONFIG=/config/coredns/Corefile
-EXPOSE 3000/tcp 3001/tcp 443/udp
+EXPOSE 3000/tcp 3001/tcp 3002/tcp 443/udp
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
+  CMD curl -f http://localhost:3002/health || exit 1
 # Running as root temporarily until entrypoint can drop privileges after network setup
 # USER proxyuser
 ENTRYPOINT ["/usr/local/bin/start-proxy-wg"]

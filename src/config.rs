@@ -4,6 +4,7 @@ pub struct Config {
     pub proxy_port: u16,
     pub tproxy_port: u16,
     pub wg_port: u16,
+    pub admin_port: u16,
     pub wg_interface: Option<String>,
     pub max_connections: usize,
     pub tarpit_max_connections: usize,
@@ -131,6 +132,10 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(51820);
+        let admin_port = std::env::var("ADMIN_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3002);
         let wg_interface = std::env::var("WG_INTERFACE").ok();
         let max_connections = std::env::var("MAX_CONNECTIONS")
             .ok()
@@ -222,7 +227,12 @@ impl Config {
             .unwrap_or(false);
 
         // Validate required fields
-        if proxy_port == tproxy_port || tproxy_port == wg_port || proxy_port == wg_port {
+        if proxy_port == tproxy_port 
+            || tproxy_port == wg_port 
+            || proxy_port == wg_port
+            || admin_port == proxy_port
+            || admin_port == tproxy_port
+            || admin_port == wg_port {
             return Err(ConfigError::PortConflict);
         }
         if oracle_conn.is_empty() && cfg!(feature = "oracle-db") {
@@ -245,6 +255,7 @@ impl Config {
             proxy_port,
             tproxy_port,
             wg_port,
+            admin_port,
             wg_interface,
             max_connections,
             tarpit_max_connections,

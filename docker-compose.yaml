@@ -7,7 +7,7 @@ services:
         CARGO_FEATURES: oracle-db
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/health && wg show wg0"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3002/health && wg show wg0"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -51,6 +51,7 @@ services:
       - "443:443/udp"
       - "3000:3000"
       - "127.0.0.1:3001:3001"
+      - "127.0.0.1:3002:3002"
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
