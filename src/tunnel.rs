@@ -703,13 +703,9 @@ async fn run_transparent(
 ) {
     set_keepalive(&client);
     
-    // Use configured tunnel endpoint if available, otherwise connect directly
-    let connect_target = state.config.tunnel_endpoint.clone()
-        .unwrap_or_else(|| orig_dst.to_string());
-
     match tokio::time::timeout(
         tokio::time::Duration::from_secs(10),
-        tokio::net::TcpStream::connect(&connect_target),
+        tokio::net::TcpStream::connect(orig_dst),
     )
     .await
     {
@@ -1017,10 +1013,7 @@ pub async fn handle(
             let mut client_io = TokioIo::new(upgraded);
             
             // 2. Raw TCP connection to upstream - NO MITM, NO OBFUSCATION
-            let connect_target = state.config.tunnel_endpoint.clone()
-                .unwrap_or_else(|| host.clone());
-                
-            if let Ok(mut upstream) = tokio::net::TcpStream::connect(&connect_target).await {
+            if let Ok(mut upstream) = tokio::net::TcpStream::connect(&host).await {
                 set_keepalive(&upstream);
                 
                 let (bytes_up, bytes_down) = tokio::io::copy_bidirectional(&mut client_io, &mut upstream)
