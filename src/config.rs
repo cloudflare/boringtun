@@ -55,37 +55,37 @@ pub enum ConfigError {
 mod tests {
     use super::*;
 
-#[test]
-fn test_config_port_conflict_error() {
-    std::env::set_var("PROXY_PORT", "51820");
-    std::env::set_var("WG_PORT", "51820");
-    std::env::set_var("ADMIN_API_KEY", "test-key");
+    #[test]
+    fn test_config_port_conflict_error() {
+        std::env::set_var("PROXY_PORT", "51820");
+        std::env::set_var("WG_PORT", "51820");
+        std::env::set_var("ADMIN_API_KEY", "test-key");
 
-    let result = Config::from_env();
-    assert!(matches!(result, Err(ConfigError::PortConflict)));
-}
+        let result = Config::from_env();
+        assert!(matches!(result, Err(ConfigError::PortConflict)));
+    }
 
-#[test]
-#[cfg(feature = "oracle-db")]
-fn test_config_missing_oracle_conn_error() {
-    std::env::remove_var("ORACLE_CONN");
-    std::env::set_var("ORACLE_USER", "test_user");
-    std::env::set_var("ADMIN_API_KEY", "test-key");
+    #[test]
+    #[cfg(feature = "oracle-db")]
+    fn test_config_missing_oracle_conn_error() {
+        std::env::remove_var("ORACLE_CONN");
+        std::env::set_var("ORACLE_USER", "test_user");
+        std::env::set_var("ADMIN_API_KEY", "test-key");
 
-    let result = Config::from_env();
-    assert!(matches!(result, Err(ConfigError::MissingOracleConn)));
-}
+        let result = Config::from_env();
+        assert!(matches!(result, Err(ConfigError::MissingOracleConn)));
+    }
 
-#[test]
-#[cfg(feature = "oracle-db")]
-fn test_config_missing_oracle_user_error() {
-    std::env::set_var("ORACLE_CONN", "test_conn");
-    std::env::remove_var("ORACLE_USER");
-    std::env::set_var("ADMIN_API_KEY", "test-key");
+    #[test]
+    #[cfg(feature = "oracle-db")]
+    fn test_config_missing_oracle_user_error() {
+        std::env::set_var("ORACLE_CONN", "test_conn");
+        std::env::remove_var("ORACLE_USER");
+        std::env::set_var("ADMIN_API_KEY", "test-key");
 
-    let result = Config::from_env();
-    assert!(matches!(result, Err(ConfigError::MissingOracleUser)));
-}
+        let result = Config::from_env();
+        assert!(matches!(result, Err(ConfigError::MissingOracleUser)));
+    }
 }
 
 impl std::fmt::Debug for Config {
@@ -217,7 +217,7 @@ impl Config {
         let upstream_proxy = std::env::var("UPSTREAM_PROXY")
             .ok()
             .filter(|s| !s.is_empty());
-            
+
         let enable_dns_lookups = std::env::var("ENABLE_DNS_LOOKUPS")
             .map(|v| match v.to_ascii_lowercase().as_str() {
                 "true" | "1" | "yes" | "on" => true,
@@ -227,12 +227,13 @@ impl Config {
             .unwrap_or(false);
 
         // Validate required fields
-        if proxy_port == tproxy_port 
-            || tproxy_port == wg_port 
+        if proxy_port == tproxy_port
+            || tproxy_port == wg_port
             || proxy_port == wg_port
             || admin_port == proxy_port
             || admin_port == tproxy_port
-            || admin_port == wg_port {
+            || admin_port == wg_port
+        {
             return Err(ConfigError::PortConflict);
         }
         if oracle_conn.is_empty() && cfg!(feature = "oracle-db") {

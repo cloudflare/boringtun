@@ -7,8 +7,6 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
-use std::error::Error;
-use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info};
 
@@ -237,35 +235,35 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
                 let name2 = name.clone();
                 // Only perform DNS lookups if explicitly enabled
                 if state2.config.enable_dns_lookups {
-                tokio::spawn(async move {
-                    const TTL_SECS: u64 = 300;
-                    if state2
-                        .dns_cache
-                        .get(&name2)
-                        .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
-                        .unwrap_or(false)
-                    {
-                        return;
-                    }
-                    if let Ok(Ok(addrs)) = tokio::time::timeout(
-                        tokio::time::Duration::from_millis(500),
-                        state2.resolver.lookup_ip(name2.as_str()),
-                    )
-                    .await
-                    {
-                        if let Some(ip) = addrs.iter().next() {
-                            let ip_str = ip.to_string();
-                            state2.dns_cache.insert(
-                                name2.clone(),
-                                crate::state::ResolvedMeta {
-                                    ip: ip_str.clone(),
-                                    resolved_at: Instant::now(),
-                                },
-                            );
-                            state2.record_resolved(&name2, ip_str, None);
+                    tokio::spawn(async move {
+                        const TTL_SECS: u64 = 300;
+                        if state2
+                            .dns_cache
+                            .get(&name2)
+                            .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
+                            .unwrap_or(false)
+                        {
+                            return;
                         }
-                    }
-                });
+                        if let Ok(Ok(addrs)) = tokio::time::timeout(
+                            tokio::time::Duration::from_millis(500),
+                            state2.resolver.lookup_ip(name2.as_str()),
+                        )
+                        .await
+                        {
+                            if let Some(ip) = addrs.iter().next() {
+                                let ip_str = ip.to_string();
+                                state2.dns_cache.insert(
+                                    name2.clone(),
+                                    crate::state::ResolvedMeta {
+                                        ip: ip_str.clone(),
+                                        resolved_at: Instant::now(),
+                                    },
+                                );
+                                state2.record_resolved(&name2, ip_str, None);
+                            }
+                        }
+                    });
                 }
             }
             info!(
@@ -341,7 +339,7 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
         "graph.facebook.com",
         "graph.instagram.com",
         "googlevideo.com",
-        "s.youtube.com"
+        "s.youtube.com",
     ];
 
     if let Some(ref name) = hostname {
@@ -353,15 +351,17 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
                 host = %name,
                 "Certificate pinned domain detected, bypassing interception"
             );
-            
+
             match tokio::time::timeout(
                 tokio::time::Duration::from_secs(10),
                 tokio::net::TcpStream::connect(orig_dst),
-            ).await {
+            )
+            .await
+            {
                 Ok(Ok(mut upstream)) => {
                     set_keepalive(&upstream);
                     let _ = tokio::io::copy_bidirectional(&mut stream, &mut upstream).await;
-                },
+                }
                 _ => {}
             }
             return;
@@ -704,7 +704,7 @@ async fn run_transparent(
     profile: crate::obfuscation::Profile,
 ) {
     set_keepalive(&client);
-    
+
     match tokio::time::timeout(
         tokio::time::Duration::from_secs(10),
         tokio::net::TcpStream::connect(orig_dst),
@@ -879,35 +879,35 @@ pub async fn handle(
             let hostname2 = hostname.to_string();
             // Only perform DNS lookups if explicitly enabled
             if state2.config.enable_dns_lookups {
-            tokio::spawn(async move {
-                const TTL_SECS: u64 = 300;
-                if state2
-                    .dns_cache
-                    .get(&hostname2)
-                    .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
-                    .unwrap_or(false)
-                {
-                    return;
-                }
-                if let Ok(Ok(addrs)) = tokio::time::timeout(
-                    tokio::time::Duration::from_millis(500),
-                    state2.resolver.lookup_ip(hostname2.as_str()),
-                )
-                .await
-                {
-                    if let Some(ip) = addrs.iter().next() {
-                        let ip_str = ip.to_string();
-                        state2.dns_cache.insert(
-                            hostname2.clone(),
-                            crate::state::ResolvedMeta {
-                                ip: ip_str.clone(),
-                                resolved_at: std::time::Instant::now(),
-                            },
-                        );
-                        state2.record_resolved(&hostname2, ip_str, None);
+                tokio::spawn(async move {
+                    const TTL_SECS: u64 = 300;
+                    if state2
+                        .dns_cache
+                        .get(&hostname2)
+                        .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
+                        .unwrap_or(false)
+                    {
+                        return;
                     }
-                }
-            });
+                    if let Ok(Ok(addrs)) = tokio::time::timeout(
+                        tokio::time::Duration::from_millis(500),
+                        state2.resolver.lookup_ip(hostname2.as_str()),
+                    )
+                    .await
+                    {
+                        if let Some(ip) = addrs.iter().next() {
+                            let ip_str = ip.to_string();
+                            state2.dns_cache.insert(
+                                hostname2.clone(),
+                                crate::state::ResolvedMeta {
+                                    ip: ip_str.clone(),
+                                    resolved_at: std::time::Instant::now(),
+                                },
+                            );
+                            state2.record_resolved(&hostname2, ip_str, None);
+                        }
+                    }
+                });
             }
         }
         info!(
@@ -941,21 +941,21 @@ pub async fn handle(
         #[cfg(feature = "oracle-db")]
         crate::db::insert_proxy_event(
             state.db.clone(),
-                crate::db::ProxyEvent {
-                    obfuscation_profile: None,
-                    event_type: "block".to_string(),
-                    host: hostname.to_string(),
-                    peer_ip: peer_ip.clone(),
-                    bytes_up: 0,
-                    bytes_down: 0,
-                    status_code: None,
-                    blocked: true,
-                    correlation_id: None,
-                    parent_event_id: None,
-                    event_sequence: None,
-                    duration_ms: None,
-                    raw_json: raw,
-                },
+            crate::db::ProxyEvent {
+                obfuscation_profile: None,
+                event_type: "block".to_string(),
+                host: hostname.to_string(),
+                peer_ip: peer_ip.clone(),
+                bytes_up: 0,
+                bytes_down: 0,
+                status_code: None,
+                blocked: true,
+                correlation_id: None,
+                parent_event_id: None,
+                event_sequence: None,
+                duration_ms: None,
+                raw_json: raw,
+            },
         );
 
         if verdict == "TARPIT" {
@@ -974,7 +974,7 @@ pub async fn handle(
                     }
                 });
             }
-            
+
             return Ok(Response::builder()
                 .status(StatusCode::OK)
                 .body(Body::empty())
@@ -988,11 +988,12 @@ pub async fn handle(
                     let _ = tokio::time::timeout(
                         tokio::time::Duration::from_millis(200),
                         tokio::io::copy(&mut stream, &mut tokio::io::sink()),
-                    ).await;
+                    )
+                    .await;
                     // Connection will be dropped gracefully at end of scope
                 }
             });
-            
+
             return Ok(Response::builder()
                 .status(StatusCode::OK)
                 .body(Body::empty())
@@ -1001,34 +1002,35 @@ pub async fn handle(
     }
 
     // EPISODIC FIX: The Meta/Google Surgical Bypass - Certificate Pinning Domains
-    let is_pinned_app = hostname.contains("facebook.com") 
-                     || hostname.contains("instagram.com") 
-                     || hostname.contains("googlevideo.com") 
-                     || hostname.contains("apple.com")
-                     || hostname.contains("youtube.com")
-                     || hostname.contains("fbcdn.net")
-                     || hostname.contains("instagramstatic.com");
+    let is_pinned_app = hostname.contains("facebook.com")
+        || hostname.contains("instagram.com")
+        || hostname.contains("googlevideo.com")
+        || hostname.contains("apple.com")
+        || hostname.contains("youtube.com")
+        || hostname.contains("fbcdn.net")
+        || hostname.contains("instagramstatic.com");
 
     if is_pinned_app {
         let start = Instant::now();
-        
+
         // 1. Return 200 OK immediately to establish the tunnel
         tokio::spawn(async move {
             let upgraded = match upgrade_fut.await {
                 Ok(u) => u,
                 Err(_) => return,
             };
-            
+
             let mut client_io = TokioIo::new(upgraded);
-            
+
             // 2. Raw TCP connection to upstream - NO MITM, NO OBFUSCATION
             if let Ok(mut upstream) = tokio::net::TcpStream::connect(&host).await {
                 set_keepalive(&upstream);
-                
-                let (bytes_up, bytes_down) = tokio::io::copy_bidirectional(&mut client_io, &mut upstream)
-                    .await
-                    .unwrap_or((0, 0));
-                
+
+                let (bytes_up, bytes_down) =
+                    tokio::io::copy_bidirectional(&mut client_io, &mut upstream)
+                        .await
+                        .unwrap_or((0, 0));
+
                 // Log completion with metrics
                 info!(
                     target: "audit",
@@ -1055,27 +1057,12 @@ pub async fn handle(
     state.record_host_allow(hostname);
 
     // RFC 7231 compliant CONNECT handshake implementation
-    // Write correct status line directly to socket after upgrade
+    // Hyper sends the 200 OK response as part of the request reply;
+    // the upgraded stream is reserved for raw TCP proxying only.
     tokio::spawn(async move {
         match upgrade_fut.await {
             Ok(upgraded) => {
-                let mut stream = TokioIo::new(upgraded);
-                
-                // ✅ Send EXACTLY what curl and all clients expect
-                // This is the only thing that works 100% across all HTTP clients
-                const CONNECT_OK: &[u8] = b"HTTP/1.1 200 Connection Established\r\nConnection: keep-alive\r\n\r\n";
-                
-                if let Err(e) = stream.write_all(CONNECT_OK).await {
-                    error!(%host, %e, "Failed to send CONNECT response");
-                    return;
-                }
-                
-                if let Err(e) = stream.flush().await {
-                    error!(%host, %e, "Failed to flush CONNECT response");
-                    return;
-                }
-                
-                // Now proceed with actual tunnel
+                let stream = TokioIo::new(upgraded);
                 run_tunnel(stream.into_inner(), host, state, category, peer_ip, profile).await;
             }
             Err(e) => {

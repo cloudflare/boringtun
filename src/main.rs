@@ -100,10 +100,7 @@ async fn main() {
     // Prefer IPv4 first to avoid "Network unreachable" errors when IPv6 is not configured
     opts.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4thenIpv6;
 
-    let cloudflare_ips = [
-        "1.1.1.1".parse().unwrap(),
-        "1.0.0.1".parse().unwrap(),
-    ];
+    let cloudflare_ips = ["1.1.1.1".parse().unwrap(), "1.0.0.1".parse().unwrap()];
     let resolver_config = ResolverConfig::from_parts(
         None,
         Vec::new(),

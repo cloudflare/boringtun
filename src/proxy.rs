@@ -57,11 +57,11 @@ fn emit_full(
         obj.extend(ext.clone());
     }
     let raw = v.to_string();
-    
+
     // Send to broadcast channel (non-blocking for broadcast senders)
     // Err result from send() on broadcast channel always means no active receivers - this is normal behavior
     let _ = state.events_tx.send(raw.clone());
-    
+
     #[cfg(feature = "oracle-db")]
     {
         let db = state.db.clone();
@@ -80,12 +80,12 @@ fn emit_full(
             duration_ms: None,
             raw_json: raw,
         };
-        
+
         // Offload blocking DB operation to blocking thread pool
         let handle = tokio::task::spawn_blocking(move || {
             crate::db::insert_proxy_event(db, event);
         });
-        
+
         // Detach handle but log join errors
         tokio::spawn(async move {
             if let Err(e) = handle.await {
@@ -217,7 +217,7 @@ pub async fn handler(
     // Full global header scrubbing - remove ALL identifying headers
     {
         let headers = req.headers_mut();
-        
+
         // Explicitly remove known leak headers
         headers.remove("forwarded");
         headers.remove("x-real-ip");
@@ -235,9 +235,10 @@ pub async fn handler(
         headers.remove("x-amzn-trace-id");
         headers.remove("x-cloud-trace-context");
         headers.remove("via");
-        
+
         // Remove ANY header starting with x- that is not explicitly whitelisted
-        let x_headers: Vec<_> = headers.keys()
+        let x_headers: Vec<_> = headers
+            .keys()
             .filter(|k| {
                 let name = k.as_str();
                 name.starts_with("x-") && 
@@ -247,11 +248,11 @@ pub async fn handler(
             })
             .map(|k| k.clone())
             .collect();
-            
+
         for name in x_headers {
             headers.remove(name);
         }
-        
+
         // Replace User-Agent with generic value
         headers.insert("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse().unwrap());
     }
@@ -304,7 +305,11 @@ pub async fn handler(
                 0,
                 Some(status),
                 false,
-                if matches!(profile, obfuscation::Profile::None) { None } else { Some(profile.as_str().to_string()) },
+                if matches!(profile, obfuscation::Profile::None) {
+                    None
+                } else {
+                    Some(profile.as_str().to_string())
+                },
                 serde_json::json!({
                     "method": method.as_str(),
                     "uri":    scrubbed_uri,

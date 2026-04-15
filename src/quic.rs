@@ -238,11 +238,7 @@ async fn handle_h3_request(
     } else {
         // IPv4 or hostname with optional port
         host.rsplit_once(':')
-            .and_then(|(h, p)| {
-                p.parse::<u16>()
-                    .ok()
-                    .map(|port| (h.to_string(), port))
-            })
+            .and_then(|(h, p)| p.parse::<u16>().ok().map(|port| (h.to_string(), port)))
             .unwrap_or_else(|| (host.to_string(), 443))
     };
 
