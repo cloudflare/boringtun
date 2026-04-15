@@ -279,10 +279,18 @@ fn insert_batch(conn: &oracle::Connection, batch: &[DbEvent]) -> Result<(), orac
         upsert_tls_fingerprints_with_fallback(conn, &tls_events, &mut processing_errors)?;
     }
     if !session_open_events.is_empty() {
-        insert_connection_session_open_with_fallback(conn, &session_open_events, &mut processing_errors)?;
+        insert_connection_session_open_with_fallback(
+            conn,
+            &session_open_events,
+            &mut processing_errors,
+        )?;
     }
     if !session_close_events.is_empty() {
-        update_connection_session_close_with_fallback(conn, &session_close_events, &mut processing_errors)?;
+        update_connection_session_close_with_fallback(
+            conn,
+            &session_close_events,
+            &mut processing_errors,
+        )?;
     }
     if !blocklist_events.is_empty() {
         insert_blocklist_audit_with_fallback(conn, &blocklist_events, &mut processing_errors)?;
@@ -305,7 +313,10 @@ fn emit_processing_error_dlq(err: &ProcessingError) {
     );
 }
 
-fn insert_proxy_events(conn: &oracle::Connection, batch: &[&ProxyEvent]) -> Result<(), oracle::Error> {
+fn insert_proxy_events(
+    conn: &oracle::Connection,
+    batch: &[&ProxyEvent],
+) -> Result<(), oracle::Error> {
     let sql = "INSERT INTO proxy_events \
                (event_type, host, peer_ip, bytes_up, bytes_down, status_code, blocked, obfuscation_profile, correlation_id, parent_event_id, event_sequence, duration_ms, raw_json) \
                VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13)";
@@ -333,7 +344,10 @@ fn insert_proxy_events(conn: &oracle::Connection, batch: &[&ProxyEvent]) -> Resu
     Ok(())
 }
 
-fn insert_payload_audit(conn: &oracle::Connection, batch: &[&PayloadAuditEvent]) -> Result<(), oracle::Error> {
+fn insert_payload_audit(
+    conn: &oracle::Connection,
+    batch: &[&PayloadAuditEvent],
+) -> Result<(), oracle::Error> {
     let sql = "INSERT INTO payload_audit \
                (correlation_id, host, direction, byte_offset, payload_bytes, payload_b64, content_type, http_method, http_status, http_path, is_encrypted, truncated, peer_ip, notes) \
                VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14)";
@@ -615,7 +629,10 @@ pub fn upsert_tls_fingerprint_event(sender: Arc<EventSender>, ev: TlsFingerprint
     sender.send(DbEvent::TlsFingerprint(ev));
 }
 
-pub fn insert_connection_session_open_event(sender: Arc<EventSender>, ev: ConnectionSessionOpenEvent) {
+pub fn insert_connection_session_open_event(
+    sender: Arc<EventSender>,
+    ev: ConnectionSessionOpenEvent,
+) {
     sender.send(DbEvent::ConnectionSessionOpen(ev));
 }
 

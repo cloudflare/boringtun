@@ -153,7 +153,7 @@ mod tests {
         config.obfuscation_enabled = true;
 
         AppState::new(
-            crate::proxy::ProxyClient::builder(hyper_util::rt::TokioExecutor::new())
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
                 .build(hyper_util::client::legacy::connect::HttpConnector::new()),
             resolver,
             stats_tx,

@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y \
         iptables \
         kmod \
         libaio1 \
+        openssl \
         wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
@@ -47,7 +48,8 @@ RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh \
  && setcap cap_net_admin+eip /usr/local/bin/coredns \
  && setcap cap_net_admin+eip /app/ssl-proxy
 ENV LD_LIBRARY_PATH=/app/lib \
-    WG_CONFIG_PATH=/config/wg_confs/wg0.conf \
+    WG_CONFIG_PATH=/run/wireguard/wg0.conf \
+    WG_TEMPLATE_PATH=/config/templates/server.conf \
     WG_SUDO=1 \
     COREDNS_CONFIG=/config/coredns/Corefile
 EXPOSE 3000/tcp 3001/tcp 3002/tcp 443/udp

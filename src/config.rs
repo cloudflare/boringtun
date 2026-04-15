@@ -5,6 +5,7 @@ pub struct Config {
     pub tproxy_port: u16,
     pub wg_port: u16,
     pub admin_port: u16,
+    pub explicit_proxy_enabled: bool,
     pub wg_interface: Option<String>,
     pub max_connections: usize,
     pub tarpit_max_connections: usize,
@@ -54,9 +55,52 @@ pub enum ConfigError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn clear_env() {
+        for key in [
+            "PROXY_PORT",
+            "TPROXY_PORT",
+            "WG_PORT",
+            "ADMIN_PORT",
+            "EXPLICIT_PROXY_ENABLED",
+            "WG_INTERFACE",
+            "MAX_CONNECTIONS",
+            "TARPIT_MAX_CONNECTIONS",
+            "ADMIN_API_KEY",
+            "ADMIN_API_KEY_FILE",
+            "CORS_ALLOWED_ORIGINS",
+            "LOG_FORMAT",
+            "ORACLE_CONN",
+            "ORACLE_USER",
+            "ORACLE_PASS",
+            "ORACLE_PASS_FILE",
+            "OBFUSCATION_PROFILES",
+            "OBFUSCATION_ENABLED",
+            "OBFUSCATION_PROFILE",
+            "FOX_UA_OVERRIDE",
+            "TLS_CERT_PATH",
+            "TLS_KEY_PATH",
+            "PROXY_USERNAME",
+            "PROXY_PASSWORD",
+            "PROXY_PASSWORD_FILE",
+            "TUNNEL_ENDPOINT",
+            "UPSTREAM_PROXY",
+            "ENABLE_DNS_LOOKUPS",
+        ] {
+            std::env::remove_var(key);
+        }
+    }
 
     #[test]
     fn test_config_port_conflict_error() {
+        let _guard = env_lock();
+        clear_env();
         std::env::set_var("PROXY_PORT", "51820");
         std::env::set_var("WG_PORT", "51820");
         std::env::set_var("ADMIN_API_KEY", "test-key");
@@ -68,6 +112,8 @@ mod tests {
     #[test]
     #[cfg(feature = "oracle-db")]
     fn test_config_missing_oracle_conn_error() {
+        let _guard = env_lock();
+        clear_env();
         std::env::remove_var("ORACLE_CONN");
         std::env::set_var("ORACLE_USER", "test_user");
         std::env::set_var("ADMIN_API_KEY", "test-key");
@@ -79,12 +125,37 @@ mod tests {
     #[test]
     #[cfg(feature = "oracle-db")]
     fn test_config_missing_oracle_user_error() {
+        let _guard = env_lock();
+        clear_env();
         std::env::set_var("ORACLE_CONN", "test_conn");
         std::env::remove_var("ORACLE_USER");
         std::env::set_var("ADMIN_API_KEY", "test-key");
 
         let result = Config::from_env();
         assert!(matches!(result, Err(ConfigError::MissingOracleUser)));
+    }
+
+    #[test]
+    fn test_explicit_proxy_disabled_by_default() {
+        let _guard = env_lock();
+        clear_env();
+        std::env::set_var("ADMIN_API_KEY", "test-key");
+
+        let result = Config::from_env().unwrap();
+
+        assert!(!result.explicit_proxy_enabled);
+    }
+
+    #[test]
+    fn test_explicit_proxy_enabled_when_requested() {
+        let _guard = env_lock();
+        clear_env();
+        std::env::set_var("ADMIN_API_KEY", "test-key");
+        std::env::set_var("EXPLICIT_PROXY_ENABLED", "true");
+
+        let result = Config::from_env().unwrap();
+
+        assert!(result.explicit_proxy_enabled);
     }
 }
 
@@ -94,6 +165,8 @@ impl std::fmt::Debug for Config {
             .field("proxy_port", &self.proxy_port)
             .field("tproxy_port", &self.tproxy_port)
             .field("wg_port", &self.wg_port)
+            .field("admin_port", &self.admin_port)
+            .field("explicit_proxy_enabled", &self.explicit_proxy_enabled)
             .field("wg_interface", &self.wg_interface)
             .field("max_connections", &self.max_connections)
             .field("tarpit_max_connections", &self.tarpit_max_connections)
@@ -136,6 +209,13 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(3002);
+        let explicit_proxy_enabled = std::env::var("EXPLICIT_PROXY_ENABLED")
+            .map(|v| match v.to_ascii_lowercase().as_str() {
+                "true" | "1" | "yes" | "on" => true,
+                "false" | "0" | "no" | "off" => false,
+                _ => false,
+            })
+            .unwrap_or(false);
         let wg_interface = std::env::var("WG_INTERFACE").ok();
         let max_connections = std::env::var("MAX_CONNECTIONS")
             .ok()
@@ -257,6 +337,7 @@ impl Config {
             tproxy_port,
             wg_port,
             admin_port,
+            explicit_proxy_enabled,
             wg_interface,
             max_connections,
             tarpit_max_connections,

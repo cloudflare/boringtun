@@ -32,24 +32,32 @@ services:
       - ./config:/config
       - ./wallet:/app/wallet
     environment:
-      - WG_CONFIG_PATH=/config/wg_confs/wg0.conf
+      - WG_INTERFACE_NAME=wg0
+      - WG_TEMPLATE_PATH=/config/templates/server.conf
+      - WG_CONFIG_PATH=/run/wireguard/wg0.conf
+      - WG_SERVER_ADDRESS=10.13.13.1/24
+      - WG_LISTEN_PORT=443
+      - WG_MTU=1280
+      - WG_SERVER_PRIVATE_KEY_FILE=/config/server/privatekey-server
+      - WG_PEER_CONFIG_PATH=/config/peer1/peer1.conf
+      - WG_PEER_PUBLIC_KEY_FILE=/config/peer1/publickey-peer1
+      - WG_PEER_ALLOWED_IPS=10.13.13.2/32
       - WG_SUDO=1
       - RUST_LOG=ssl_proxy=info
+      - EXPLICIT_PROXY_ENABLED=false
       - TNS_ADMIN=/app/wallet
       - ORACLE_CONN=mainerc_tp
       - ORACLE_USER=USCIS_APP
       - ORACLE_PASS_FILE=/run/secrets/oracle_password
       - LD_LIBRARY_PATH=/app/lib
       - ADMIN_API_KEY=test
-      - PROXY_USERNAME=iphoneuser
-      - PROXY_PASSWORD=yourpasswordhere
 
     secrets:
       - oracle_password
-      - proxy_password
     ports:
+      # Publish the WireGuard UDP listener on the Docker host.
       - "443:443/udp"
-      - "3000:3000"
+      # Keep policy-enforcement and admin surfaces local to the host.
       - "127.0.0.1:3001:3001"
       - "127.0.0.1:3002:3002"
     sysctls:
@@ -60,5 +68,3 @@ services:
 secrets:
   oracle_password:
     file: ./secrets/oracle_password.txt
-  proxy_password:
-    file: ./secrets/proxy_password.txt

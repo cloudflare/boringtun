@@ -1,7 +1,6 @@
 . {
-    forward . 9.9.9.9 149.112.112.112 {
-        tls_servername dns.quad9.net
-        force_tcp
+    forward . tls://1.1.1.1 tls://1.0.0.1 {
+        tls_servername cloudflare-dns.com
     }
     errors
     health

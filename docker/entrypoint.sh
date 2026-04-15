@@ -3,10 +3,144 @@ set -euo pipefail
 
 PROXY_BIN="${PROXY_BIN:-/app/ssl-proxy}"
 COREDNS_CONFIG="${COREDNS_CONFIG:-/config/coredns/Corefile}"
+WG_INTERFACE_NAME="${WG_INTERFACE_NAME:-wg0}"
+WG_CONFIG_PATH="${WG_CONFIG_PATH:-/run/wireguard/${WG_INTERFACE_NAME}.conf}"
+WG_TEMPLATE_PATH="${WG_TEMPLATE_PATH:-/config/templates/server.conf}"
+WG_SERVER_PRIVATE_KEY_FILE="${WG_SERVER_PRIVATE_KEY_FILE:-/config/server/privatekey-server}"
+WG_PEER_CONFIG_PATH="${WG_PEER_CONFIG_PATH:-/config/peer1/peer1.conf}"
+WG_PEER_PUBLIC_KEY_FILE="${WG_PEER_PUBLIC_KEY_FILE:-/config/peer1/publickey-peer1}"
+WG_PEER_PRESHARED_KEY_FILE="${WG_PEER_PRESHARED_KEY_FILE:-/config/peer1/presharedkey-peer1}"
+WG_SERVER_ADDRESS="${WG_SERVER_ADDRESS:-10.13.13.1/24}"
+WG_LISTEN_PORT="${WG_LISTEN_PORT:-443}"
+WG_MTU="${WG_MTU:-1280}"
+WG_PEER_ALLOWED_IPS="${WG_PEER_ALLOWED_IPS:-}"
 
 cmd() {
     echo "[#] $*"
     "$@"
+}
+
+trim() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
+read_trimmed_file() {
+    local path="$1"
+    if [ ! -f "$path" ]; then
+        echo "missing required file: $path" >&2
+        exit 1
+    fi
+    tr -d '\r' <"$path" | sed -e 's/[[:space:]]*$//' | tail -n 1
+}
+
+extract_ini_value() {
+    local file="$1"
+    local section="$2"
+    local key="$3"
+    awk -F= -v section="$section" -v key="$key" '
+        BEGIN { in_section = 0 }
+        /^\[/ {
+            in_section = ($0 == "[" section "]")
+            next
+        }
+        in_section {
+            lhs = $1
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
+            if (lhs == key) {
+                rhs = substr($0, index($0, "=") + 1)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", rhs)
+                print rhs
+                exit
+            }
+        }
+    ' "$file"
+}
+
+normalize_allowed_ips() {
+    local address
+    address="$(trim "${1%%,*}")"
+    if [ -z "$address" ]; then
+        echo "unable to derive peer tunnel address" >&2
+        exit 1
+    fi
+    if [[ "$address" == */* ]]; then
+        printf '%s' "$address"
+    elif [[ "$address" == *:* ]]; then
+        printf '%s/128' "$address"
+    else
+        printf '%s/32' "$address"
+    fi
+}
+
+render_wireguard_config() {
+    local server_private_key
+    local peer_public_key
+    local peer_preshared_key
+    local peer_address
+    local escaped_server_private_key
+    local escaped_peer_public_key
+    local escaped_peer_preshared_key
+    local escaped_server_address
+    local escaped_listen_port
+    local escaped_mtu
+    local escaped_peer_allowed_ips
+
+    if [ ! -f "$WG_TEMPLATE_PATH" ]; then
+        echo "missing WireGuard template: $WG_TEMPLATE_PATH" >&2
+        exit 1
+    fi
+
+    server_private_key="$(read_trimmed_file "$WG_SERVER_PRIVATE_KEY_FILE")"
+    peer_public_key="$(read_trimmed_file "$WG_PEER_PUBLIC_KEY_FILE")"
+
+    if [ -f "$WG_PEER_PRESHARED_KEY_FILE" ]; then
+        peer_preshared_key="$(read_trimmed_file "$WG_PEER_PRESHARED_KEY_FILE")"
+    else
+        peer_preshared_key="$(extract_ini_value "$WG_PEER_CONFIG_PATH" "Peer" "PresharedKey")"
+        peer_preshared_key="$(trim "$peer_preshared_key")"
+    fi
+
+    if [ -z "$peer_preshared_key" ]; then
+        echo "missing peer preshared key; set WG_PEER_PRESHARED_KEY_FILE or populate $WG_PEER_CONFIG_PATH" >&2
+        exit 1
+    fi
+
+    if [ -z "$WG_PEER_ALLOWED_IPS" ]; then
+        peer_address="$(extract_ini_value "$WG_PEER_CONFIG_PATH" "Interface" "Address")"
+        WG_PEER_ALLOWED_IPS="$(normalize_allowed_ips "$peer_address")"
+    fi
+
+    mkdir -p "$(dirname "$WG_CONFIG_PATH")"
+
+    escaped_server_private_key="${server_private_key//\\/\\\\}"
+    escaped_server_private_key="${escaped_server_private_key//&/\\&}"
+    escaped_peer_public_key="${peer_public_key//\\/\\\\}"
+    escaped_peer_public_key="${escaped_peer_public_key//&/\\&}"
+    escaped_peer_preshared_key="${peer_preshared_key//\\/\\\\}"
+    escaped_peer_preshared_key="${escaped_peer_preshared_key//&/\\&}"
+    escaped_server_address="${WG_SERVER_ADDRESS//\\/\\\\}"
+    escaped_server_address="${escaped_server_address//&/\\&}"
+    escaped_listen_port="${WG_LISTEN_PORT//\\/\\\\}"
+    escaped_listen_port="${escaped_listen_port//&/\\&}"
+    escaped_mtu="${WG_MTU//\\/\\\\}"
+    escaped_mtu="${escaped_mtu//&/\\&}"
+    escaped_peer_allowed_ips="${WG_PEER_ALLOWED_IPS//\\/\\\\}"
+    escaped_peer_allowed_ips="${escaped_peer_allowed_ips//&/\\&}"
+
+    sed \
+        -e "s|__WG_SERVER_ADDRESS__|$escaped_server_address|g" \
+        -e "s|__WG_LISTEN_PORT__|$escaped_listen_port|g" \
+        -e "s|__WG_MTU__|$escaped_mtu|g" \
+        -e "s|__WG_SERVER_PRIVATE_KEY__|$escaped_server_private_key|g" \
+        -e "s|__WG_PEER_PUBLIC_KEY__|$escaped_peer_public_key|g" \
+        -e "s|__WG_PEER_PRESHARED_KEY__|$escaped_peer_preshared_key|g" \
+        -e "s|__WG_PEER_ALLOWED_IPS__|$escaped_peer_allowed_ips|g" \
+        "$WG_TEMPLATE_PATH" >"$WG_CONFIG_PATH"
+
+    chmod 600 "$WG_CONFIG_PATH"
 }
 
 cleanup() {
@@ -18,6 +152,9 @@ cleanup() {
     fi
     if [ -n "${COREDNS_PID:-}" ]; then
         kill -TERM "$COREDNS_PID" 2>/dev/null || true
+    fi
+    if [ -n "${WG_UP:-}" ]; then
+        wg-quick down "$WG_CONFIG_PATH" 2>/dev/null || true
     fi
 }
 
@@ -42,12 +179,17 @@ shutdown() {
 
 trap shutdown TERM
 
+render_wireguard_config
+echo "starting WireGuard interface $WG_INTERFACE_NAME: $WG_CONFIG_PATH"
+cmd wg-quick up "$WG_CONFIG_PATH"
+WG_UP=1
+
 echo "starting CoreDNS: $COREDNS_CONFIG"
 cmd /usr/local/bin/coredns -conf "$COREDNS_CONFIG" &
 COREDNS_PID=$!
 
-# Auto-generate self-signed TLS certificate only if explicitly enabled
-if [ "${DISABLE_TLS:-false}" != "true" ] && [ -z "${TLS_CERT_PATH:-}" ] && [ -z "${TLS_KEY_PATH:-}" ]; then
+# Auto-generate self-signed TLS certificate only when explicit proxy mode is enabled.
+if [ "${EXPLICIT_PROXY_ENABLED:-false}" = "true" ] && [ "${DISABLE_TLS:-false}" != "true" ] && [ -z "${TLS_CERT_PATH:-}" ] && [ -z "${TLS_KEY_PATH:-}" ]; then
     if [ ! -f "/ssl/tls.crt" ] || [ ! -f "/ssl/tls.key" ]; then
         echo "[#] Generating self-signed TLS certificate for proxy listener"
         mkdir -p /ssl
@@ -69,11 +211,11 @@ if [ "${DISABLE_TLS:-false}" != "true" ] && [ -z "${TLS_CERT_PATH:-}" ] && [ -z 
     fi
 fi
 
-# Force plaintext mode when DISABLE_TLS is set
-if [ "${DISABLE_TLS:-false}" = "true" ]; then
+# Force plaintext mode when DISABLE_TLS is set or explicit proxy mode is disabled.
+if [ "${DISABLE_TLS:-false}" = "true" ] || [ "${EXPLICIT_PROXY_ENABLED:-false}" != "true" ]; then
     unset TLS_CERT_PATH
     unset TLS_KEY_PATH
-    echo "[#] TLS disabled - proxy will run in PLAINTEXT mode only"
+    echo "[#] Explicit proxy TLS disabled"
 fi
 
 echo "starting ssl-proxy"

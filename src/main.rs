@@ -239,79 +239,17 @@ async fn main() {
             .ok();
     });
 
-    // Main proxy router - only handles proxy traffic
-    let router = Router::new()
-        .fallback(any(proxy::handler))
-        .layer(TraceLayer::new_for_http())
-        .layer(cors)
-        .with_state(state.clone());
-
     #[cfg(feature = "oracle-db")]
     dashboard::spawn_oracle_flusher(state.clone(), shutdown.clone());
-
-    // Build proxy credentials for WAN authentication (RFC 7235 Basic).
-    let proxy_creds: Option<std::sync::Arc<(String, String)>> =
-        match (&config.proxy_username, &config.proxy_password) {
-            (Some(u), Some(p)) => {
-                info!(username = %u, "proxy authentication enabled");
-                Some(std::sync::Arc::new((u.clone(), p.clone())))
-            }
-            _ => {
-                warn!(
-                    "PROXY_USERNAME / PROXY_PASSWORD not set \u{2014} proxy has NO authentication"
-                );
-                None
-            }
-        };
 
     info!(
         proxy_port = config.proxy_port,
         tproxy_port = config.tproxy_port,
         wg_port = config.wg_port,
+        admin_port = config.admin_port,
+        explicit_proxy_enabled = config.explicit_proxy_enabled,
         "port assignment"
     );
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], config.proxy_port));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .unwrap_or_else(|e| {
-            error!(%addr, %e, "failed to bind listener");
-            std::process::exit(1)
-        });
-    info!(%addr, "proxy + dashboard active");
-
-    // Build TLS acceptor if cert/key paths are configured
-    let tls_acceptor: Option<TlsAcceptor> =
-        if let (Some(cert_path), Some(key_path)) = (&config.tls_cert_path, &config.tls_key_path) {
-            let cert_pem = std::fs::read(cert_path).expect("failed to read TLS cert");
-            let key_pem = std::fs::read(key_path).expect("failed to read TLS key");
-            let certs: Vec<_> = rustls_pemfile::certs(&mut &cert_pem[..])
-                .collect::<Result<_, _>>()
-                .expect("invalid cert PEM");
-            let key = rustls_pemfile::private_key(&mut &key_pem[..])
-                .expect("failed to parse key PEM")
-                .expect("no private key found");
-            let tls_config = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certs, key)
-                .expect("invalid TLS config");
-            info!("TLS enabled on proxy listener");
-            Some(TlsAcceptor::from(std::sync::Arc::new(tls_config)))
-        } else {
-            warn!("TLS_CERT_PATH / TLS_KEY_PATH not set \u{2014} proxy listener is PLAINTEXT");
-            None
-        };
-
-    // Spawn QUIC/H3 listener if TLS is configured
-    if config.tls_cert_path.is_some() && config.tls_key_path.is_some() {
-        let quic_state = state.clone();
-        let quic_config = config.clone();
-        let quic_shutdown = shutdown.clone();
-        let quic_creds = proxy_creds.clone();
-        tokio::spawn(async move {
-            quic::run_quic_listener(quic_state, quic_config, quic_shutdown, quic_creds).await;
-        });
-    }
 
     // Transparent proxy listener — receives connections redirected by iptables REDIRECT
     let tproxy_addr = SocketAddr::from(([0, 0, 0, 0], config.tproxy_port));
@@ -357,113 +295,209 @@ async fn main() {
 
     let mut tasks: JoinSet<()> = JoinSet::new();
 
-    loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                info!("shutdown signal received, stopping accept loop");
-                shutdown.cancel();
-                break;
+    if config.explicit_proxy_enabled {
+        warn!(
+            "EXPLICIT_PROXY_ENABLED=true — legacy explicit proxy listeners are active; plaintext HTTP CONNECT leaks target hostnames on the client-to-proxy leg"
+        );
+
+        let router = Router::new()
+            .fallback(any(proxy::handler))
+            .layer(TraceLayer::new_for_http())
+            .layer(cors)
+            .with_state(state.clone());
+
+        let proxy_creds: Option<std::sync::Arc<(String, String)>> = match (
+            &config.proxy_username,
+            &config.proxy_password,
+        ) {
+            (Some(u), Some(p)) => {
+                info!(username = %u, "explicit proxy authentication enabled");
+                Some(std::sync::Arc::new((u.clone(), p.clone())))
             }
-            result = listener.accept() => {
-                let (stream, peer) = match result {
-                    Ok(c) => c,
-                    Err(e) => {
-                        error!(%e, "accept failed");
-                        continue;
+            _ => {
+                warn!(
+                        "PROXY_USERNAME / PROXY_PASSWORD not set — explicit proxy has NO authentication"
+                    );
+                None
+            }
+        };
+
+        let addr = SocketAddr::from(([0, 0, 0, 0], config.proxy_port));
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .unwrap_or_else(|e| {
+                error!(%addr, %e, "failed to bind explicit proxy listener");
+                std::process::exit(1)
+            });
+        info!(%addr, "explicit proxy listener active");
+
+        let tls_acceptor: Option<TlsAcceptor> = if let (Some(cert_path), Some(key_path)) =
+            (&config.tls_cert_path, &config.tls_key_path)
+        {
+            let cert_pem = std::fs::read(cert_path).expect("failed to read TLS cert");
+            let key_pem = std::fs::read(key_path).expect("failed to read TLS key");
+            let certs: Vec<_> = rustls_pemfile::certs(&mut &cert_pem[..])
+                .collect::<Result<_, _>>()
+                .expect("invalid cert PEM");
+            let key = rustls_pemfile::private_key(&mut &key_pem[..])
+                .expect("failed to parse key PEM")
+                .expect("no private key found");
+            let tls_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .expect("invalid TLS config");
+            info!("TLS enabled on explicit proxy listener");
+            Some(TlsAcceptor::from(std::sync::Arc::new(tls_config)))
+        } else {
+            warn!("TLS_CERT_PATH / TLS_KEY_PATH not set — explicit proxy listener is PLAINTEXT");
+            None
+        };
+
+        if tls_acceptor.is_some() {
+            let quic_state = state.clone();
+            let quic_config = config.clone();
+            let quic_shutdown = shutdown.clone();
+            let quic_creds = proxy_creds.clone();
+            tasks.spawn(async move {
+                quic::run_quic_listener(quic_state, quic_config, quic_shutdown, quic_creds).await;
+            });
+        }
+
+        loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => {
+                    info!("shutdown signal received, stopping explicit proxy accept loop");
+                    shutdown.cancel();
+                    break;
+                }
+                result = tokio::signal::ctrl_c() => {
+                    if let Err(e) = result {
+                        error!(%e, "ctrl_c signal handler failed");
                     }
-                };
+                    info!("shutdown signal received, stopping explicit proxy accept loop");
+                    shutdown.cancel();
+                    break;
+                }
+                result = listener.accept() => {
+                    let (stream, peer) = match result {
+                        Ok(c) => c,
+                        Err(e) => {
+                            error!(%e, "accept failed");
+                            continue;
+                        }
+                    };
 
-                let permit = match connection_semaphore.clone().try_acquire_owned() {
-                    Ok(p) => p,
-                    Err(_) => {
-                        warn!("max connections reached, dropping connection");
-                        continue;
-                    }
-                };
+                    let permit = match connection_semaphore.clone().try_acquire_owned() {
+                        Ok(p) => p,
+                        Err(_) => {
+                            warn!("max connections reached, dropping connection");
+                            continue;
+                        }
+                    };
 
-                let state = state.clone();
-                let router = router.clone();
-                let token = shutdown.clone();
-                let tls_acceptor = tls_acceptor.clone();
-                let proxy_creds = proxy_creds.clone();
+                    let state = state.clone();
+                    let router = router.clone();
+                    let token = shutdown.clone();
+                    let tls_acceptor = tls_acceptor.clone();
+                    let proxy_creds = proxy_creds.clone();
 
-                tasks.spawn(async move {
-                    let _permit = permit; // hold until task completes
+                    tasks.spawn(async move {
+                        let _permit = permit; // hold until task completes
 
-                    // Macro-like closure to build the service and serve a connection
-                    // on an arbitrary AsyncRead + AsyncWrite stream.
-                    macro_rules! serve_io {
-                        ($io:expr) => {{
-                            let io = $io;
-                            let svc = service_fn(move |req: Request<hyper::body::Incoming>| {
-                                let state = state.clone();
-                                let router = router.clone();
-                                let creds = proxy_creds.clone();
-                                async move {
-                                    let req: Request<Body> = req.map(Body::new);
+                        // Serve either plain TCP explicit-proxy traffic or TLS-wrapped
+                        // explicit-proxy traffic on the same request handling path.
+                        macro_rules! serve_io {
+                            ($io:expr) => {{
+                                let io = $io;
+                                let svc = service_fn(move |req: Request<hyper::body::Incoming>| {
+                                    let state = state.clone();
+                                    let router = router.clone();
+                                    let creds = proxy_creds.clone();
+                                    async move {
+                                        let req: Request<Body> = req.map(Body::new);
 
-                                    // Proxy requests (CONNECT or absolute-URI forwards)
-                                    // require Proxy-Authorization when credentials are
-                                    // configured. Internal management routes (relative
-                                    // URIs such as /health, /dashboard) pass through.
-                                    let is_proxy_request = req.method() == Method::CONNECT
-                                        || req.uri().scheme().is_some();
+                                        let is_proxy_request = req.method() == Method::CONNECT
+                                            || req.uri().scheme().is_some();
 
-                                    if is_proxy_request {
-                                        if let Some(ref c) = creds {
-                                            if !check_proxy_auth(&req, &c.0, &c.1) {
-                                                return Ok(Response::builder()
-                                                    .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
-                                                    .header(
-                                                        "Proxy-Authenticate",
-                                                        "Basic realm=\"Proxy Access\"",
-                                                    )
-                                                    .body(Body::empty())
-                                                    .unwrap());
+                                        if is_proxy_request {
+                                            if let Some(ref c) = creds {
+                                                if !check_proxy_auth(&req, &c.0, &c.1) {
+                                                    return Ok(Response::builder()
+                                                        .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+                                                        .header(
+                                                            "Proxy-Authenticate",
+                                                            "Basic realm=\"Proxy Access\"",
+                                                        )
+                                                        .body(Body::empty())
+                                                        .unwrap());
+                                                }
                                             }
                                         }
-                                    }
 
-                                    if req.method() == Method::CONNECT {
-                                        tunnel::handle(req, state, Some(peer.ip().to_string())).await
-                                    } else {
-                                        let mut router = router.clone();
-                                        router.call(req).await.map_err(|e| match e {})
+                                        if req.method() == Method::CONNECT {
+                                            tunnel::handle(req, state, Some(peer.ip().to_string())).await
+                                        } else {
+                                            let mut router = router.clone();
+                                            router.call(req).await.map_err(|e| match e {})
+                                        }
+                                    }
+                                });
+
+                                let builder = ServerBuilder::new(TokioExecutor::new());
+                                let conn = builder.serve_connection_with_upgrades(io, svc);
+                                tokio::select! {
+                                    result = conn => {
+                                        if let Err(e) = result {
+                                            debug!(%peer, %e, "connection error");
+                                        }
+                                    }
+                                    _ = token.cancelled() => {
+                                        debug!(%peer, "connection dropped due to shutdown");
                                     }
                                 }
-                            });
-
-                            let builder = ServerBuilder::new(TokioExecutor::new());
-                            let conn = builder.serve_connection_with_upgrades(io, svc);
-                            tokio::select! {
-                                result = conn => {
-                                    if let Err(e) = result {
-                                        debug!(%peer, %e, "connection error");
-                                    }
-                                }
-                                _ = token.cancelled() => {
-                                    debug!(%peer, "connection dropped due to shutdown");
-                                }
-                            }
-                        }};
-                    }
-
-                    if let Some(ref acceptor) = tls_acceptor {
-                        match acceptor.accept(stream).await {
-                            Ok(tls_stream) => {
-                                serve_io!(TokioIo::new(tls_stream));
-                            }
-                            Err(e) => {
-                                debug!(%peer, %e, "TLS handshake failed");
-                                return;
-                            }
+                            }};
                         }
-                    } else {
-                        serve_io!(TokioIo::new(stream));
-                    }
-                });
+
+                        if let Some(ref acceptor) = tls_acceptor {
+                            match acceptor.accept(stream).await {
+                                Ok(tls_stream) => {
+                                    serve_io!(TokioIo::new(tls_stream));
+                                }
+                                Err(e) => {
+                                    debug!(%peer, %e, "TLS handshake failed");
+                                    return;
+                                }
+                            }
+                        } else {
+                            serve_io!(TokioIo::new(stream));
+                        }
+                    });
+                }
             }
         }
+    } else {
+        info!(
+            proxy_port = config.proxy_port,
+            "explicit proxy listener disabled; WireGuard is the supported client ingress"
+        );
+        if config.tls_cert_path.is_some() || config.tls_key_path.is_some() {
+            warn!(
+                "TLS_CERT_PATH / TLS_KEY_PATH set while EXPLICIT_PROXY_ENABLED=false — skipping HTTPS and QUIC explicit-proxy listeners"
+            );
+        }
+        tokio::select! {
+            _ = shutdown.cancelled() => {
+                info!("shutdown signal received, stopping background listeners");
+            }
+            result = tokio::signal::ctrl_c() => {
+                if let Err(e) = result {
+                    error!(%e, "ctrl_c signal handler failed");
+                }
+                info!("shutdown signal received, stopping background listeners");
+                shutdown.cancel();
+            }
+        }
+        shutdown.cancel();
     }
 
     info!("draining in-flight connections (5s timeout)");

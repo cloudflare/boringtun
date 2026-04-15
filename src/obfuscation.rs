@@ -168,6 +168,7 @@ mod tests {
             tproxy_port: 3001,
             wg_port: 51820,
             admin_port: 3002,
+            explicit_proxy_enabled: false,
             wg_interface: None,
             max_connections: 4096,
             tarpit_max_connections: 64,

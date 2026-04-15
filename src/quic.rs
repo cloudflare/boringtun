@@ -328,7 +328,9 @@ async fn handle_h3_request(
         "QUIC tunnel established"
     );
     if !matches!(profile, crate::obfuscation::Profile::None) {
-        state.obfuscated_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        state
+            .obfuscated_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         info!(
             target: "audit",
             event = "tunnel_obfuscated",
@@ -347,7 +349,7 @@ async fn handle_h3_request(
     // Split the H3 bidi stream into send/recv halves and the upstream TCP stream.
     let (mut h3_send, mut h3_recv) = stream.split();
     let (mut upstream_read, mut upstream_write) = upstream.split();
-    
+
     let mut up_buf = Vec::with_capacity(PAYLOAD_PREVIEW_LIMIT);
     let mut down_buf = Vec::with_capacity(PAYLOAD_PREVIEW_LIMIT);
 
@@ -365,13 +367,13 @@ async fn handle_h3_request(
                             return total;
                         }
                         total += len as u64;
-                        
+
                         // Capture first N bytes only
                         if up_buf.len() < PAYLOAD_PREVIEW_LIMIT {
                             let take = (PAYLOAD_PREVIEW_LIMIT - up_buf.len()).min(len);
                             up_buf.extend_from_slice(&chunk[..take]);
                         }
-                        
+
                         bytes::Buf::advance(&mut buf, len);
                     }
                 }
@@ -399,7 +401,7 @@ async fn handle_h3_request(
                         break;
                     }
                     total += n as u64;
-                    
+
                     // Capture first N bytes only
                     if down_buf.len() < PAYLOAD_PREVIEW_LIMIT {
                         let take = (PAYLOAD_PREVIEW_LIMIT - down_buf.len()).min(n);
@@ -437,7 +439,7 @@ async fn handle_h3_request(
         duration_ms = start.elapsed().as_millis(),
         "QUIC tunnel closed"
     );
-    
+
     // Emit event with payload preview to oracle
     let event = serde_json::json!({
         "type":        "tunnel_close",
@@ -450,10 +452,10 @@ async fn handle_h3_request(
         "obfuscation_profile": profile.as_str(),
         "payload_preview": payload_preview,
     });
-    
+
     let raw = event.to_string();
     let _ = state.events_tx.send(raw.clone());
-    
+
     #[cfg(feature = "oracle-db")]
     crate::db::insert_proxy_event(
         state.db.clone(),

@@ -333,11 +333,13 @@ pub async fn handler(
             if is_https {
                 res.headers_mut().insert(
                     "Strict-Transport-Security",
-                    "max-age=31536000; includeSubDomains".parse().unwrap()
+                    "max-age=31536000; includeSubDomains".parse().unwrap(),
                 );
                 res.headers_mut().insert(
                     "Alt-Svc",
-                    "h3=\":443\"; ma=86400, h3-29=\":443\"; ma=86400".parse().unwrap()
+                    "h3=\":443\"; ma=86400, h3-29=\":443\"; ma=86400"
+                        .parse()
+                        .unwrap(),
                 );
             }
 

@@ -54,12 +54,13 @@ fn parse_host_port(authority: &str) -> (String, u16) {
     if authority.contains(']') {
         if let Some(bracket_end) = authority.find(']') {
             let hostname = authority[1..bracket_end].to_string();
-            let port =
-                if bracket_end + 1 < authority.len() && authority.as_bytes()[bracket_end + 1] == b':' {
-                    authority[bracket_end + 2..].parse().unwrap_or(443)
-                } else {
-                    443
-                };
+            let port = if bracket_end + 1 < authority.len()
+                && authority.as_bytes()[bracket_end + 1] == b':'
+            {
+                authority[bracket_end + 2..].parse().unwrap_or(443)
+            } else {
+                443
+            };
             return (hostname, port);
         }
     }
@@ -97,7 +98,10 @@ async fn dial_upstream_with_resolver(
     authority: &str,
 ) -> Result<(tokio::net::TcpStream, Vec<String>, String), UpstreamDialError> {
     let (hostname, port) = parse_host_port(authority);
-    let hostname = hostname.trim_start_matches('[').trim_end_matches(']').to_string();
+    let hostname = hostname
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string();
 
     let addrs = tokio::time::timeout(
         tokio::time::Duration::from_secs(DNS_RESOLVE_TIMEOUT_SECS),
@@ -1059,27 +1063,29 @@ async fn run_transparent(
                 None,
             );
             state.record_tunnel_open();
-            
+
             /// Maximum bytes to capture per direction for payload preview
             const PAYLOAD_PREVIEW_LIMIT: usize = 4096;
-            
+
             // Split streams for bidirectional copy
             let (mut client_read, mut client_write) = tokio::io::split(client);
             let (mut upstream_read, mut upstream_write) = tokio::io::split(upstream);
-            
+
             let mut up_buf = Vec::with_capacity(PAYLOAD_PREVIEW_LIMIT);
             let mut down_buf = Vec::with_capacity(PAYLOAD_PREVIEW_LIMIT);
-            
+
             // Client -> Upstream copy with tee
             let up_task = async {
                 let mut buf = [0u8; 8192];
                 let mut total = 0u64;
                 loop {
                     let n = client_read.read(&mut buf).await?;
-                    if n == 0 { break; }
+                    if n == 0 {
+                        break;
+                    }
                     upstream_write.write_all(&buf[..n]).await?;
                     total += n as u64;
-                    
+
                     // Capture first N bytes only
                     if up_buf.len() < PAYLOAD_PREVIEW_LIMIT {
                         let take = (PAYLOAD_PREVIEW_LIMIT - up_buf.len()).min(n);
@@ -1088,17 +1094,19 @@ async fn run_transparent(
                 }
                 Ok::<u64, std::io::Error>(total)
             };
-            
+
             // Upstream -> Client copy with tee
             let down_task = async {
                 let mut buf = [0u8; 8192];
                 let mut total = 0u64;
                 loop {
                     let n = upstream_read.read(&mut buf).await?;
-                    if n == 0 { break; }
+                    if n == 0 {
+                        break;
+                    }
                     client_write.write_all(&buf[..n]).await?;
                     total += n as u64;
-                    
+
                     // Capture first N bytes only
                     if down_buf.len() < PAYLOAD_PREVIEW_LIMIT {
                         let take = (PAYLOAD_PREVIEW_LIMIT - down_buf.len()).min(n);
@@ -1107,7 +1115,7 @@ async fn run_transparent(
                 }
                 Ok::<u64, std::io::Error>(total)
             };
-            
+
             match tokio::try_join!(up_task, down_task) {
                 Ok((up, down)) => {
                     state.record_tunnel_close(up, down);
@@ -1122,7 +1130,7 @@ async fn run_transparent(
                         category = category,
                         "transparent tunnel closed"
                     );
-                    
+
                     // Encode captured payloads as base64 for audit log
                     let payload_preview = serde_json::json!({
                         "up": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &up_buf),
@@ -1130,7 +1138,7 @@ async fn run_transparent(
                         "truncated_up": up > PAYLOAD_PREVIEW_LIMIT as u64,
                         "truncated_down": down > PAYLOAD_PREVIEW_LIMIT as u64,
                     });
-                    
+
                     emit_full(
                         &state,
                         "tunnel_close",
@@ -1547,117 +1555,117 @@ pub async fn handle(
             // 2. Raw TCP connection to upstream - NO MITM, NO OBFUSCATION
             match dial_upstream_with_resolver(&state, &host).await {
                 Ok((mut upstream, resolved_ips, selected_ip)) => {
-                let session_id = uuid::Uuid::new_v4().to_string();
-                set_keepalive(&upstream);
-                state.record_tunnel_open();
-                info!(
-                    target: "audit",
-                    event = "tunnel_open",
-                    kind = "bypass",
-                    host = %host,
-                    category = category,
-                    resolved_ips = ?resolved_ips,
-                    selected_ip = %selected_ip,
-                    obfuscation_profile = "none",
-                    reason = "certificate_pinning",
-                    "bypass tunnel established"
-                );
-                emit_full(
-                    &state,
-                    "tunnel_open",
-                    &host,
-                    peer_ip.clone(),
-                    0,
-                    0,
-                    None,
-                    false,
-                    serde_json::json!({
-                        "kind":                "bypass",
-                        "category":            category,
-                        "resolved_ips":        resolved_ips,
-                        "selected_ip":         selected_ip,
-                        "obfuscation_profile": "none",
-                        "bypass_reason":       "certificate_pinning",
-                    }),
-                );
-                #[cfg(feature = "oracle-db")]
-                db_session_open(
-                    &state,
-                    &session_id,
-                    &host,
-                    peer_ip.clone(),
-                    "bypass",
-                    false,
-                    false,
-                    Some("ALLOWED".to_string()),
-                    Some(category.to_string()),
-                    Some("none".to_string()),
-                    None,
-                    None,
-                    None,
-                    Some(selected_ip.clone()),
-                    None,
-                );
+                    let session_id = uuid::Uuid::new_v4().to_string();
+                    set_keepalive(&upstream);
+                    state.record_tunnel_open();
+                    info!(
+                        target: "audit",
+                        event = "tunnel_open",
+                        kind = "bypass",
+                        host = %host,
+                        category = category,
+                        resolved_ips = ?resolved_ips,
+                        selected_ip = %selected_ip,
+                        obfuscation_profile = "none",
+                        reason = "certificate_pinning",
+                        "bypass tunnel established"
+                    );
+                    emit_full(
+                        &state,
+                        "tunnel_open",
+                        &host,
+                        peer_ip.clone(),
+                        0,
+                        0,
+                        None,
+                        false,
+                        serde_json::json!({
+                            "kind":                "bypass",
+                            "category":            category,
+                            "resolved_ips":        resolved_ips,
+                            "selected_ip":         selected_ip,
+                            "obfuscation_profile": "none",
+                            "bypass_reason":       "certificate_pinning",
+                        }),
+                    );
+                    #[cfg(feature = "oracle-db")]
+                    db_session_open(
+                        &state,
+                        &session_id,
+                        &host,
+                        peer_ip.clone(),
+                        "bypass",
+                        false,
+                        false,
+                        Some("ALLOWED".to_string()),
+                        Some(category.to_string()),
+                        Some("none".to_string()),
+                        None,
+                        None,
+                        None,
+                        Some(selected_ip.clone()),
+                        None,
+                    );
 
-                let (bytes_up, bytes_down) =
-                    tokio::io::copy_bidirectional(&mut client_io, &mut upstream)
-                        .await
-                        .unwrap_or((0, 0));
-                state.record_tunnel_close(bytes_up, bytes_down);
+                    let (bytes_up, bytes_down) =
+                        tokio::io::copy_bidirectional(&mut client_io, &mut upstream)
+                            .await
+                            .unwrap_or((0, 0));
+                    state.record_tunnel_close(bytes_up, bytes_down);
 
-                // Log completion with metrics
-                info!(
-                    target: "audit",
-                    event="tunnel_close",
-                    kind="bypass",
-                    host=%host,
-                    bytes_up=bytes_up,
-                    bytes_down=bytes_down,
-                    duration_ms = start.elapsed().as_millis(),
-                    category = category,
-                    obfuscation_profile = "none",
-                    reason = "certificate_pinning",
-                    "bypass tunnel closed"
-                );
-                emit_full(
-                    &state,
-                    "tunnel_close",
-                    &host,
-                    peer_ip,
-                    bytes_up,
-                    bytes_down,
-                    None,
-                    false,
-                    serde_json::json!({
-                        "kind":                "bypass",
-                        "category":            category,
-                        "bytes_up":            bytes_up,
-                        "bytes_down":          bytes_down,
-                        "duration_ms":         start.elapsed().as_millis(),
-                        "selected_ip":         selected_ip,
-                        "obfuscation_profile": "none",
-                        "bypass_reason":       "certificate_pinning",
-                    }),
-                );
-                #[cfg(feature = "oracle-db")]
-                db_session_close(
-                    &state,
-                    &session_id,
-                    Some(start.elapsed().as_millis() as i64),
-                    bytes_up,
-                    bytes_down,
-                    false,
-                    false,
-                    None,
-                    Some("ALLOWED".to_string()),
-                    Some(category.to_string()),
-                    Some("none".to_string()),
-                    None,
-                    None,
-                    None,
-                    Some(selected_ip),
-                    None,
-                );
+                    // Log completion with metrics
+                    info!(
+                        target: "audit",
+                        event="tunnel_close",
+                        kind="bypass",
+                        host=%host,
+                        bytes_up=bytes_up,
+                        bytes_down=bytes_down,
+                        duration_ms = start.elapsed().as_millis(),
+                        category = category,
+                        obfuscation_profile = "none",
+                        reason = "certificate_pinning",
+                        "bypass tunnel closed"
+                    );
+                    emit_full(
+                        &state,
+                        "tunnel_close",
+                        &host,
+                        peer_ip,
+                        bytes_up,
+                        bytes_down,
+                        None,
+                        false,
+                        serde_json::json!({
+                            "kind":                "bypass",
+                            "category":            category,
+                            "bytes_up":            bytes_up,
+                            "bytes_down":          bytes_down,
+                            "duration_ms":         start.elapsed().as_millis(),
+                            "selected_ip":         selected_ip,
+                            "obfuscation_profile": "none",
+                            "bypass_reason":       "certificate_pinning",
+                        }),
+                    );
+                    #[cfg(feature = "oracle-db")]
+                    db_session_close(
+                        &state,
+                        &session_id,
+                        Some(start.elapsed().as_millis() as i64),
+                        bytes_up,
+                        bytes_down,
+                        false,
+                        false,
+                        None,
+                        Some("ALLOWED".to_string()),
+                        Some(category.to_string()),
+                        Some("none".to_string()),
+                        None,
+                        None,
+                        None,
+                        Some(selected_ip),
+                        None,
+                    );
                 }
                 Err(e) => {
                     error!(
