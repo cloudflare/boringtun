@@ -329,8 +329,8 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
                     .await;
                     state.record_tarpit_held(name, tarpit_start.elapsed().as_millis() as u64);
                 }
+                return;
             }
-            return;
         }
     }
 
