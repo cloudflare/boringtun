@@ -124,11 +124,11 @@ fn emit_full(
     state: &SharedState,
     event: &str,
     host: &str,
-    _peer_ip: Option<String>,
-    _bytes_up: u64,
-    _bytes_down: u64,
-    _status_code: Option<u16>,
-    _blocked: bool,
+    peer_ip: Option<String>,
+    bytes_up: u64,
+    bytes_down: u64,
+    status_code: Option<u16>,
+    blocked: bool,
     extra: serde_json::Value,
 ) {
     let mut v = serde_json::json!({

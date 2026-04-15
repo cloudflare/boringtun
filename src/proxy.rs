@@ -40,12 +40,12 @@ fn emit_full(
     state: &SharedState,
     event: &str,
     host: &str,
-    _peer_ip: Option<String>,
-    _bytes_up: u64,
-    _bytes_down: u64,
-    _status_code: Option<u16>,
-    _blocked: bool,
-    _obfuscation_profile: Option<String>,
+    peer_ip: Option<String>,
+    bytes_up: u64,
+    bytes_down: u64,
+    status_code: Option<u16>,
+    blocked: bool,
+    obfuscation_profile: Option<String>,
     extra: serde_json::Value,
 ) {
     let mut v = serde_json::json!({
@@ -84,9 +84,7 @@ fn emit_full(
         
         // Offload blocking DB operation to blocking thread pool
         let handle = tokio::task::spawn_blocking(move || {
-            if let Err(e) = crate::db::insert_proxy_event(db, event) {
-                error!(%e, "failed to insert proxy event into database");
-            }
+            crate::db::insert_proxy_event(db, event);
         });
         
         // Detach handle but log join errors
