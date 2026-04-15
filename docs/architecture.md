@@ -12,7 +12,7 @@ flowchart LR
     end
 
     subgraph HOST["Docker Host"]
-        HE["Host endpoint\n`192.168.1.166:443/udp`"]
+        HE["Host endpoint\n`192.168.1.221:443/udp`"]
         HP["Published local ports\n`127.0.0.1:3001`\n`127.0.0.1:3002`"]
     end
 
@@ -84,7 +84,7 @@ flowchart LR
 ```mermaid
 flowchart TD
     START["Supported client setup"] --> IMPORT["Import `config/peer1/peer1.conf` into a WireGuard client"]
-    IMPORT --> PROFILE["Profile values\nAddress `10.13.13.2/32`\nDNS `10.13.13.1`\nEndpoint `192.168.1.166:443`\nAllowedIPs `0.0.0.0/0, ::/0`"]
+    IMPORT --> PROFILE["Profile values\nAddress `10.13.13.2/32`\nDNS `10.13.13.1`\nEndpoint `192.168.1.221:443`\nAllowedIPs `0.0.0.0/0, ::/0`"]
     PROFILE --> CONNECT["Client establishes WireGuard tunnel\nUDP `443` to the Docker host endpoint"]
     CONNECT --> ROUTE["Expected behavior\nClient traffic routes through the VPN tunnel"]
     ROUTE --> DNS["Expected DNS behavior\nClient DNS uses VPN resolver `10.13.13.1`\nnot the local ISP resolver"]

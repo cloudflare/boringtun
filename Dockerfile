@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y \
         kmod \
         libaio1 \
         openssl \
+        procps \
         wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app

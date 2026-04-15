@@ -40,7 +40,7 @@ If `config/server/privatekey-server` is missing on first boot, the entrypoint ge
 
 ```mermaid
 flowchart LR
-    C["Client imports `peer1.conf`\n`10.13.13.2/32`\nDNS `10.13.13.1`"] -->|"WireGuard UDP `443`"| H["Docker host endpoint\n`192.168.1.166:443`"]
+    C["Client imports `peer1.conf`\n`10.13.13.2/32`\nDNS `10.13.13.1`"] -->|"WireGuard UDP `443`"| H["Docker host endpoint\n`192.168.1.221:443`"]
     H --> E["Container entrypoint renders\n`/run/wireguard/wg0.conf`\nand runs `wg-quick up`"]
     E --> W["`wg0`\nserver `10.13.13.1/24`"]
     W --> D["CoreDNS\nserves VPN DNS on `10.13.13.1`\nforwards upstream via Cloudflare DoT"]
@@ -111,7 +111,7 @@ All configuration is via environment variables. Key settings:
 - `config/server/privatekey-server` is optional on first boot. If it is missing, the container generates a new server keypair automatically.
 - The generated or existing server public key is written to `config/server/publickey-server`.
 - The compose stack renders the server interface config from `config/templates/server.conf` at startup.
-- The checked-in peer config `config/peer1/peer1.conf` uses tunnel IP `10.13.13.2/32`, DNS `10.13.13.1`, and endpoint `192.168.1.166:443`.
+- The checked-in peer config `config/peer1/peer1.conf` uses tunnel IP `10.13.13.2/32`, DNS `10.13.13.1`, and endpoint `192.168.1.221:443`.
 - When a new server keypair is generated, redistribute the updated `config/peer1/peer1.conf` to clients before connecting.
 - The peer endpoint must be the Docker host’s LAN or public IP, not the container’s bridge IP.
 
