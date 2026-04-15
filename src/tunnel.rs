@@ -233,6 +233,8 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
             {
                 let state2 = state.clone();
                 let name2 = name.clone();
+                // Only perform DNS lookups if explicitly enabled
+                if state2.config.enable_dns_lookups {
                 tokio::spawn(async move {
                     const TTL_SECS: u64 = 300;
                     if state2
@@ -262,6 +264,7 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
                         }
                     }
                 });
+                }
             }
             info!(
                 target: "audit",
@@ -876,6 +879,8 @@ pub async fn handle(
         {
             let state2 = state.clone();
             let hostname2 = hostname.to_string();
+            // Only perform DNS lookups if explicitly enabled
+            if state2.config.enable_dns_lookups {
             tokio::spawn(async move {
                 const TTL_SECS: u64 = 300;
                 if state2
@@ -905,6 +910,7 @@ pub async fn handle(
                     }
                 }
             });
+            }
         }
         info!(
             target: "audit",
@@ -970,10 +976,16 @@ pub async fn handle(
                 });
             }
         } else {
-            // Fast drop — iOS handles this as a natural close.
+            // Graceful half-close: properly complete TCP FIN handshake before dropping
             tokio::spawn(async move {
                 if let Ok(upgraded) = upgrade_fut.await {
-                    drop(TokioIo::new(upgraded));
+                    let mut stream = TokioIo::new(upgraded);
+                    // Give client 200ms to complete FIN/ACK handshake
+                    let _ = tokio::time::timeout(
+                        tokio::time::Duration::from_millis(200),
+                        tokio::io::copy(&mut stream, &mut tokio::io::sink()),
+                    ).await;
+                    // Connection will be dropped gracefully at end of scope
                 }
             });
         }

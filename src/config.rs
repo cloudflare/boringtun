@@ -24,6 +24,8 @@ pub struct Config {
     pub proxy_password: Option<String>,
     pub proxy_password_file: String,
     pub tunnel_endpoint: Option<String>,
+    pub upstream_proxy: Option<String>,
+    pub enable_dns_lookups: bool,
 }
 
 use thiserror::Error;
@@ -207,6 +209,18 @@ impl Config {
             .ok()
             .filter(|s| !s.is_empty());
 
+        let upstream_proxy = std::env::var("UPSTREAM_PROXY")
+            .ok()
+            .filter(|s| !s.is_empty());
+            
+        let enable_dns_lookups = std::env::var("ENABLE_DNS_LOOKUPS")
+            .map(|v| match v.to_ascii_lowercase().as_str() {
+                "true" | "1" | "yes" | "on" => true,
+                "false" | "0" | "no" | "off" => false,
+                _ => false, // Default OFF - no DNS leaks
+            })
+            .unwrap_or(false);
+
         // Validate required fields
         if proxy_port == tproxy_port || tproxy_port == wg_port || proxy_port == wg_port {
             return Err(ConfigError::PortConflict);
@@ -251,6 +265,8 @@ impl Config {
             proxy_password,
             proxy_password_file,
             tunnel_endpoint,
+            upstream_proxy,
+            enable_dns_lookups,
         })
     }
 

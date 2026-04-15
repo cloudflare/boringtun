@@ -95,8 +95,6 @@ async fn main() {
         .add_directive("ssl_proxy=info".parse().unwrap())
         .add_directive("tower_http=info".parse().unwrap());
 
-    let client = Client::builder(TokioExecutor::new()).build(HttpConnector::new());
-
     let mut opts = ResolverOpts::default();
     opts.cache_size = 1024;
     let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare_https(), opts);
@@ -107,6 +105,8 @@ async fn main() {
     let shutdown = CancellationToken::new();
 
     let config = config::Config::from_env_or_panic();
+
+    let client = Client::builder(TokioExecutor::new()).build(HttpConnector::new());
 
     // LOG_FORMAT=json  →  newline-delimited JSON (pipe to Vector/Filebeat)
     // anything else    →  human-readable (default for dev)

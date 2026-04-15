@@ -204,21 +204,43 @@ pub async fn handler(
     req.headers_mut().remove("transfer-encoding");
     req.headers_mut().remove("upgrade");
 
-    // Clean header policy: Remove identifying headers before upstream
+    // Full global header scrubbing - remove ALL identifying headers
     {
         let headers = req.headers_mut();
         
-        // Remove all X-Forwarded-* headers
-        let x_forwarded_headers: Vec<_> = headers.keys()
-            .filter(|k| k.as_str().starts_with("x-forwarded-"))
+        // Explicitly remove known leak headers
+        headers.remove("forwarded");
+        headers.remove("x-real-ip");
+        headers.remove("x-client-ip");
+        headers.remove("x-forwarded-host");
+        headers.remove("x-forwarded-proto");
+        headers.remove("x-forwarded-port");
+        headers.remove("x-forwarded-for");
+        headers.remove("x-forwarded-server");
+        headers.remove("x-forwarded-proto");
+        headers.remove("x-original-url");
+        headers.remove("x-original-uri");
+        headers.remove("x-request-id");
+        headers.remove("x-request-id");
+        headers.remove("x-amzn-trace-id");
+        headers.remove("x-cloud-trace-context");
+        headers.remove("via");
+        
+        // Remove ANY header starting with x- that is not explicitly whitelisted
+        let x_headers: Vec<_> = headers.keys()
+            .filter(|k| {
+                let name = k.as_str();
+                name.starts_with("x-") && 
+                // Whitelist only safe headers here
+                !name.eq("x-amz-target") &&
+                !name.eq("x-client-data")
+            })
             .map(|k| k.clone())
             .collect();
-        for name in x_forwarded_headers {
+            
+        for name in x_headers {
             headers.remove(name);
         }
-        
-        // Remove Via headers
-        headers.remove("via");
         
         // Replace User-Agent with generic value
         headers.insert("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse().unwrap());
