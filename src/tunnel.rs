@@ -1074,6 +1074,15 @@ pub async fn handle(
 
     if is_pinned_app {
         let start = Instant::now();
+        info!(
+            target: "audit",
+            event = "tunnel_bypass",
+            kind = "connect",
+            host = %host,
+            category = category,
+            reason = "certificate_pinning",
+            "certificate-pinned domain bypass enabled"
+        );
 
         // 1. Return 200 OK immediately to establish the tunnel
         tokio::spawn(async move {
@@ -1087,11 +1096,39 @@ pub async fn handle(
             // 2. Raw TCP connection to upstream - NO MITM, NO OBFUSCATION
             if let Ok(mut upstream) = tokio::net::TcpStream::connect(&host).await {
                 set_keepalive(&upstream);
+                state.record_tunnel_open();
+                info!(
+                    target: "audit",
+                    event = "tunnel_open",
+                    kind = "bypass",
+                    host = %host,
+                    category = category,
+                    obfuscation_profile = "none",
+                    reason = "certificate_pinning",
+                    "bypass tunnel established"
+                );
+                emit_full(
+                    &state,
+                    "tunnel_open",
+                    &host,
+                    peer_ip.clone(),
+                    0,
+                    0,
+                    None,
+                    false,
+                    serde_json::json!({
+                        "kind":                "bypass",
+                        "category":            category,
+                        "obfuscation_profile": "none",
+                        "bypass_reason":       "certificate_pinning",
+                    }),
+                );
 
                 let (bytes_up, bytes_down) =
                     tokio::io::copy_bidirectional(&mut client_io, &mut upstream)
                         .await
                         .unwrap_or((0, 0));
+                state.record_tunnel_close(bytes_up, bytes_down);
 
                 // Log completion with metrics
                 info!(
@@ -1102,7 +1139,32 @@ pub async fn handle(
                     bytes_up=bytes_up,
                     bytes_down=bytes_down,
                     duration_ms = start.elapsed().as_millis(),
+                    category = category,
+                    obfuscation_profile = "none",
+                    reason = "certificate_pinning",
+                    "bypass tunnel closed"
                 );
+                emit_full(
+                    &state,
+                    "tunnel_close",
+                    &host,
+                    peer_ip,
+                    bytes_up,
+                    bytes_down,
+                    None,
+                    false,
+                    serde_json::json!({
+                        "kind":                "bypass",
+                        "category":            category,
+                        "bytes_up":            bytes_up,
+                        "bytes_down":          bytes_down,
+                        "duration_ms":         start.elapsed().as_millis(),
+                        "obfuscation_profile": "none",
+                        "bypass_reason":       "certificate_pinning",
+                    }),
+                );
+            } else {
+                error!(%host, "bypass tunnel connect failed");
             }
         });
 

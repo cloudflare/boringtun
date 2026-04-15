@@ -273,7 +273,7 @@ async fn handle_h3_request(
     }
 
     // Classify obfuscation profile after blocklist check
-    let _profile = obfuscation::classify_obfuscation(&hostname, &config);
+    let profile = obfuscation::classify_obfuscation(&hostname, &config);
 
     // Record allow for streak reset
     state.record_host_allow(&hostname);
@@ -327,6 +327,17 @@ async fn handle_h3_request(
         host = %host,
         "QUIC tunnel established"
     );
+    if !matches!(profile, crate::obfuscation::Profile::None) {
+        state.obfuscated_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        info!(
+            target: "audit",
+            event = "tunnel_obfuscated",
+            kind = "quic-h3",
+            host = %host,
+            profile = profile.as_str(),
+            "QUIC tunnel obfuscated"
+        );
+    }
     state.record_tunnel_open();
 
     /// Maximum bytes to capture per direction for payload preview
@@ -436,6 +447,7 @@ async fn handle_h3_request(
         "bytes_up":    up,
         "bytes_down":  down,
         "duration_ms": start.elapsed().as_millis(),
+        "obfuscation_profile": profile.as_str(),
         "payload_preview": payload_preview,
     });
     
@@ -446,7 +458,7 @@ async fn handle_h3_request(
     crate::db::insert_proxy_event(
         state.db.clone(),
         crate::db::ProxyEvent {
-            obfuscation_profile: None,
+            obfuscation_profile: Some(profile.as_str().to_string()),
             event_type: "tunnel_close".to_string(),
             host: host.to_string(),
             peer_ip: Some(peer.ip().to_string()),
