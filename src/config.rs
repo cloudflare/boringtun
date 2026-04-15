@@ -60,7 +60,9 @@ mod tests {
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     fn clear_env() {
@@ -99,10 +101,18 @@ mod tests {
         }
     }
 
+    fn set_oracle_env_defaults() {
+        if cfg!(feature = "oracle-db") {
+            std::env::set_var("ORACLE_CONN", "test_conn");
+            std::env::set_var("ORACLE_USER", "test_user");
+        }
+    }
+
     #[test]
     fn test_config_port_conflict_error() {
         let _guard = env_lock();
         clear_env();
+        set_oracle_env_defaults();
         std::env::set_var("PROXY_PORT", "51820");
         std::env::set_var("WG_PORT", "51820");
         std::env::set_var("ADMIN_API_KEY", "test-key");
@@ -141,6 +151,7 @@ mod tests {
     fn test_explicit_proxy_disabled_by_default() {
         let _guard = env_lock();
         clear_env();
+        set_oracle_env_defaults();
         std::env::set_var("ADMIN_API_KEY", "test-key");
 
         let result = Config::from_env().unwrap();
@@ -152,6 +163,7 @@ mod tests {
     fn test_explicit_proxy_enabled_when_requested() {
         let _guard = env_lock();
         clear_env();
+        set_oracle_env_defaults();
         std::env::set_var("ADMIN_API_KEY", "test-key");
         std::env::set_var("EXPLICIT_PROXY_ENABLED", "true");
 

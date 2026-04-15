@@ -49,9 +49,10 @@ pub async fn health() -> impl IntoResponse {
 }
 
 /// GET /ready — readiness probe for optional dependencies such as Oracle.
-pub async fn ready(State(state): State<SharedState>) -> impl IntoResponse {
+pub async fn ready(State(_state): State<SharedState>) -> impl IntoResponse {
     #[cfg(feature = "oracle-db")]
     {
+        let state = _state;
         if let crate::db::OracleStatus::Misconfigured(_) = &state.oracle_startup_status {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,

@@ -149,7 +149,36 @@ mod tests {
         let (events_tx, _) = broadcast::channel(16);
         let resolver = TokioAsyncResolver::tokio_from_system_conf().unwrap();
 
-        let mut config = crate::config::Config::from_env_or_panic();
+        let mut config = crate::config::Config {
+            proxy_port: 3000,
+            tproxy_port: 3001,
+            wg_port: 51820,
+            admin_port: 3002,
+            explicit_proxy_enabled: false,
+            wg_interface: None,
+            max_connections: 4096,
+            tarpit_max_connections: 64,
+            admin_api_key: Some("test-key".to_string()),
+            cors_allowed_origins: vec![],
+            log_format: "human".to_string(),
+            oracle_conn: String::new(),
+            oracle_user: String::new(),
+            oracle_pass: None,
+            oracle_pass_file: String::new(),
+            tns_admin: None,
+            obfuscation_profiles: String::new(),
+            obfuscation_enabled: true,
+            obfuscation_profile: vec![],
+            fox_ua_override: "Mozilla/5.0 (Test UA)".to_string(),
+            tls_cert_path: None,
+            tls_key_path: None,
+            proxy_username: None,
+            proxy_password: None,
+            proxy_password_file: String::new(),
+            tunnel_endpoint: None,
+            upstream_proxy: None,
+            enable_dns_lookups: false,
+        };
         config.obfuscation_enabled = true;
 
         AppState::new(

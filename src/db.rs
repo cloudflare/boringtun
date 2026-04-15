@@ -32,6 +32,7 @@ impl OracleStatus {
     }
 }
 
+#[derive(Debug)]
 pub struct OracleConnectArgs {
     pub conn_str: String,
     pub user: String,
