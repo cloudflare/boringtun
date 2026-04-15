@@ -25,6 +25,8 @@ A privacy-first WireGuard gateway with transparent policy enforcement, legacy op
 
 ```bash
 # Start the privacy-first WireGuard stack
+VCS_REF="$(git rev-parse --short HEAD)" \
+BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 docker compose up -d --build
 
 # Verify liveness for the internal admin surface locally
@@ -32,6 +34,9 @@ curl -i http://127.0.0.1:3002/health
 
 # Verify dependency readiness (returns 503 until the Oracle wallet is mounted)
 curl -i http://127.0.0.1:3002/ready
+
+# Verify the container fingerprint matches the current build
+docker compose logs ssl-proxy | grep '\[startup-fingerprint\]'
 
 # Or use the setup script (installs Docker if needed)
 sudo ./setup-ubuntu.sh
@@ -43,6 +48,7 @@ If `config/server/privatekey-server` is missing on first boot, the entrypoint ge
 WireGuard firewall/NAT rules use `WG_WAN_INTERFACE` (default `auto`), which resolves from the host default route (for this machine, expected `wlp3s0`).
 Sysctl hooks remain available in `PostUp`, but can be disabled with `WG_RUNTIME_SYSCTLS=0` when the runtime blocks `sysctl -w` (for example, restricted Docker hosts).
 `/health` now reports only core service liveness; `/ready` reports Oracle readiness and stays `503` until a valid wallet and TNS alias are present under `./wallet/`.
+The container startup logs also emit a stable fingerprint with the build revision, build date, entrypoint checksum, and the raw versus normalized `WG_SERVER_ADDRESS` values used for rendering.
 
 ```mermaid
 flowchart LR
@@ -124,11 +130,12 @@ All configuration is via environment variables. Key settings:
 - The generated or existing server public key is written to `config/server/publickey-server`.
 - The compose stack renders the server interface config from `config/templates/server.conf` at startup.
 - WireGuard ingress/NAT rules target `WG_WAN_INTERFACE`; default `auto` resolves the host default-route interface.
-- Rendered WireGuard interface addresses are normalized and duplicate addresses cause startup to fail before `wg-quick up`.
+- Rendered WireGuard interface addresses are normalized before rendering, so duplicated `WG_SERVER_ADDRESS` input such as `10.13.13.1/24,10.13.13.1/24` is tolerated and reduced to a single address.
 - Sysctl hooks in WireGuard `PostUp` are best-effort: they retry and log warnings if denied, then continue startup. Set `WG_RUNTIME_SYSCTLS=0` to suppress runtime writes entirely.
 - The checked-in peer config `config/peer1/peer1.conf` uses tunnel IP `10.13.13.2/32`, DNS `10.13.13.1`, and endpoint `192.168.1.221:443`.
 - When a new server keypair is generated, redistribute the updated `config/peer1/peer1.conf` to clients before connecting.
 - The peer endpoint must be the Docker host’s LAN or public IP, not the container’s bridge IP.
+- When logs do not match the repo, compare `docker images boringtun-ssl-proxy`, `docker compose config`, the `[startup-fingerprint]` lines in `docker compose logs ssl-proxy`, and the first lines of `/run/wireguard/wg0.conf` before assuming a code regression.
 
 ## Health Endpoints
 

@@ -4,6 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "🧪 Starting SSL Proxy smoke test"
+CURRENT_VCS_REF="$(git rev-parse --short HEAD)"
+CURRENT_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 cleanup() {
     echo "🧹 Cleaning up"
@@ -93,12 +95,35 @@ assert_unique_server_address() {
     echo "✅ Rendered WireGuard config contains one unique server address"
 }
 
+assert_startup_fingerprint() {
+    local raw_address="$1"
+    local normalized_address="$2"
+    local logs
+
+    logs="$(docker compose logs ssl-proxy)"
+
+    if ! echo "$logs" | grep -Eq "\\[startup-fingerprint\\] revision=${CURRENT_VCS_REF} build_date=.* entrypoint_sha256=[0-9a-f]{64}"; then
+        echo "❌ Startup fingerprint revision or entrypoint checksum missing from logs"
+        echo "$logs"
+        exit 1
+    fi
+
+    if ! echo "$logs" | grep -Fq "[startup-fingerprint] raw_wg_server_address=${raw_address} normalized_wg_server_address=${normalized_address} wg_config_path=/run/wireguard/wg0.conf"; then
+        echo "❌ Startup fingerprint address normalization details missing from logs"
+        echo "$logs"
+        exit 1
+    fi
+
+    echo "✅ Startup fingerprint is present in container logs"
+}
+
 run_default_scenario() {
     echo "🚀 Bringing up default stack"
     cleanup
-    docker compose up -d --build
+    VCS_REF="$CURRENT_VCS_REF" BUILD_DATE="$CURRENT_BUILD_DATE" docker compose up -d --build
     wait_for_health
     assert_ready_status "$(expected_ready_status)"
+    assert_startup_fingerprint "10.13.13.1/24" "10.13.13.1/24"
     assert_wg_interface
     assert_unique_server_address
 }
@@ -106,9 +131,11 @@ run_default_scenario() {
 run_duplicate_address_scenario() {
     echo "🚀 Re-running with duplicated WG_SERVER_ADDRESS input"
     cleanup
-    WG_SERVER_ADDRESS="10.13.13.1/24,10.13.13.1/24" docker compose up -d --build
+    VCS_REF="$CURRENT_VCS_REF" BUILD_DATE="$CURRENT_BUILD_DATE" \
+        WG_SERVER_ADDRESS="10.13.13.1/24,10.13.13.1/24" docker compose up -d --build
     wait_for_health
     assert_ready_status "$(expected_ready_status)"
+    assert_startup_fingerprint "10.13.13.1/24,10.13.13.1/24" "10.13.13.1/24"
     assert_wg_interface
     assert_unique_server_address
 }

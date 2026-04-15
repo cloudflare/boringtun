@@ -21,6 +21,10 @@ RUN if [ -n "$CARGO_FEATURES" ]; then \
 # debian:bookworm-slim is required (not alpine) because Oracle Instant Client
 # depends on libaio1, which is glibc-only and unavailable on musl/alpine.
 FROM debian:bookworm-slim
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.revision=$VCS_REF \
+      org.opencontainers.image.created=$BUILD_DATE
 RUN apt-get update && apt-get install -y \
         bash \
         ca-certificates \
@@ -47,7 +51,9 @@ RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg \
  && chown -R proxyuser:proxyuser /app /usr/local/bin/start-proxy-wg \
  && setcap cap_net_admin+eip /usr/local/bin/coredns \
  && setcap cap_net_admin+eip /app/ssl-proxy
-ENV LD_LIBRARY_PATH=/app/lib \
+ENV IMAGE_VCS_REF=$VCS_REF \
+    IMAGE_BUILD_DATE=$BUILD_DATE \
+    LD_LIBRARY_PATH=/app/lib \
     WG_CONFIG_PATH=/run/wireguard/wg0.conf \
     WG_TEMPLATE_PATH=/config/templates/server.conf \
     WG_SUDO=1 \

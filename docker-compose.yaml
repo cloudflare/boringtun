@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
       args:
         CARGO_FEATURES: oracle-db
+        VCS_REF: ${VCS_REF:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3002/health && wg show wg0"]
