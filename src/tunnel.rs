@@ -1036,9 +1036,9 @@ pub async fn handle(
             }
 
             return Ok(Response::builder()
-                .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
-                .header("Proxy-Authenticate", "Basic realm=\"Proxy Access\"")
-                .body(Body::empty())
+                .status(StatusCode::FORBIDDEN)
+                .header("Content-Type", "text/plain; charset=utf-8")
+                .body(Body::from("Access denied"))
                 .unwrap());
         } else {
             // Graceful half-close: properly complete TCP FIN handshake before dropping
@@ -1056,9 +1056,9 @@ pub async fn handle(
             });
 
             return Ok(Response::builder()
-                .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
-                .header("Proxy-Authenticate", "Basic realm=\"Proxy Access\"")
-                .body(Body::empty())
+                .status(StatusCode::FORBIDDEN)
+                .header("Content-Type", "text/plain; charset=utf-8")
+                .body(Body::from("Access denied"))
                 .unwrap());
         }
     }
@@ -1168,32 +1168,10 @@ async fn run_tunnel(
         .unwrap_or((&host, 443));
     let name = name.trim_start_matches('[').trim_end_matches(']');
 
-    // Certificate pinned domains: bypass DoH resolver, connect directly with system DNS
-    let is_pinned_app = name.contains("facebook.com")
-        || name.contains("instagram.com")
-        || name.contains("googlevideo.com")
-        || name.contains("apple.com")
-        || name.contains("youtube.com")
-        || name.contains("fbcdn.net")
-        || name.contains("instagramstatic.com");
-
+    // Always use system DNS resolution through WireGuard tunnel
+    // Fixes anycast CDN IP mismatch for Instagram/YouTube and all other domains
     let connect = async {
-        if is_pinned_app {
-            // Direct connection using hostname - preserves SNI, CDN routing, and system DNS
-            tokio::net::TcpStream::connect(&host).await
-        } else {
-            // Normal domains: use configured DoH resolver
-            let addrs = state.resolver.lookup_ip(name).await?;
-            let mut last_err =
-                std::io::Error::new(std::io::ErrorKind::NotFound, "DoH returned no addresses");
-            for ip in addrs.iter() {
-                match tokio::net::TcpStream::connect((ip, port)).await {
-                    Ok(stream) => return Ok(stream),
-                    Err(e) => last_err = e,
-                }
-            }
-            Err(last_err)
-        }
+        tokio::net::TcpStream::connect(&host).await
     };
 
     match tokio::time::timeout(tokio::time::Duration::from_secs(10), connect).await {
