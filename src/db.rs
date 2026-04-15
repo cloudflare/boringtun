@@ -839,3 +839,124 @@ pub fn update_connection_session_close_event(
 pub fn insert_blocklist_audit_event(sender: Arc<EventSender>, ev: BlocklistAuditEvent) {
     sender.send(DbEvent::BlocklistAudit(ev));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::{Mutex, OnceLock},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn temp_wallet_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "boringtun-oracle-wallet-{}-{}-{}",
+            name,
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn test_config(tns_admin: Option<String>) -> Config {
+        Config {
+            proxy_port: 3000,
+            tproxy_port: 3001,
+            wg_port: 51820,
+            admin_port: 3002,
+            explicit_proxy_enabled: false,
+            wg_interface: None,
+            max_connections: 4096,
+            tarpit_max_connections: 64,
+            admin_api_key: Some("test-key".to_string()),
+            cors_allowed_origins: vec![],
+            log_format: "human".to_string(),
+            oracle_conn: "mainerc_tp".to_string(),
+            oracle_user: "USCIS_APP".to_string(),
+            oracle_pass: Some("secret".to_string()),
+            oracle_pass_file: String::new(),
+            tns_admin,
+            obfuscation_profiles: String::new(),
+            obfuscation_enabled: true,
+            obfuscation_profile: vec![],
+            fox_ua_override: "Mozilla/5.0 (Test UA)".to_string(),
+            tls_cert_path: None,
+            tls_key_path: None,
+            proxy_username: None,
+            proxy_password: None,
+            proxy_password_file: String::new(),
+            tunnel_endpoint: None,
+            upstream_proxy: None,
+            enable_dns_lookups: false,
+        }
+    }
+
+    #[test]
+    fn test_tns_alias_exists_case_insensitive() {
+        let contents = "MAINERC_TP =\n  (DESCRIPTION=...)";
+        assert!(tns_alias_exists(contents, "mainerc_tp"));
+        assert!(!tns_alias_exists(contents, "other_alias"));
+    }
+
+    #[test]
+    fn test_oracle_connect_args_requires_tns_admin() {
+        let _guard = env_lock();
+        let config = test_config(None);
+
+        let status = oracle_connect_args(&config).unwrap_err();
+        assert_eq!(
+            status,
+            OracleStatus::Misconfigured("TNS_ADMIN is not set".to_string())
+        );
+    }
+
+    #[test]
+    fn test_oracle_connect_args_requires_alias_in_wallet() {
+        let _guard = env_lock();
+        let wallet_dir = temp_wallet_dir("missing-alias");
+        fs::write(wallet_dir.join("tnsnames.ora"), "OTHER_ALIAS = (DESCRIPTION=...)").unwrap();
+        fs::write(wallet_dir.join("cwallet.sso"), "placeholder").unwrap();
+
+        let config = test_config(Some(wallet_dir.display().to_string()));
+        let status = oracle_connect_args(&config).unwrap_err();
+
+        match status {
+            OracleStatus::Misconfigured(reason) => {
+                assert!(reason.contains("TNS alias mainerc_tp not found"));
+            }
+            other => panic!("unexpected oracle status: {other:?}"),
+        }
+
+        fs::remove_dir_all(wallet_dir).unwrap();
+    }
+
+    #[test]
+    fn test_oracle_connect_args_accepts_valid_wallet_alias() {
+        let _guard = env_lock();
+        let wallet_dir = temp_wallet_dir("valid");
+        fs::write(wallet_dir.join("tnsnames.ora"), "mainerc_tp = (DESCRIPTION=...)").unwrap();
+        fs::write(wallet_dir.join("cwallet.sso"), "placeholder").unwrap();
+        fs::write(wallet_dir.join("sqlnet.ora"), "WALLET_LOCATION = /tmp").unwrap();
+
+        let config = test_config(Some(wallet_dir.display().to_string()));
+        let args = oracle_connect_args(&config).unwrap();
+
+        assert_eq!(args.conn_str, "mainerc_tp");
+        assert_eq!(args.user, "USCIS_APP");
+        assert_eq!(args.pass, "secret");
+
+        fs::remove_dir_all(wallet_dir).unwrap();
+    }
+}
