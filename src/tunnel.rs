@@ -1098,9 +1098,9 @@ pub async fn handle(
         }
     });
 
-    // Return 100 Continue to Hyper so it stops processing HTTP and passes through the stream
+    // Return 200 OK to indicate CONNECT tunnel has been accepted and the upgrade is active.
     Ok(Response::builder()
-        .status(StatusCode::CONTINUE)
+        .status(StatusCode::OK)
         .body(Body::empty())
         .unwrap())
 }
@@ -1213,7 +1213,14 @@ async fn run_tunnel(
                 }
             }
         }
-        Ok(Err(e)) => error!(%host, %e, "failed to connect to tunnel target"),
+        Ok(Err(e)) => {
+            error!(
+                %host,
+                %e,
+                kind = ?e.kind(),
+                "failed to connect to tunnel target"
+            );
+        }
         Err(_) => error!(%host, "tunnel connect timed out"),
     }
 }
