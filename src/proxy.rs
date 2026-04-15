@@ -59,9 +59,8 @@ fn emit_full(
     let raw = v.to_string();
     
     // Send to broadcast channel (non-blocking for broadcast senders)
-    if let Err(e) = state.events_tx.send(raw.clone()) {
-        tracing::warn!(target: "audit", error = %e, "failed to send audit event to channel");
-    }
+    // Err result from send() on broadcast channel always means no active receivers - this is normal behavior
+    let _ = state.events_tx.send(raw.clone());
     
     #[cfg(feature = "oracle-db")]
     {
