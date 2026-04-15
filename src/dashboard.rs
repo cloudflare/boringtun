@@ -43,37 +43,31 @@ pub struct HostSnapshot {
     pub asn_org: Option<String>,
 }
 
-/// GET /health — liveness probe; verifies Oracle DB connectivity when the
-/// `oracle-db` feature is enabled, otherwise returns 200 immediately.
-pub async fn health(State(state): State<SharedState>) -> impl IntoResponse {
+/// GET /health — liveness probe for the admin surface.
+pub async fn health() -> impl IntoResponse {
+    (StatusCode::OK, "ok").into_response()
+}
+
+/// GET /ready — readiness probe for optional dependencies such as Oracle.
+pub async fn ready(State(state): State<SharedState>) -> impl IntoResponse {
     #[cfg(feature = "oracle-db")]
     {
-        let conn_str = state.config.oracle_conn.clone();
-        let user = state.config.oracle_user.clone();
-        let pass = state.config.oracle_pass.clone().unwrap_or_else(|| {
-            std::fs::read_to_string(&state.config.oracle_pass_file)
-                .unwrap_or_default()
-                .trim_end_matches(&['\n', '\r'][..])
-                .to_string()
-        });
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            tokio::task::spawn_blocking(move || {
-                oracle::Connection::connect(&user, &pass, &conn_str).and_then(|conn| {
-                    conn.query_row_as::<u32>("SELECT 1 FROM DUAL", &[])
-                        .map(|_| ())
-                })
-            }),
-        )
-        .await;
-        match result {
-            Ok(Ok(Ok(()))) => return (StatusCode::OK, "ok").into_response(),
-            Ok(Ok(Err(e))) => {
-                error!(%e, "Oracle health check failed");
-                return (StatusCode::SERVICE_UNAVAILABLE, "db unreachable").into_response();
-            }
-            _ => return (StatusCode::SERVICE_UNAVAILABLE, "db timeout").into_response(),
+        if let crate::db::OracleStatus::Misconfigured(_) = &state.oracle_startup_status {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                state.oracle_startup_status.readiness_body(),
+            )
+                .into_response();
         }
+
+        let status =
+            crate::db::oracle_readiness(&state.config, tokio::time::Duration::from_secs(5)).await;
+        let code = if matches!(status, crate::db::OracleStatus::Ready) {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+        return (code, status.readiness_body()).into_response();
     }
     #[cfg(not(feature = "oracle-db"))]
     (StatusCode::OK, "ok").into_response()
@@ -86,12 +80,10 @@ pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::Cancell
     tokio::spawn(async move {
         let conn_str = state.config.oracle_conn.clone();
         let user = state.config.oracle_user.clone();
-        let pass = state.config.oracle_pass.clone().unwrap_or_else(|| {
-            std::fs::read_to_string(&state.config.oracle_pass_file)
-                .unwrap_or_default()
-                .trim_end_matches(&['\n', '\r'][..])
-                .to_string()
-        });
+        let pass = match crate::db::oracle_connect_args(&state.config) {
+            Ok(args) => args.pass,
+            Err(_) => return,
+        };
         loop {
             tokio::select! {
                 _ = token.cancelled() => { info!("oracle flusher shutting down"); return; }

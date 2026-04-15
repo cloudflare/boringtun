@@ -216,6 +216,7 @@ async fn main() {
         .route("/ws", get(dashboard::ws_stats))
         .route("/events", get(dashboard::ws_events))
         .route("/health", get(dashboard::health))
+        .route("/ready", get(dashboard::ready))
         .merge(admin_routes)
         .nest_service("/dashboard", ServeDir::new("static"))
         .layer(TraceLayer::new_for_http())

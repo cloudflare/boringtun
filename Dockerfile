@@ -41,7 +41,6 @@ COPY static ./static
 RUN mkdir -p /app/lib
 # Wallet directory is optional; create empty dir if not present
 RUN mkdir -p /app/wallet
-COPY docker/wg_up.sh /usr/local/bin/wg_up.sh
 COPY docker/entrypoint.sh /usr/local/bin/start-proxy-wg
 RUN ldconfig && chmod +x /usr/local/bin/start-proxy-wg /usr/local/bin/wg_up.sh \
  && groupadd -r proxyuser && useradd -r -g proxyuser proxyuser \
