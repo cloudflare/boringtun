@@ -211,6 +211,7 @@ pub struct AppState {
     pub tunnels_opened: AtomicU64,
     pub blocked_count: AtomicU64,
     pub obfuscated_count: AtomicU64,
+    pub host_stats_dropped: AtomicU64,
     pub blocklist: RwLock<HashSet<String>>,
     pub host_stats: DashMap<String, HostStats>,
     pub tarpit_sem: std::sync::Arc<tokio::sync::Semaphore>,
@@ -264,6 +265,7 @@ impl AppState {
             tunnels_opened: AtomicU64::new(0),
             blocked_count: AtomicU64::new(0),
             obfuscated_count: AtomicU64::new(0),
+            host_stats_dropped: AtomicU64::new(0),
             blocklist: RwLock::new(seed),
             host_stats: DashMap::new(),
             tarpit_sem: crate::tunnel::tarpit_semaphore(max_tarpit),
@@ -329,6 +331,8 @@ impl AppState {
                 .or_insert_with(|| HostStats::new(connect_header_bytes, category));
             None
         } else {
+            warn!(%host, count = self.host_stats.len(), "MAX_TRACKED_HOSTS limit reached, dropping host statistics");
+            self.host_stats_dropped.fetch_add(1, Ordering::Relaxed);
             None
         }
     }

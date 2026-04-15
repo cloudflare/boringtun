@@ -51,11 +51,14 @@ if [ -z "${TLS_CERT_PATH:-}" ] && [ -z "${TLS_KEY_PATH:-}" ]; then
     if [ ! -f "/ssl/tls.crt" ] || [ ! -f "/ssl/tls.key" ]; then
         echo "[#] Generating self-signed TLS certificate for proxy listener"
         mkdir -p /ssl
-        openssl req -x509 -nodes -days 365 -newkey rsa:4096 \
+        if ! openssl req -x509 -nodes -days 365 -newkey rsa:4096 \
             -keyout /ssl/tls.key \
             -out /ssl/tls.crt \
             -subj "/CN=ssl-proxy.local" \
-            -addext "subjectAltName=DNS:ssl-proxy.local,DNS:localhost,IP:127.0.0.1" 2>/dev/null
+            -addext "subjectAltName=DNS:ssl-proxy.local,DNS:localhost,IP:127.0.0.1"; then
+            echo "[!] Failed to generate TLS certificate" >&2
+            exit 1
+        fi
         chmod 600 /ssl/tls.key
         export TLS_CERT_PATH="/ssl/tls.crt"
         export TLS_KEY_PATH="/ssl/tls.key"

@@ -218,22 +218,33 @@ async fn handle_h3_request(
         }
     };
 
-    let hostname: String = host
-        .rsplit_once(':')
-        .and_then(|(h, p)| {
-            p.parse::<u16>()
-                .ok()
-                .map(|_| h.trim_start_matches('[').trim_end_matches(']').to_string())
-        })
-        .unwrap_or_else(|| {
-            host.trim_start_matches('[')
-                .trim_end_matches(']')
-                .to_string()
-        });
-    let port: u16 = host
-        .rsplit_once(':')
-        .and_then(|(_, p)| p.parse().ok())
-        .unwrap_or(443);
+    // Parse host with proper IPv6 support
+    let (hostname, port): (String, u16) = if host.contains(']') {
+        // Bracketed IPv6 with optional port: [::1]:8080
+        if let Some(bracket_end) = host.find(']') {
+            let hostname = host[1..bracket_end].to_string();
+            let port = if bracket_end + 1 < host.len() && host.as_bytes()[bracket_end + 1] == b':' {
+                host[bracket_end + 2..].parse().unwrap_or(443)
+            } else {
+                443
+            };
+            (hostname, port)
+        } else {
+            (host.to_string(), 443)
+        }
+    } else if host.chars().filter(|&c| c == ':').count() > 1 {
+        // Bare IPv6 address without brackets
+        (host.to_string(), 443)
+    } else {
+        // IPv4 or hostname with optional port
+        host.rsplit_once(':')
+            .and_then(|(h, p)| {
+                p.parse::<u16>()
+                    .ok()
+                    .map(|port| (h.to_string(), port))
+            })
+            .unwrap_or_else(|| (host.to_string(), 443))
+    };
 
     // Blocklist check — same logic as tunnel::handle (lines 801-935)
     if blocklist::is_blocked(&hostname, &state).await {
@@ -300,11 +311,13 @@ async fn handle_h3_request(
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
                 error!(%host, %e, "QUIC: failed to connect to tunnel target");
+                let _ = stream.reset(h3::error::Code::H3_INTERNAL_ERROR);
                 stream.finish().await.ok();
                 return;
             }
             Err(_) => {
                 error!(%host, "QUIC: tunnel connect timed out");
+                let _ = stream.reset(h3::error::Code::H3_INTERNAL_ERROR);
                 stream.finish().await.ok();
                 return;
             }
@@ -377,7 +390,18 @@ async fn handle_h3_request(
         total
     };
 
-    let (up, down) = tokio::join!(h3_to_upstream, upstream_to_h3);
+    let (up, down) = tokio::select! {
+        up_res = h3_to_upstream => {
+            // Cancel the other direction when upstream completes
+            upstream_read.shutdown(std::net::Shutdown::Both).ok();
+            (up_res, upstream_to_h3.await)
+        }
+        down_res = upstream_to_h3 => {
+            // Cancel the other direction when downstream completes
+            h3_recv.stop_sending(h3::error::Code::H3_NO_ERROR);
+            (h3_to_upstream.await, down_res)
+        }
+    };
     state.record_tunnel_close(up, down);
 
     info!(

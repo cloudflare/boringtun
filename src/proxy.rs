@@ -83,8 +83,17 @@ fn emit_full(
         };
         
         // Offload blocking DB operation to blocking thread pool
-        tokio::task::spawn_blocking(move || {
-            crate::db::insert_proxy_event(db, event);
+        let handle = tokio::task::spawn_blocking(move || {
+            if let Err(e) = crate::db::insert_proxy_event(db, event) {
+                error!(%e, "failed to insert proxy event into database");
+            }
+        });
+        
+        // Detach handle but log join errors
+        tokio::spawn(async move {
+            if let Err(e) = handle.await {
+                error!(%e, "proxy event database task failed");
+            }
         });
     }
 }

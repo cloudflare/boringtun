@@ -44,7 +44,8 @@ fi
 
 echo "🔌 Testing CONNECT proxy request"
 echo "Using proxy health endpoint for reliable testing"
-CURL_OUTPUT=$(curl -v --proxy http://localhost:3000 --connect-timeout 10 --max-time 15 http://localhost:3000/health 2>&1) || CURL_EXIT=$?
+# Proxy a request to a known external endpoint
+CURL_OUTPUT=$(curl -v --proxy http://localhost:3000 --connect-timeout 10 --max-time 15 http://httpbin.org/get 2>&1) || CURL_EXIT=$?
 
 # Accept successful connection (even if health endpoint returns anything)
 if [ "${CURL_EXIT:-0}" -ne 0 ] && [ "${CURL_EXIT:-0}" -ne 56 ] && [ "${CURL_EXIT:-0}" -ne 35 ]; then
@@ -60,7 +61,7 @@ echo "🔍 Verifying request was logged"
 sleep 2
 LOGS=$(docker compose logs ssl-proxy)
 
-if echo "$LOGS" | grep -q "localhost:3000/health\|/health"; then
+if echo "$LOGS" | grep -q "httpbin.org"; then
     echo "✅ Proxy request successfully logged"
 else
     echo "❌ Proxy request not found in logs"
