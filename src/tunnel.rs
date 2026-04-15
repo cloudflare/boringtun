@@ -1079,18 +1079,8 @@ pub async fn handle(
                 run_tunnel(stream.into_inner(), host, state, category, peer_ip, profile).await;
             }
             Err(e) => {
-                let error_kind = if e.is::<hyper::Error>() && e.to_string().contains("operation was canceled") {
-                    if let Some(source) = e.source() {
-                        if source.to_string().contains("connection closed before message completed") {
-                            "client_disconnected"
-                        } else if source.to_string().contains("canceled") {
-                            "request_aborted"
-                        } else {
-                            "operation_canceled"
-                        }
-                    } else {
-                        "operation_canceled"
-                    }
+                let error_kind = if e.to_string().contains("operation was canceled") {
+                    "client_disconnected"
                 } else {
                     "unknown"
                 };
