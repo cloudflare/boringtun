@@ -7,6 +7,7 @@ WG_INTERFACE_NAME="${WG_INTERFACE_NAME:-wg0}"
 WG_CONFIG_PATH="${WG_CONFIG_PATH:-/run/wireguard/${WG_INTERFACE_NAME}.conf}"
 WG_TEMPLATE_PATH="${WG_TEMPLATE_PATH:-/config/templates/server.conf}"
 WG_SERVER_PRIVATE_KEY_FILE="${WG_SERVER_PRIVATE_KEY_FILE:-/config/server/privatekey-server}"
+WG_SERVER_PUBLIC_KEY_FILE="${WG_SERVER_PUBLIC_KEY_FILE:-/config/server/publickey-server}"
 WG_PEER_CONFIG_PATH="${WG_PEER_CONFIG_PATH:-/config/peer1/peer1.conf}"
 WG_PEER_PUBLIC_KEY_FILE="${WG_PEER_PUBLIC_KEY_FILE:-/config/peer1/publickey-peer1}"
 WG_PEER_PRESHARED_KEY_FILE="${WG_PEER_PRESHARED_KEY_FILE:-/config/peer1/presharedkey-peer1}"
@@ -34,6 +35,15 @@ read_trimmed_file() {
         exit 1
     fi
     tr -d '\r' <"$path" | sed -e 's/[[:space:]]*$//' | tail -n 1
+}
+
+write_trimmed_file() {
+    local path="$1"
+    local value="$2"
+    local mode="${3:-600}"
+    mkdir -p "$(dirname "$path")"
+    printf '%s\n' "$value" >"$path"
+    chmod "$mode" "$path"
 }
 
 extract_ini_value() {
@@ -72,6 +82,70 @@ normalize_allowed_ips() {
         printf '%s/128' "$address"
     else
         printf '%s/32' "$address"
+    fi
+}
+
+sync_peer_server_public_key() {
+    local public_key="$1"
+    local peer_config="$2"
+    local tmp_file
+
+    if [ ! -f "$peer_config" ]; then
+        return
+    fi
+
+    tmp_file="$(mktemp)"
+    awk -v public_key="$public_key" '
+        BEGIN { in_peer = 0 }
+        /^\[Peer\]/ { in_peer = 1; print; next }
+        /^\[/ { in_peer = 0; print; next }
+        in_peer {
+            line = $0
+            stripped = line
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", stripped)
+            if (stripped ~ /^PublicKey[[:space:]]*=/) {
+                print "PublicKey = " public_key
+                next
+            }
+        }
+        { print }
+    ' "$peer_config" >"$tmp_file"
+    mv "$tmp_file" "$peer_config"
+}
+
+ensure_wireguard_server_keys() {
+    local server_private_key
+    local server_public_key
+    local current_public_key
+
+    mkdir -p "$(dirname "$WG_SERVER_PRIVATE_KEY_FILE")"
+    mkdir -p "$(dirname "$WG_SERVER_PUBLIC_KEY_FILE")"
+
+    if [ ! -f "$WG_SERVER_PRIVATE_KEY_FILE" ]; then
+        echo "[#] Generating WireGuard server keypair at $WG_SERVER_PRIVATE_KEY_FILE"
+        umask 077
+        server_private_key="$(wg genkey)"
+        write_trimmed_file "$WG_SERVER_PRIVATE_KEY_FILE" "$server_private_key" 600
+    else
+        server_private_key="$(read_trimmed_file "$WG_SERVER_PRIVATE_KEY_FILE")"
+    fi
+
+    server_public_key="$(printf '%s\n' "$server_private_key" | wg pubkey)"
+
+    if [ -f "$WG_SERVER_PUBLIC_KEY_FILE" ]; then
+        current_public_key="$(read_trimmed_file "$WG_SERVER_PUBLIC_KEY_FILE")"
+    else
+        current_public_key=""
+    fi
+
+    if [ "$current_public_key" != "$server_public_key" ]; then
+        echo "[#] Syncing WireGuard server public key to $WG_SERVER_PUBLIC_KEY_FILE"
+        write_trimmed_file "$WG_SERVER_PUBLIC_KEY_FILE" "$server_public_key" 644
+    fi
+
+    if [ -f "$WG_PEER_CONFIG_PATH" ]; then
+        echo "[#] Syncing server public key into $WG_PEER_CONFIG_PATH"
+        sync_peer_server_public_key "$server_public_key" "$WG_PEER_CONFIG_PATH"
     fi
 }
 
@@ -179,6 +253,7 @@ shutdown() {
 
 trap shutdown TERM
 
+ensure_wireguard_server_keys
 render_wireguard_config
 echo "starting WireGuard interface $WG_INTERFACE_NAME: $WG_CONFIG_PATH"
 cmd wg-quick up "$WG_CONFIG_PATH"

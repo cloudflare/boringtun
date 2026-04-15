@@ -20,7 +20,6 @@ A privacy-first WireGuard gateway with transparent policy enforcement, legacy op
 ### Prerequisites
 
 - Docker and Docker Compose
-- A local WireGuard server private key at `config/server/privatekey-server`
 
 ### Running
 
@@ -36,7 +35,8 @@ sudo ./setup-ubuntu.sh
 ```
 
 Supported client onboarding is WireGuard profile import from `config/peer1/peer1.conf`. Manual Wi-Fi or MDM HTTP proxy configuration is a legacy debugging path and is not privacy-preserving.
-The container renders its runtime server config to `/run/wireguard/wg0.conf` from `config/templates/server.conf`, your local `config/server/privatekey-server`, and the checked-in peer metadata.
+The container renders its runtime server config to `/run/wireguard/wg0.conf` from `config/templates/server.conf`, the server keypair under `config/server/`, and the checked-in peer metadata.
+If `config/server/privatekey-server` is missing on first boot, the entrypoint generates a new server keypair and syncs the derived public key into `config/server/publickey-server` and `config/peer1/peer1.conf`.
 
 ```mermaid
 flowchart LR
@@ -108,9 +108,11 @@ All configuration is via environment variables. Key settings:
 
 ## WireGuard Config Layout
 
-- Place the server private key in `config/server/privatekey-server`. That file is ignored by git.
+- `config/server/privatekey-server` is optional on first boot. If it is missing, the container generates a new server keypair automatically.
+- The generated or existing server public key is written to `config/server/publickey-server`.
 - The compose stack renders the server interface config from `config/templates/server.conf` at startup.
 - The checked-in peer config `config/peer1/peer1.conf` uses tunnel IP `10.13.13.2/32`, DNS `10.13.13.1`, and endpoint `192.168.1.166:443`.
+- When a new server keypair is generated, redistribute the updated `config/peer1/peer1.conf` to clients before connecting.
 - The peer endpoint must be the Docker host’s LAN or public IP, not the container’s bridge IP.
 
 ## Legacy Explicit Proxy Mode
