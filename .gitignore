@@ -3,6 +3,7 @@
 .vscode/
 .env
 /wallet
+/lib/
 # Ignore secret/credential config files but allow templates
 /config/**/privatekey-*
 /config/**/presharedkey-*
@@ -10,3 +11,5 @@
 /config/**/*-credentials.*
 /config/**/secrets.*
 /config/wg_confs/*.conf
+/secrets/proxy_password.txt
+/secrets/oracle_password.txt

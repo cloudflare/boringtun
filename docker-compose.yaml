@@ -7,7 +7,7 @@ services:
         CARGO_FEATURES: oracle-db
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/health && wg show wg0"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3002/health && wg show wg0"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -28,6 +28,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     volumes:
+      - ./lib:/app/lib
       - ./config:/config
       - ./wallet:/app/wallet
     environment:
@@ -39,19 +40,25 @@ services:
       - ORACLE_USER=USCIS_APP
       - ORACLE_PASS_FILE=/run/secrets/oracle_password
       - LD_LIBRARY_PATH=/app/lib
+      - ADMIN_API_KEY=test
+      - PROXY_USERNAME=iphoneuser
+      - PROXY_PASSWORD=yourpasswordhere
+
     secrets:
       - oracle_password
+      - proxy_password
     ports:
       - "443:443/udp"
       - "3000:3000"
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:3002:3002"
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
       - net.ipv4.conf.all.rp_filter=0
-      - net.core.rmem_max=212992
-      - net.core.wmem_max=212992
 
 secrets:
   oracle_password:
     file: ./secrets/oracle_password.txt
+  proxy_password:
+    file: ./secrets/proxy_password.txt

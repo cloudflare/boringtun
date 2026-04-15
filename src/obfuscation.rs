@@ -130,15 +130,15 @@ pub fn apply_request_headers(
     headers.remove("dnt");
     headers.remove("sec-gpc");
 
-    // Normalize User-Agent to configured override string
-    if !config.fox_ua_override.is_empty() {
-        headers.insert(
-            "user-agent",
-            axum::http::HeaderValue::from_str(&config.fox_ua_override).unwrap_or_else(|_| {
-                axum::http::HeaderValue::from_static("Mozilla/5.0 (compatible; Generic/1.0)")
-            }),
-        );
-    }
+    // Normalize User-Agent to configured override string (or default if empty)
+    let ua = if config.fox_ua_override.is_empty() {
+        axum::http::HeaderValue::from_static("Mozilla/5.0 (compatible; Generic/1.0)")
+    } else {
+        axum::http::HeaderValue::from_str(&config.fox_ua_override).unwrap_or_else(|_| {
+            axum::http::HeaderValue::from_static("Mozilla/5.0 (compatible; Generic/1.0)")
+        })
+    };
+    headers.insert("user-agent", ua);
 }
 
 /// Apply response header obfuscation for Fox profiles.
@@ -167,6 +167,7 @@ mod tests {
             proxy_port: 3000,
             tproxy_port: 3001,
             wg_port: 51820,
+            admin_port: 3002,
             wg_interface: None,
             max_connections: 4096,
             tarpit_max_connections: 64,
@@ -189,6 +190,12 @@ mod tests {
             fox_ua_override: "Mozilla/5.0 (Test UA)".to_string(),
             tls_cert_path: None,
             tls_key_path: None,
+            proxy_username: None,
+            proxy_password: None,
+            proxy_password_file: String::new(),
+            tunnel_endpoint: None,
+            upstream_proxy: None,
+            enable_dns_lookups: false,
         }
     }
 

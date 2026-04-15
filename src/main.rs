@@ -12,14 +12,15 @@ mod tunnel;
 use axum::http::Method;
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::{Request, Response, StatusCode},
     middleware::{self, Next},
     response::IntoResponse,
     routing::{any, get},
     Router,
 };
+use base64::Engine;
 use hickory_resolver::{
-    config::{ResolverConfig, ResolverOpts},
+    config::{NameServerConfigGroup, ResolverConfig, ResolverOpts},
     TokioAsyncResolver,
 };
 use hyper::service::service_fn;
@@ -32,11 +33,11 @@ use std::net::SocketAddr;
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
-use tower::ServiceExt;
+use tower::Service;
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
-fn constant_time_eq(a: &str, b: &str) -> bool {
+pub(crate) fn constant_time_eq(a: &str, b: &str) -> bool {
     use subtle::ConstantTimeEq;
     const MAX_LEN: usize = 256;
     let mut a_buf = [0u8; MAX_LEN];
@@ -48,17 +49,69 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     a_buf.ct_eq(&b_buf).into()
 }
 
+/// Validate the Proxy-Authorization header (RFC 7235 / RFC 7617 Basic scheme).
+/// Returns `true` when the header carries valid credentials.
+/// Generic over the body type so it works for both hyper and h3 requests.
+pub(crate) fn check_proxy_auth<B>(req: &Request<B>, username: &str, password: &str) -> bool {
+    let header = match req
+        .headers()
+        .get("proxy-authorization")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(h) => h,
+        None => return false,
+    };
+    // RFC 7235 §2.1: auth-scheme comparison is case-insensitive.
+    let encoded = if header.len() >= 6 && header[..6].eq_ignore_ascii_case("basic ") {
+        &header[6..]
+    } else {
+        return false;
+    };
+    let decoded = match base64::engine::general_purpose::STANDARD.decode(encoded) {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    let decoded_str = match std::str::from_utf8(&decoded) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let (user, pass) = match decoded_str.split_once(':') {
+        Some(pair) => pair,
+        None => return false,
+    };
+    let user_ok = constant_time_eq(user, username);
+    let pass_ok = constant_time_eq(pass, password);
+    user_ok & pass_ok
+}
+
 #[tokio::main]
 async fn main() {
+    // Install rustls crypto provider FIRST before ANY other code
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     let filter = tracing_subscriber::EnvFilter::from_default_env()
         .add_directive("ssl_proxy=info".parse().unwrap())
         .add_directive("tower_http=info".parse().unwrap());
 
-    let client = Client::builder(TokioExecutor::new()).build(HttpConnector::new());
-
     let mut opts = ResolverOpts::default();
     opts.cache_size = 1024;
-    let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare_https(), opts);
+    // Prefer IPv4 first to avoid "Network unreachable" errors when IPv6 is not configured
+    opts.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4thenIpv6;
+
+    let cloudflare_ips = ["1.1.1.1".parse().unwrap(), "1.0.0.1".parse().unwrap()];
+    let resolver_config = ResolverConfig::from_parts(
+        None,
+        Vec::new(),
+        NameServerConfigGroup::from_ips_https(
+            &cloudflare_ips,
+            443,
+            "cloudflare-dns.com".to_string(),
+            true,
+        ),
+    );
+    let resolver = TokioAsyncResolver::tokio(resolver_config, opts);
 
     let (stats_tx, _) = broadcast::channel(64);
     let (events_tx, _) = broadcast::channel(256);
@@ -66,6 +119,8 @@ async fn main() {
     let shutdown = CancellationToken::new();
 
     let config = config::Config::from_env_or_panic();
+
+    let client = Client::builder(TokioExecutor::new()).build(HttpConnector::new());
 
     // LOG_FORMAT=json  →  newline-delimited JSON (pipe to Vector/Filebeat)
     // anything else    →  human-readable (default for dev)
@@ -136,7 +191,7 @@ async fn main() {
                 let key = admin_api_key.clone();
                 async move {
                     // If no admin API key configured, deny all access to admin endpoints
-                    let Some(ref valid_key) = key else {
+                    let Some(valid_key) = key.as_ref() else {
                         return StatusCode::NOT_FOUND.into_response();
                     };
 
@@ -156,19 +211,58 @@ async fn main() {
         ))
         .with_state(state.clone());
 
-    let router = Router::new()
+    // Admin / dashboard listener — plaintext, internal only
+    let admin_router = Router::new()
         .route("/ws", get(dashboard::ws_stats))
         .route("/events", get(dashboard::ws_events))
         .route("/health", get(dashboard::health))
         .merge(admin_routes)
-        .fallback(any(proxy::handler))
         .nest_service("/dashboard", ServeDir::new("static"))
+        .layer(TraceLayer::new_for_http())
+        .layer(cors.clone())
+        .with_state(state.clone());
+
+    let admin_addr = SocketAddr::from(([0, 0, 0, 0], config.admin_port));
+    let admin_listener = tokio::net::TcpListener::bind(admin_addr)
+        .await
+        .unwrap_or_else(|e| {
+            error!(%admin_addr, %e, "failed to bind admin listener");
+            std::process::exit(1)
+        });
+    info!(%admin_addr, "admin/dashboard listener active (plaintext)");
+
+    let admin_shutdown = shutdown.clone();
+    tokio::spawn(async move {
+        axum::serve(admin_listener, admin_router)
+            .with_graceful_shutdown(async move { admin_shutdown.cancelled().await })
+            .await
+            .ok();
+    });
+
+    // Main proxy router - only handles proxy traffic
+    let router = Router::new()
+        .fallback(any(proxy::handler))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state.clone());
 
     #[cfg(feature = "oracle-db")]
     dashboard::spawn_oracle_flusher(state.clone(), shutdown.clone());
+
+    // Build proxy credentials for WAN authentication (RFC 7235 Basic).
+    let proxy_creds: Option<std::sync::Arc<(String, String)>> =
+        match (&config.proxy_username, &config.proxy_password) {
+            (Some(u), Some(p)) => {
+                info!(username = %u, "proxy authentication enabled");
+                Some(std::sync::Arc::new((u.clone(), p.clone())))
+            }
+            _ => {
+                warn!(
+                    "PROXY_USERNAME / PROXY_PASSWORD not set \u{2014} proxy has NO authentication"
+                );
+                None
+            }
+        };
 
     info!(
         proxy_port = config.proxy_port,
@@ -213,8 +307,9 @@ async fn main() {
         let quic_state = state.clone();
         let quic_config = config.clone();
         let quic_shutdown = shutdown.clone();
+        let quic_creds = proxy_creds.clone();
         tokio::spawn(async move {
-            quic::run_quic_listener(quic_state, quic_config, quic_shutdown).await;
+            quic::run_quic_listener(quic_state, quic_config, quic_shutdown, quic_creds).await;
         });
     }
 
@@ -290,6 +385,7 @@ async fn main() {
                 let router = router.clone();
                 let token = shutdown.clone();
                 let tls_acceptor = tls_acceptor.clone();
+                let proxy_creds = proxy_creds.clone();
 
                 tasks.spawn(async move {
                     let _permit = permit; // hold until task completes
@@ -302,12 +398,37 @@ async fn main() {
                             let svc = service_fn(move |req: Request<hyper::body::Incoming>| {
                                 let state = state.clone();
                                 let router = router.clone();
+                                let creds = proxy_creds.clone();
                                 async move {
                                     let req: Request<Body> = req.map(Body::new);
+
+                                    // Proxy requests (CONNECT or absolute-URI forwards)
+                                    // require Proxy-Authorization when credentials are
+                                    // configured. Internal management routes (relative
+                                    // URIs such as /health, /dashboard) pass through.
+                                    let is_proxy_request = req.method() == Method::CONNECT
+                                        || req.uri().scheme().is_some();
+
+                                    if is_proxy_request {
+                                        if let Some(ref c) = creds {
+                                            if !check_proxy_auth(&req, &c.0, &c.1) {
+                                                return Ok(Response::builder()
+                                                    .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+                                                    .header(
+                                                        "Proxy-Authenticate",
+                                                        "Basic realm=\"Proxy Access\"",
+                                                    )
+                                                    .body(Body::empty())
+                                                    .unwrap());
+                                            }
+                                        }
+                                    }
+
                                     if req.method() == Method::CONNECT {
                                         tunnel::handle(req, state, Some(peer.ip().to_string())).await
                                     } else {
-                                        router.oneshot(req).await.map_err(|e| match e {})
+                                        let mut router = router.clone();
+                                        router.call(req).await.map_err(|e| match e {})
                                     }
                                 }
                             });

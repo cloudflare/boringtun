@@ -8,6 +8,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::{broadcast, RwLock};
+use tracing::warn;
 
 use crate::blocklist::SEED;
 
@@ -25,16 +26,53 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::broadcast;
 
+    fn test_config() -> crate::config::Config {
+        crate::config::Config {
+            proxy_port: 3000,
+            tproxy_port: 3001,
+            wg_port: 51820,
+            admin_port: 3002,
+            wg_interface: None,
+            max_connections: 4096,
+            tarpit_max_connections: 64,
+            admin_api_key: Some("test-key".to_string()),
+            cors_allowed_origins: vec![],
+            log_format: "human".to_string(),
+            oracle_conn: "".to_string(),
+            oracle_user: "".to_string(),
+            oracle_pass: None,
+            oracle_pass_file: "".to_string(),
+            obfuscation_profiles: "".to_string(),
+            obfuscation_enabled: true,
+            obfuscation_profile: vec![
+                "fox-news".to_string(),
+                "fox-sports".to_string(),
+                "fox-general".to_string(),
+                "fox-cdn".to_string(),
+                "fx-network".to_string(),
+            ],
+            fox_ua_override: "Mozilla/5.0 (Test UA)".to_string(),
+            tls_cert_path: None,
+            tls_key_path: None,
+            proxy_username: None,
+            proxy_password: None,
+            proxy_password_file: String::new(),
+            tunnel_endpoint: None,
+            upstream_proxy: None,
+            enable_dns_lookups: false,
+        }
+    }
+
     async fn create_test_state() -> SharedState {
         let (stats_tx, _) = broadcast::channel(16);
         let (events_tx, _) = broadcast::channel(16);
         let resolver = TokioAsyncResolver::tokio_from_system_conf().unwrap();
 
-        let mut config = crate::config::Config::default();
-        config.obfuscation_enabled = true;
+        let config = test_config();
 
         AppState::new(
-            crate::proxy::ProxyClient::new(),
+            crate::proxy::ProxyClient::builder(hyper_util::rt::TokioExecutor::new())
+                .build(hyper_util::client::legacy::connect::HttpConnector::new()),
             resolver,
             stats_tx,
             events_tx,
@@ -209,7 +247,9 @@ pub struct AppState {
     pub active_tunnels: AtomicU64,
     pub tunnels_opened: AtomicU64,
     pub blocked_count: AtomicU64,
+    pub allowed_count: AtomicU64,
     pub obfuscated_count: AtomicU64,
+    pub host_stats_dropped: AtomicU64,
     pub blocklist: RwLock<HashSet<String>>,
     pub host_stats: DashMap<String, HostStats>,
     pub tarpit_sem: std::sync::Arc<tokio::sync::Semaphore>,
@@ -262,7 +302,9 @@ impl AppState {
             active_tunnels: AtomicU64::new(0),
             tunnels_opened: AtomicU64::new(0),
             blocked_count: AtomicU64::new(0),
+            allowed_count: AtomicU64::new(0),
             obfuscated_count: AtomicU64::new(0),
+            host_stats_dropped: AtomicU64::new(0),
             blocklist: RwLock::new(seed),
             host_stats: DashMap::new(),
             tarpit_sem: crate::tunnel::tarpit_semaphore(max_tarpit),
@@ -297,6 +339,10 @@ impl AppState {
         self.blocked_count.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_allowed(&self) {
+        self.allowed_count.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Update per-host heuristic counters for a blocked connection.
     /// Returns `(prev_verdict, next_verdict)` if the verdict changed.
     pub fn record_host_block(
@@ -328,6 +374,8 @@ impl AppState {
                 .or_insert_with(|| HostStats::new(connect_header_bytes, category));
             None
         } else {
+            warn!(%host, count = self.host_stats.len(), "MAX_TRACKED_HOSTS limit reached, dropping host statistics");
+            self.host_stats_dropped.fetch_add(1, Ordering::Relaxed);
             None
         }
     }

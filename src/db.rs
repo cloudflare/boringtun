@@ -1,3 +1,5 @@
+#![cfg(feature = "oracle-db")]
+
 /// Oracle DB integration — compiled only with `--features oracle-db`.
 ///
 /// All proxy_events inserts are serialised through a single background writer
@@ -18,6 +20,10 @@ pub struct ProxyEvent {
     pub status_code: Option<u16>,
     pub blocked: bool,
     pub obfuscation_profile: Option<String>,
+    pub correlation_id: Option<uuid::Uuid>,
+    pub parent_event_id: Option<uuid::Uuid>,
+    pub event_sequence: Option<i32>,
+    pub duration_ms: Option<i64>,
     pub raw_json: String,
 }
 
@@ -141,11 +147,13 @@ pub fn spawn_writer(
 
 fn insert_batch(conn: &oracle::Connection, batch: &[ProxyEvent]) -> Result<(), oracle::Error> {
     let sql = "INSERT INTO proxy_events \
-               (event_type, host, peer_ip, bytes_up, bytes_down, status_code, blocked, obfuscation_profile, raw_json) \
-               VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9)";
+               (event_type, host, peer_ip, bytes_up, bytes_down, status_code, blocked, obfuscation_profile, correlation_id, parent_event_id, event_sequence, duration_ms, raw_json) \
+               VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13)";
     let mut stmt = conn.statement(sql).build()?;
     for ev in batch {
         let blocked_i: i32 = if ev.blocked { 1 } else { 0 };
+        let correlation_id_str = ev.correlation_id.map(|id| id.to_string());
+        let parent_event_id_str = ev.parent_event_id.map(|id| id.to_string());
         stmt.execute(&[
             &ev.event_type,
             &ev.host,
@@ -155,6 +163,10 @@ fn insert_batch(conn: &oracle::Connection, batch: &[ProxyEvent]) -> Result<(), o
             &ev.status_code,
             &blocked_i,
             &ev.obfuscation_profile,
+            &correlation_id_str,
+            &parent_event_id_str,
+            &ev.event_sequence,
+            &ev.duration_ms,
             &ev.raw_json,
         ])?;
     }

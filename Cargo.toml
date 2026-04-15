@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+uuid = { version = "1.0", features = ["v4", "serde"] }
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1.40", features = ["full"] }
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "http2", "server", "tokio"] }
+hyper-proxy = "0.9.1"
 http-body-util = "0.1"
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["set-header", "fs", "trace", "cors"] }
@@ -33,6 +35,7 @@ quinn = "0.11"
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
 bytes = "1"
+base64 = "0.22"
 
 [features]
 oracle-db = ["oracle"]

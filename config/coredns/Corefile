@@ -1,6 +1,7 @@
 . {
-    forward . https://dns.quad9.net/dns-query {
+    forward . 9.9.9.9 149.112.112.112 {
         tls_servername dns.quad9.net
+        force_tcp
     }
     errors
     health

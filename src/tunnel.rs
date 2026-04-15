@@ -13,7 +13,7 @@ use tracing::{debug, error, info};
 use crate::{blocklist, obfuscation, state::SharedState};
 
 /// Maximum time a single tarpit connection is held open.
-const MAX_TARPIT_MS: u64 = 5 * 60 * 1_000; // 5 minutes
+const MAX_TARPIT_MS: u64 = 10_000; // 10 seconds
 
 /// Process-wide semaphore — initialised once, shared via Arc in AppState.
 pub fn tarpit_semaphore(max_tarpit: usize) -> Arc<Semaphore> {
@@ -153,6 +153,10 @@ fn emit_full(
             bytes_down,
             status_code,
             blocked,
+            correlation_id: None,
+            parent_event_id: None,
+            event_sequence: None,
+            duration_ms: None,
             raw_json: raw,
         },
     );
@@ -229,35 +233,38 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
             {
                 let state2 = state.clone();
                 let name2 = name.clone();
-                tokio::spawn(async move {
-                    const TTL_SECS: u64 = 300;
-                    if state2
-                        .dns_cache
-                        .get(&name2)
-                        .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
-                        .unwrap_or(false)
-                    {
-                        return;
-                    }
-                    if let Ok(Ok(addrs)) = tokio::time::timeout(
-                        tokio::time::Duration::from_millis(500),
-                        state2.resolver.lookup_ip(name2.as_str()),
-                    )
-                    .await
-                    {
-                        if let Some(ip) = addrs.iter().next() {
-                            let ip_str = ip.to_string();
-                            state2.dns_cache.insert(
-                                name2.clone(),
-                                crate::state::ResolvedMeta {
-                                    ip: ip_str.clone(),
-                                    resolved_at: Instant::now(),
-                                },
-                            );
-                            state2.record_resolved(&name2, ip_str, None);
+                // Only perform DNS lookups if explicitly enabled
+                if state2.config.enable_dns_lookups {
+                    tokio::spawn(async move {
+                        const TTL_SECS: u64 = 300;
+                        if state2
+                            .dns_cache
+                            .get(&name2)
+                            .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
+                            .unwrap_or(false)
+                        {
+                            return;
                         }
-                    }
-                });
+                        if let Ok(Ok(addrs)) = tokio::time::timeout(
+                            tokio::time::Duration::from_millis(500),
+                            state2.resolver.lookup_ip(name2.as_str()),
+                        )
+                        .await
+                        {
+                            if let Some(ip) = addrs.iter().next() {
+                                let ip_str = ip.to_string();
+                                state2.dns_cache.insert(
+                                    name2.clone(),
+                                    crate::state::ResolvedMeta {
+                                        ip: ip_str.clone(),
+                                        resolved_at: Instant::now(),
+                                    },
+                                );
+                                state2.record_resolved(&name2, ip_str, None);
+                            }
+                        }
+                    });
+                }
             }
             info!(
                 target: "audit",
@@ -305,6 +312,10 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
                     bytes_down: 0,
                     status_code: None,
                     blocked: true,
+                    correlation_id: None,
+                    parent_event_id: None,
+                    event_sequence: None,
+                    duration_ms: None,
                     raw_json: raw,
                 },
             );
@@ -318,6 +329,40 @@ pub async fn handle_transparent(mut stream: tokio::net::TcpStream, state: Shared
                     .await;
                     state.record_tarpit_held(name, tarpit_start.elapsed().as_millis() as u64);
                 }
+                return;
+            }
+        }
+    }
+
+    // Certificate Pinning Bypass: Pass through domains with hardcoded certificate pins
+    let bypass_list = [
+        "graph.facebook.com",
+        "graph.instagram.com",
+        "googlevideo.com",
+        "s.youtube.com",
+    ];
+
+    if let Some(ref name) = hostname {
+        if bypass_list.iter().any(|&domain| name.contains(domain)) {
+            // Raw TCP pass-through - no obfuscation, no TLS termination
+            info!(
+                target: "audit",
+                event = "tunnel_bypass",
+                host = %name,
+                "Certificate pinned domain detected, bypassing interception"
+            );
+
+            match tokio::time::timeout(
+                tokio::time::Duration::from_secs(10),
+                tokio::net::TcpStream::connect(orig_dst),
+            )
+            .await
+            {
+                Ok(Ok(mut upstream)) => {
+                    set_keepalive(&upstream);
+                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut upstream).await;
+                }
+                _ => {}
             }
             return;
         }
@@ -659,6 +704,7 @@ async fn run_transparent(
     profile: crate::obfuscation::Profile,
 ) {
     set_keepalive(&client);
+
     match tokio::time::timeout(
         tokio::time::Duration::from_secs(10),
         tokio::net::TcpStream::connect(orig_dst),
@@ -831,35 +877,38 @@ pub async fn handle(
         {
             let state2 = state.clone();
             let hostname2 = hostname.to_string();
-            tokio::spawn(async move {
-                const TTL_SECS: u64 = 300;
-                if state2
-                    .dns_cache
-                    .get(&hostname2)
-                    .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
-                    .unwrap_or(false)
-                {
-                    return;
-                }
-                if let Ok(Ok(addrs)) = tokio::time::timeout(
-                    tokio::time::Duration::from_millis(500),
-                    state2.resolver.lookup_ip(hostname2.as_str()),
-                )
-                .await
-                {
-                    if let Some(ip) = addrs.iter().next() {
-                        let ip_str = ip.to_string();
-                        state2.dns_cache.insert(
-                            hostname2.clone(),
-                            crate::state::ResolvedMeta {
-                                ip: ip_str.clone(),
-                                resolved_at: std::time::Instant::now(),
-                            },
-                        );
-                        state2.record_resolved(&hostname2, ip_str, None);
+            // Only perform DNS lookups if explicitly enabled
+            if state2.config.enable_dns_lookups {
+                tokio::spawn(async move {
+                    const TTL_SECS: u64 = 300;
+                    if state2
+                        .dns_cache
+                        .get(&hostname2)
+                        .map(|e| e.resolved_at.elapsed().as_secs() < TTL_SECS)
+                        .unwrap_or(false)
+                    {
+                        return;
                     }
-                }
-            });
+                    if let Ok(Ok(addrs)) = tokio::time::timeout(
+                        tokio::time::Duration::from_millis(500),
+                        state2.resolver.lookup_ip(hostname2.as_str()),
+                    )
+                    .await
+                    {
+                        if let Some(ip) = addrs.iter().next() {
+                            let ip_str = ip.to_string();
+                            state2.dns_cache.insert(
+                                hostname2.clone(),
+                                crate::state::ResolvedMeta {
+                                    ip: ip_str.clone(),
+                                    resolved_at: std::time::Instant::now(),
+                                },
+                            );
+                            state2.record_resolved(&hostname2, ip_str, None);
+                        }
+                    }
+                });
+            }
         }
         info!(
             target: "audit",
@@ -901,6 +950,10 @@ pub async fn handle(
                 bytes_down: 0,
                 status_code: None,
                 blocked: true,
+                correlation_id: None,
+                parent_event_id: None,
+                event_sequence: None,
+                duration_ms: None,
                 raw_json: raw,
             },
         );
@@ -909,8 +962,9 @@ pub async fn handle(
             // Acquire a permit; fall back to fast drop if at capacity.
             if let Ok(permit) = state.tarpit_sem.clone().try_acquire_owned() {
                 let host_owned = hostname.to_string();
+                let state_clone = state.clone();
                 tokio::spawn(async move {
-                    run_tarpit(upgrade_fut, host_owned, state).await;
+                    run_tarpit(upgrade_fut, host_owned, state_clone).await;
                     drop(permit);
                 });
             } else {
@@ -920,14 +974,76 @@ pub async fn handle(
                     }
                 });
             }
+
+            return Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())
+                .unwrap());
         } else {
-            // Fast drop — iOS handles this as a natural close.
+            // Graceful half-close: properly complete TCP FIN handshake before dropping
             tokio::spawn(async move {
                 if let Ok(upgraded) = upgrade_fut.await {
-                    drop(TokioIo::new(upgraded));
+                    let mut stream = TokioIo::new(upgraded);
+                    // Give client 200ms to complete FIN/ACK handshake
+                    let _ = tokio::time::timeout(
+                        tokio::time::Duration::from_millis(200),
+                        tokio::io::copy(&mut stream, &mut tokio::io::sink()),
+                    )
+                    .await;
+                    // Connection will be dropped gracefully at end of scope
                 }
             });
+
+            return Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())
+                .unwrap());
         }
+    }
+
+    // EPISODIC FIX: The Meta/Google Surgical Bypass - Certificate Pinning Domains
+    let is_pinned_app = hostname.contains("facebook.com")
+        || hostname.contains("instagram.com")
+        || hostname.contains("googlevideo.com")
+        || hostname.contains("apple.com")
+        || hostname.contains("youtube.com")
+        || hostname.contains("fbcdn.net")
+        || hostname.contains("instagramstatic.com");
+
+    if is_pinned_app {
+        let start = Instant::now();
+
+        // 1. Return 200 OK immediately to establish the tunnel
+        tokio::spawn(async move {
+            let upgraded = match upgrade_fut.await {
+                Ok(u) => u,
+                Err(_) => return,
+            };
+
+            let mut client_io = TokioIo::new(upgraded);
+
+            // 2. Raw TCP connection to upstream - NO MITM, NO OBFUSCATION
+            if let Ok(mut upstream) = tokio::net::TcpStream::connect(&host).await {
+                set_keepalive(&upstream);
+
+                let (bytes_up, bytes_down) =
+                    tokio::io::copy_bidirectional(&mut client_io, &mut upstream)
+                        .await
+                        .unwrap_or((0, 0));
+
+                // Log completion with metrics
+                info!(
+                    target: "audit",
+                    event="tunnel_close",
+                    kind="bypass",
+                    host=%host,
+                    bytes_up=bytes_up,
+                    bytes_down=bytes_down,
+                    duration_ms = start.elapsed().as_millis(),
+                );
+            }
+        });
+
         return Ok(Response::builder()
             .status(StatusCode::OK)
             .body(Body::empty())
@@ -940,13 +1056,36 @@ pub async fn handle(
     // Epic 3.4 — record allow for streak reset
     state.record_host_allow(hostname);
 
+    // RFC 7231 compliant CONNECT handshake implementation
+    // Hyper sends the 200 OK response as part of the request reply;
+    // the upgraded stream is reserved for raw TCP proxying only.
     tokio::spawn(async move {
         match upgrade_fut.await {
-            Ok(upgraded) => run_tunnel(upgraded, host, state, category, peer_ip, profile).await,
-            Err(e) => error!(%e, "CONNECT upgrade failed"),
+            Ok(upgraded) => {
+                let stream = TokioIo::new(upgraded);
+                run_tunnel(stream.into_inner(), host, state, category, peer_ip, profile).await;
+            }
+            Err(e) => {
+                let error_kind = if e.to_string().contains("operation was canceled") {
+                    "client_disconnected"
+                } else {
+                    "unknown"
+                };
+
+                error!(
+                    %host,
+                    peer_ip = %peer_ip.as_deref().unwrap_or("-"),
+                    user_agent = %connect_ua.as_deref().unwrap_or("-"),
+                    %category,
+                    error_kind,
+                    %e,
+                    "CONNECT upgrade failed"
+                );
+            }
         }
     });
 
+    // Return 200 OK to indicate CONNECT tunnel has been accepted and the upgrade is active.
     Ok(Response::builder()
         .status(StatusCode::OK)
         .body(Body::empty())
@@ -1061,7 +1200,14 @@ async fn run_tunnel(
                 }
             }
         }
-        Ok(Err(e)) => error!(%host, %e, "failed to connect to tunnel target"),
+        Ok(Err(e)) => {
+            error!(
+                %host,
+                %e,
+                kind = ?e.kind(),
+                "failed to connect to tunnel target"
+            );
+        }
         Err(_) => error!(%host, "tunnel connect timed out"),
     }
 }

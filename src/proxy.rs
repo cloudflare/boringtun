@@ -45,6 +45,7 @@ fn emit_full(
     bytes_down: u64,
     status_code: Option<u16>,
     blocked: bool,
+    obfuscation_profile: Option<String>,
     extra: serde_json::Value,
 ) {
     let mut v = serde_json::json!({
@@ -56,14 +57,16 @@ fn emit_full(
         obj.extend(ext.clone());
     }
     let raw = v.to_string();
-    if let Err(e) = state.events_tx.send(raw.clone()) {
-        tracing::warn!(target: "audit", error = %e, "failed to send audit event to channel");
-    }
+
+    // Send to broadcast channel (non-blocking for broadcast senders)
+    // Err result from send() on broadcast channel always means no active receivers - this is normal behavior
+    let _ = state.events_tx.send(raw.clone());
+
     #[cfg(feature = "oracle-db")]
-    crate::db::insert_proxy_event(
-        state.db.clone(),
-        crate::db::ProxyEvent {
-            obfuscation_profile: None,
+    {
+        let db = state.db.clone();
+        let event = crate::db::ProxyEvent {
+            obfuscation_profile,
             event_type: event.to_string(),
             host: host.to_string(),
             peer_ip,
@@ -71,9 +74,25 @@ fn emit_full(
             bytes_down,
             status_code,
             blocked,
+            correlation_id: None,
+            parent_event_id: None,
+            event_sequence: None,
+            duration_ms: None,
             raw_json: raw,
-        },
-    );
+        };
+
+        // Offload blocking DB operation to blocking thread pool
+        let handle = tokio::task::spawn_blocking(move || {
+            crate::db::insert_proxy_event(db, event);
+        });
+
+        // Detach handle but log join errors
+        tokio::spawn(async move {
+            if let Err(e) = handle.await {
+                error!(%e, "proxy event database task failed");
+            }
+        });
+    }
 }
 pub async fn handler(
     State(state): State<SharedState>,
@@ -109,6 +128,7 @@ pub async fn handler(
             .get("content-length")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse().ok());
+        state.record_host_block(&hostname, req_content_length.unwrap_or(0), "http");
         // Epic 1.2a — interesting header inventory
         let interesting = [
             "content-type",
@@ -144,6 +164,7 @@ pub async fn handler(
             0,
             None,
             true,
+            None,
             serde_json::json!({
                 "method":              req.method().as_str(),
                 "uri":                 scrubbed,
@@ -158,6 +179,10 @@ pub async fn handler(
         );
         return Err(StatusCode::FORBIDDEN);
     }
+
+    // Host allowed - reset block streak and count
+    state.record_host_allow(&hostname);
+    state.record_allowed();
 
     // Classify obfuscation profile after blocklist check
     let profile = obfuscation::classify_obfuscation(&hostname, &state.config);
@@ -184,11 +209,53 @@ pub async fn handler(
 
     req.headers_mut().remove("connection");
     req.headers_mut().remove("keep-alive");
-    req.headers_mut().remove("proxy-authorization");
     req.headers_mut().remove("te");
     req.headers_mut().remove("trailers");
     req.headers_mut().remove("transfer-encoding");
-    req.headers_mut().remove("upgrade");
+    // DO NOT REMOVE upgrade header - required for WebSocket handshake
+
+    // Full global header scrubbing - remove ALL identifying headers
+    {
+        let headers = req.headers_mut();
+
+        // Explicitly remove known leak headers
+        headers.remove("forwarded");
+        headers.remove("x-real-ip");
+        headers.remove("x-client-ip");
+        headers.remove("x-forwarded-host");
+        headers.remove("x-forwarded-proto");
+        headers.remove("x-forwarded-port");
+        headers.remove("x-forwarded-for");
+        headers.remove("x-forwarded-server");
+        headers.remove("x-forwarded-proto");
+        headers.remove("x-original-url");
+        headers.remove("x-original-uri");
+        headers.remove("x-request-id");
+        headers.remove("x-request-id");
+        headers.remove("x-amzn-trace-id");
+        headers.remove("x-cloud-trace-context");
+        headers.remove("via");
+
+        // Remove ANY header starting with x- that is not explicitly whitelisted
+        let x_headers: Vec<_> = headers
+            .keys()
+            .filter(|k| {
+                let name = k.as_str();
+                name.starts_with("x-") && 
+                // Whitelist only safe headers here
+                !name.eq("x-amz-target") &&
+                !name.eq("x-client-data")
+            })
+            .map(|k| k.clone())
+            .collect();
+
+        for name in x_headers {
+            headers.remove(name);
+        }
+
+        // Replace User-Agent with generic value
+        headers.insert("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse().unwrap());
+    }
 
     // Apply request header obfuscation for Fox profiles
     if !matches!(profile, obfuscation::Profile::None) {
@@ -238,6 +305,11 @@ pub async fn handler(
                 0,
                 Some(status),
                 false,
+                if matches!(profile, obfuscation::Profile::None) {
+                    None
+                } else {
+                    Some(profile.as_str().to_string())
+                },
                 serde_json::json!({
                     "method": method.as_str(),
                     "uri":    scrubbed_uri,
@@ -261,8 +333,6 @@ pub async fn handler(
             for h in &[
                 "connection",
                 "keep-alive",
-                "proxy-authenticate",
-                "proxy-authorization",
                 "proxy-connection",
                 "te",
                 "trailer",
@@ -294,6 +364,7 @@ pub async fn handler(
                 0,
                 None,
                 false,
+                None,
                 serde_json::json!({
                     "method": method.as_str(),
                     "uri":    scrubbed_uri,
