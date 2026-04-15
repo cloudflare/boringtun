@@ -212,8 +212,10 @@ pub async fn oracle_readiness(config: &Config, timeout: Duration) -> OracleStatu
     match tokio::time::timeout(
         timeout,
         tokio::task::spawn_blocking(move || {
-            oracle::Connection::connect(&user, &pass, &conn_str)
-                .and_then(|conn| conn.query_row_as::<u32>("SELECT 1 FROM DUAL", &[]).map(|_| ()))
+            oracle::Connection::connect(&user, &pass, &conn_str).and_then(|conn| {
+                conn.query_row_as::<u32>("SELECT 1 FROM DUAL", &[])
+                    .map(|_| ())
+            })
         }),
     )
     .await
@@ -235,13 +237,8 @@ fn read_oracle_password(config: &Config) -> Result<String, String> {
     }
 
     let path = Path::new(&config.oracle_pass_file);
-    let password = std::fs::read_to_string(path).map_err(|e| {
-        format!(
-            "unable to read ORACLE_PASS_FILE {}: {}",
-            path.display(),
-            e
-        )
-    })?;
+    let password = std::fs::read_to_string(path)
+        .map_err(|e| format!("unable to read ORACLE_PASS_FILE {}: {}", path.display(), e))?;
     let password = password.trim_end_matches(&['\n', '\r'][..]).to_string();
     if password.is_empty() {
         return Err(format!("ORACLE_PASS_FILE {} is empty", path.display()));
@@ -251,7 +248,9 @@ fn read_oracle_password(config: &Config) -> Result<String, String> {
 
 fn validate_wallet(config: &Config, conn_str: &str) -> Result<(), OracleStatus> {
     let Some(tns_admin) = config.tns_admin.as_ref() else {
-        return Err(OracleStatus::Misconfigured("TNS_ADMIN is not set".to_string()));
+        return Err(OracleStatus::Misconfigured(
+            "TNS_ADMIN is not set".to_string(),
+        ));
     };
 
     let tns_admin = Path::new(tns_admin);
@@ -279,11 +278,7 @@ fn validate_wallet(config: &Config, conn_str: &str) -> Result<(), OracleStatus> 
 
     if is_tns_alias(conn_str) {
         let tnsnames_contents = std::fs::read_to_string(&tnsnames).map_err(|e| {
-            OracleStatus::Misconfigured(format!(
-                "unable to read {}: {}",
-                tnsnames.display(),
-                e
-            ))
+            OracleStatus::Misconfigured(format!("unable to read {}: {}", tnsnames.display(), e))
         })?;
         if !tns_alias_exists(&tnsnames_contents, conn_str) {
             return Err(OracleStatus::Misconfigured(format!(
@@ -311,9 +306,9 @@ fn wallet_artifacts_present(tns_admin: &Path) -> bool {
 
 fn is_tns_alias(conn_str: &str) -> bool {
     !conn_str.is_empty()
-        && conn_str.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
-        })
+        && conn_str
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
 fn tns_alias_exists(tnsnames_contents: &str, alias: &str) -> bool {
@@ -926,7 +921,11 @@ mod tests {
     fn test_oracle_connect_args_requires_alias_in_wallet() {
         let _guard = env_lock();
         let wallet_dir = temp_wallet_dir("missing-alias");
-        fs::write(wallet_dir.join("tnsnames.ora"), "OTHER_ALIAS = (DESCRIPTION=...)").unwrap();
+        fs::write(
+            wallet_dir.join("tnsnames.ora"),
+            "OTHER_ALIAS = (DESCRIPTION=...)",
+        )
+        .unwrap();
         fs::write(wallet_dir.join("cwallet.sso"), "placeholder").unwrap();
 
         let config = test_config(Some(wallet_dir.display().to_string()));
@@ -946,7 +945,11 @@ mod tests {
     fn test_oracle_connect_args_accepts_valid_wallet_alias() {
         let _guard = env_lock();
         let wallet_dir = temp_wallet_dir("valid");
-        fs::write(wallet_dir.join("tnsnames.ora"), "mainerc_tp = (DESCRIPTION=...)").unwrap();
+        fs::write(
+            wallet_dir.join("tnsnames.ora"),
+            "mainerc_tp = (DESCRIPTION=...)",
+        )
+        .unwrap();
         fs::write(wallet_dir.join("cwallet.sso"), "placeholder").unwrap();
         fs::write(wallet_dir.join("sqlnet.ora"), "WALLET_LOCATION = /tmp").unwrap();
 
