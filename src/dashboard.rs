@@ -45,12 +45,17 @@ pub struct HostSnapshot {
 
 /// GET /health — liveness probe; verifies Oracle DB connectivity when the
 /// `oracle-db` feature is enabled, otherwise returns 200 immediately.
-pub async fn health() -> impl IntoResponse {
+pub async fn health(State(state): State<SharedState>) -> impl IntoResponse {
     #[cfg(feature = "oracle-db")]
     {
-        let conn_str = std::env::var("ORACLE_CONN").unwrap_or_default();
-        let user = std::env::var("ORACLE_USER").unwrap_or_default();
-        let pass = std::env::var("ORACLE_PASS").unwrap_or_default();
+        let conn_str = state.config.oracle_conn.clone();
+        let user = state.config.oracle_user.clone();
+        let pass = state.config.oracle_pass.clone().unwrap_or_else(|| {
+            std::fs::read_to_string(&state.config.oracle_pass_file)
+                .unwrap_or_default()
+                .trim_end_matches(&['\n', '\r'][..])
+                .to_string()
+        });
         let result = tokio::time::timeout(
             tokio::time::Duration::from_secs(5),
             tokio::task::spawn_blocking(move || {
@@ -79,9 +84,14 @@ pub async fn health() -> impl IntoResponse {
 #[cfg(feature = "oracle-db")]
 pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::CancellationToken) {
     tokio::spawn(async move {
-        let conn_str = std::env::var("ORACLE_CONN").unwrap_or_default();
-        let user = std::env::var("ORACLE_USER").unwrap_or_default();
-        let pass = std::env::var("ORACLE_PASS").unwrap_or_default();
+        let conn_str = state.config.oracle_conn.clone();
+        let user = state.config.oracle_user.clone();
+        let pass = state.config.oracle_pass.clone().unwrap_or_else(|| {
+            std::fs::read_to_string(&state.config.oracle_pass_file)
+                .unwrap_or_default()
+                .trim_end_matches(&['\n', '\r'][..])
+                .to_string()
+        });
         loop {
             tokio::select! {
                 _ = token.cancelled() => { info!("oracle flusher shutting down"); return; }

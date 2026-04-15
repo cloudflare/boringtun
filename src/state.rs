@@ -26,13 +26,49 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::broadcast;
 
+    fn test_config() -> crate::config::Config {
+        crate::config::Config {
+            proxy_port: 3000,
+            tproxy_port: 3001,
+            wg_port: 51820,
+            admin_port: 3002,
+            wg_interface: None,
+            max_connections: 4096,
+            tarpit_max_connections: 64,
+            admin_api_key: Some("test-key".to_string()),
+            cors_allowed_origins: vec![],
+            log_format: "human".to_string(),
+            oracle_conn: "".to_string(),
+            oracle_user: "".to_string(),
+            oracle_pass: None,
+            oracle_pass_file: "".to_string(),
+            obfuscation_profiles: "".to_string(),
+            obfuscation_enabled: true,
+            obfuscation_profile: vec![
+                "fox-news".to_string(),
+                "fox-sports".to_string(),
+                "fox-general".to_string(),
+                "fox-cdn".to_string(),
+                "fx-network".to_string(),
+            ],
+            fox_ua_override: "Mozilla/5.0 (Test UA)".to_string(),
+            tls_cert_path: None,
+            tls_key_path: None,
+            proxy_username: None,
+            proxy_password: None,
+            proxy_password_file: String::new(),
+            tunnel_endpoint: None,
+            upstream_proxy: None,
+            enable_dns_lookups: false,
+        }
+    }
+
     async fn create_test_state() -> SharedState {
         let (stats_tx, _) = broadcast::channel(16);
         let (events_tx, _) = broadcast::channel(16);
         let resolver = TokioAsyncResolver::tokio_from_system_conf().unwrap();
 
-        let mut config = crate::config::Config::from_env_or_panic();
-        config.obfuscation_enabled = true;
+        let config = test_config();
 
         AppState::new(
             crate::proxy::ProxyClient::builder(hyper_util::rt::TokioExecutor::new())
