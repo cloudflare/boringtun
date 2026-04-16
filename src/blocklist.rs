@@ -4,7 +4,7 @@ use tracing::{error, info};
 use crate::state::SharedState;
 
 pub const BLOCKLIST_URL: &str =
-    "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/pro.plus.txt";
+    "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/ultimate.txt";
 
 /// Hardcoded seed — active immediately on startup before the remote fetch completes.
 pub const SEED: &[&str] = &[
