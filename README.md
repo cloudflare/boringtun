@@ -130,7 +130,7 @@ All configuration is via environment variables. Key settings:
 - The generated or existing server public key is written to `config/server/publickey-server`.
 - The compose stack renders the server interface config from `config/templates/server.conf` at startup.
 - WireGuard ingress/NAT rules target `WG_WAN_INTERFACE`; default `auto` resolves the host default-route interface.
-- Rendered WireGuard interface addresses are normalized before rendering, so duplicated `WG_SERVER_ADDRESS` input such as `10.13.13.1/24,10.13.13.1/24` is tolerated and reduced to a single address.
+- Rendered WireGuard interface addresses are normalized before rendering, and duplicate `Address = ...` lines in a drifted mounted template are canonicalized back to a single interface address before startup continues.
 - Sysctl hooks in WireGuard `PostUp` are best-effort: they retry and log warnings if denied, then continue startup. Set `WG_RUNTIME_SYSCTLS=0` to suppress runtime writes entirely.
 - The checked-in peer config `config/peer1/peer1.conf` uses tunnel IP `10.13.13.2/32`, DNS `10.13.13.1`, and endpoint `192.168.1.221:443`.
 - When a new server keypair is generated, redistribute the updated `config/peer1/peer1.conf` to clients before connecting.

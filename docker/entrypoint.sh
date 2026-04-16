@@ -194,18 +194,102 @@ duplicate_interface_addresses() {
                 }
                 seen[addr]++
                 if (seen[addr] == 2) {
-                    duplicates[addr] = 1
+                    if (!(addr in duplicate_seen)) {
+                        duplicate_seen[addr] = 1
+                        out = (out == "" ? addr : out "," addr)
+                    }
                 }
             }
         }
-        END {
-            first = 1
-            for (addr in duplicates) {
-                printf "%s%s", first ? "" : ",", addr
-                first = 0
+        END { print out }
+    ' "$file"
+}
+
+collect_unique_interface_addresses() {
+	local file="$1"
+	awk -F= '
+        function trim(s) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+            return s
+        }
+        BEGIN { in_if = 0; out = "" }
+        /^\[Interface\]/ { in_if = 1; next }
+        /^\[/ { in_if = 0 }
+        in_if {
+            lhs = trim($1)
+            if (lhs != "Address") {
+                next
+            }
+            rhs = substr($0, index($0, "=") + 1)
+            count = split(rhs, parts, ",")
+            for (i = 1; i <= count; i++) {
+                addr = trim(parts[i])
+                if (addr == "") {
+                    continue
+                }
+                if (!(addr in seen)) {
+                    seen[addr] = 1
+                    out = (out == "" ? addr : out "," addr)
+                }
             }
         }
+        END { print out }
     ' "$file"
+}
+
+canonicalize_rendered_wireguard_config() {
+	local addresses
+	local tmp_file
+
+	addresses="$(collect_unique_interface_addresses "$WG_CONFIG_PATH")"
+	if [ -z "$addresses" ]; then
+		return 0
+	fi
+
+	tmp_file="$(mktemp)"
+	awk -v addresses="$addresses" -F= '
+        function trim(s) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+            return s
+        }
+        BEGIN {
+            in_if = 0
+            wrote_address = 0
+        }
+        /^\[Interface\]/ {
+            in_if = 1
+            print
+            next
+        }
+        /^\[/ {
+            if (in_if && !wrote_address && addresses != "") {
+                print "Address = " addresses
+                wrote_address = 1
+            }
+            in_if = 0
+            print
+            next
+        }
+        in_if {
+            lhs = trim($1)
+            if (lhs == "Address") {
+                if (!wrote_address && addresses != "") {
+                    print "Address = " addresses
+                    wrote_address = 1
+                }
+                next
+            }
+        }
+        { print }
+        END {
+            if (in_if && !wrote_address && addresses != "") {
+                print "Address = " addresses
+            }
+        }
+    ' "$WG_CONFIG_PATH" >"$tmp_file"
+	mv "$tmp_file" "$WG_CONFIG_PATH"
+	chmod 600 "$WG_CONFIG_PATH"
+	echo "[#] Canonicalized rendered WireGuard interface addresses: $addresses"
 }
 
 validate_rendered_wireguard_config() {
@@ -493,6 +577,7 @@ echo "[#] Using WAN interface: $WG_WAN_INTERFACE"
 normalize_server_address
 log_startup_fingerprint
 render_wireguard_config
+canonicalize_rendered_wireguard_config
 validate_rendered_wireguard_config
 echo "starting WireGuard interface $WG_INTERFACE_NAME: $WG_CONFIG_PATH"
 cmd wg-quick up "$WG_CONFIG_PATH"

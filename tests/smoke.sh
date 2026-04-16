@@ -11,7 +11,20 @@ cleanup() {
     echo "🧹 Cleaning up"
     docker compose down -v --remove-orphans >/dev/null 2>&1 || true
 }
-trap cleanup EXIT INT TERM
+
+restore_template() {
+    if [ -n "${TEMPLATE_BACKUP_PATH:-}" ] && [ -f "${TEMPLATE_BACKUP_PATH:-}" ]; then
+        mv "$TEMPLATE_BACKUP_PATH" config/templates/server.conf
+        TEMPLATE_BACKUP_PATH=""
+    fi
+}
+
+cleanup_all() {
+    restore_template
+    cleanup
+}
+
+trap cleanup_all EXIT INT TERM
 
 wait_for_health() {
     echo "⏳ Waiting for admin liveness and WireGuard health (timeout 60s)"
@@ -117,6 +130,23 @@ assert_startup_fingerprint() {
     echo "✅ Startup fingerprint is present in container logs"
 }
 
+inject_duplicate_template_address() {
+    TEMPLATE_BACKUP_PATH="$(mktemp)"
+    cp config/templates/server.conf "$TEMPLATE_BACKUP_PATH"
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("config/templates/server.conf")
+lines = path.read_text().splitlines()
+for idx, line in enumerate(lines):
+    if line.strip() == "Address = __WG_SERVER_ADDRESS__":
+        lines.insert(idx + 1, line)
+        break
+else:
+    raise SystemExit("missing Address placeholder in config/templates/server.conf")
+path.write_text("\n".join(lines) + "\n")
+PY
+}
+
 run_default_scenario() {
     echo "🚀 Bringing up default stack"
     cleanup
@@ -140,8 +170,22 @@ run_duplicate_address_scenario() {
     assert_unique_server_address
 }
 
+run_duplicate_template_scenario() {
+    echo "🚀 Re-running with drifted template containing duplicate Address lines"
+    cleanup
+    inject_duplicate_template_address
+    VCS_REF="$CURRENT_VCS_REF" BUILD_DATE="$CURRENT_BUILD_DATE" docker compose up -d --build
+    wait_for_health
+    assert_ready_status "$(expected_ready_status)"
+    assert_startup_fingerprint "10.13.13.1/24" "10.13.13.1/24"
+    assert_wg_interface
+    assert_unique_server_address
+    restore_template
+}
+
 run_default_scenario
 run_duplicate_address_scenario
+run_duplicate_template_scenario
 
 echo ""
 echo "ℹ️ Skipping explicit proxy request test because default compose uses transparent-only mode."

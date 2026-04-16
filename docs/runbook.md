@@ -70,7 +70,38 @@ docker compose restart ssl-proxy
 
 ---
 
-### 4. Oracle ADB Connection & Views
+### 4. Verify Container Provenance for WireGuard Startup
+
+1. **Force a fresh build with explicit metadata:**
+   ```bash
+   export VCS_REF="$(git rev-parse --short HEAD)"
+   export BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+   docker compose down --remove-orphans
+   docker compose up -d --build
+   ```
+
+2. **Compare the built image and compose input:**
+   ```bash
+   docker images boringtun-ssl-proxy
+   docker compose config | sed -n '20,55p'
+   ```
+
+3. **Verify the runtime fingerprint and rendered config:**
+   ```bash
+   docker compose logs ssl-proxy | grep '\[startup-fingerprint\]'
+   docker compose exec -T ssl-proxy sed -n '1,12p' /run/wireguard/wg0.conf
+   ```
+
+   If a mounted template drifted and duplicated `Address = ...` lines, startup now canonicalizes them back to one line before bringing `wg0` up.
+
+4. **If logs contradict the repo:**
+   - Remove the old container with `docker compose down --remove-orphans`
+   - Rebuild with `docker compose up -d --build`
+   - Re-check the `[startup-fingerprint]` lines before debugging WireGuard behavior
+
+---
+
+### 5. Oracle ADB Connection & Views
 
 1. **Place Oracle wallet files in `./wallet/` directory**
    - Restart the container after adding the wallet so the startup preflight can enable Oracle persistence.
@@ -100,7 +131,7 @@ All views are optimized for ADB columnar storage.
 
 ---
 
-### 5. Prometheus / Vector Pipeline Setup
+### 6. Prometheus / Vector Pipeline Setup
 
 1. **Start pipeline:**
    ```bash
