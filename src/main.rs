@@ -1,8 +1,11 @@
+#![warn(clippy::unwrap_used)]
+
 mod blocklist;
 mod config;
 mod dashboard;
 #[cfg(feature = "oracle-db")]
 mod db;
+mod events;
 mod obfuscation;
 mod proxy;
 mod quic;
@@ -39,14 +42,14 @@ use tracing::{debug, error, info, warn};
 
 pub(crate) fn constant_time_eq(a: &str, b: &str) -> bool {
     use subtle::ConstantTimeEq;
-    const MAX_LEN: usize = 256;
-    let mut a_buf = [0u8; MAX_LEN];
-    let mut b_buf = [0u8; MAX_LEN];
-    let a_bytes = a.as_bytes();
-    let b_bytes = b.as_bytes();
-    a_buf[..a_bytes.len().min(MAX_LEN)].copy_from_slice(&a_bytes[..a_bytes.len().min(MAX_LEN)]);
-    b_buf[..b_bytes.len().min(MAX_LEN)].copy_from_slice(&b_bytes[..b_bytes.len().min(MAX_LEN)]);
-    a_buf.ct_eq(&b_buf).into()
+    if a.len() != b.len() {
+        return false;
+    }
+    a.as_bytes().ct_eq(b.as_bytes()).into()
+}
+
+fn admin_api_key_matches(provided: &str, key: &str) -> bool {
+    !key.is_empty() && constant_time_eq(provided, key)
 }
 
 /// Validate the Proxy-Authorization header (RFC 7235 / RFC 7617 Basic scheme).
@@ -92,15 +95,30 @@ async fn main() {
         .expect("Failed to install rustls crypto provider");
 
     let filter = tracing_subscriber::EnvFilter::from_default_env()
-        .add_directive("ssl_proxy=info".parse().unwrap())
-        .add_directive("tower_http=info".parse().unwrap());
+        .add_directive(
+            "ssl_proxy=info"
+                .parse()
+                .expect("static directive must parse"),
+        )
+        .add_directive(
+            "tower_http=info"
+                .parse()
+                .expect("static directive must parse"),
+        );
 
     let mut opts = ResolverOpts::default();
     opts.cache_size = 1024;
     // Prefer IPv4 first to avoid "Network unreachable" errors when IPv6 is not configured
     opts.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4thenIpv6;
 
-    let cloudflare_ips = ["1.1.1.1".parse().unwrap(), "1.0.0.1".parse().unwrap()];
+    let cloudflare_ips = [
+        "1.1.1.1"
+            .parse()
+            .expect("static Cloudflare resolver address must parse"),
+        "1.0.0.1"
+            .parse()
+            .expect("static Cloudflare resolver address must parse"),
+    ];
     let resolver_config = ResolverConfig::from_parts(
         None,
         Vec::new(),
@@ -124,7 +142,7 @@ async fn main() {
 
     // LOG_FORMAT=json  →  newline-delimited JSON (pipe to Vector/Filebeat)
     // anything else    →  human-readable (default for dev)
-    if config.log_format == "json" {
+    if config.runtime.log_format == "json" {
         tracing_subscriber::fmt()
             .json()
             .flatten_event(true)
@@ -139,8 +157,6 @@ async fn main() {
         resolver,
         stats_tx,
         events_tx,
-        config.wg_interface.clone(),
-        config.tarpit_max_connections,
         config.clone(),
         #[cfg(feature = "oracle-db")]
         shutdown.clone(),
@@ -148,13 +164,15 @@ async fn main() {
 
     // Semaphore to limit concurrent connections
     let connection_semaphore =
-        std::sync::Arc::new(tokio::sync::Semaphore::new(config.max_connections));
+        std::sync::Arc::new(tokio::sync::Semaphore::new(config.proxy.max_connections));
 
     blocklist::spawn_refresh_task(state.clone(), shutdown.clone());
     dashboard::spawn_stats_poller(state.clone(), shutdown.clone());
+    dashboard::spawn_host_eviction_task(state.clone(), shutdown.clone());
 
-    let cors = if !config.cors_allowed_origins.is_empty() {
+    let cors = if !config.admin.cors_allowed_origins.is_empty() {
         let parsed: Vec<axum::http::HeaderValue> = config
+            .admin
             .cors_allowed_origins
             .iter()
             .filter_map(|origin| match origin.parse() {
@@ -172,16 +190,14 @@ async fn main() {
             .allow_origin(parsed)
             .allow_methods(tower_http::cors::Any)
             .allow_headers(tower_http::cors::Any)
+    } else if cfg!(debug_assertions) {
+        info!("CORS_ALLOWED_ORIGINS not set, using permissive CORS (dev mode)");
+        CorsLayer::permissive()
     } else {
-        if cfg!(debug_assertions) {
-            info!("CORS_ALLOWED_ORIGINS not set, using permissive CORS (dev mode)");
-            CorsLayer::permissive()
-        } else {
-            warn!("CORS_ALLOWED_ORIGINS not set in release build, defaulting to restrictive CORS");
-            CorsLayer::new()
-        }
+        warn!("CORS_ALLOWED_ORIGINS not set in release build, defaulting to restrictive CORS");
+        CorsLayer::new()
     };
-    let admin_api_key = config.admin_api_key.clone();
+    let admin_api_key = config.admin.api_key.clone();
     let admin_routes = Router::new()
         .route("/hosts", get(dashboard::hosts_snapshot))
         .route("/hosts/:hostname", get(dashboard::host_detail))
@@ -191,17 +207,13 @@ async fn main() {
                 let key = admin_api_key.clone();
                 async move {
                     // If no admin API key configured, deny all access to admin endpoints
-                    let Some(valid_key) = key.as_ref() else {
-                        return StatusCode::NOT_FOUND.into_response();
-                    };
-
                     let provided = req
                         .headers()
                         .get("x-api-key")
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("");
 
-                    if !constant_time_eq(provided, valid_key) {
+                    if !admin_api_key_matches(provided, &key) {
                         return StatusCode::UNAUTHORIZED.into_response();
                     }
 
@@ -223,7 +235,7 @@ async fn main() {
         .layer(cors.clone())
         .with_state(state.clone());
 
-    let admin_addr = SocketAddr::from(([0, 0, 0, 0], config.admin_port));
+    let admin_addr = SocketAddr::from(([0, 0, 0, 0], config.admin.port));
     let admin_listener = tokio::net::TcpListener::bind(admin_addr)
         .await
         .unwrap_or_else(|e| {
@@ -244,16 +256,20 @@ async fn main() {
     dashboard::spawn_oracle_flusher(state.clone(), shutdown.clone());
 
     info!(
-        proxy_port = config.proxy_port,
-        tproxy_port = config.tproxy_port,
-        wg_port = config.wg_port,
-        admin_port = config.admin_port,
-        explicit_proxy_enabled = config.explicit_proxy_enabled,
+        proxy_port = config.proxy.port,
+        tproxy_port = config.proxy.transparent_port,
+        wg_port = config.wireguard.port,
+        admin_port = config.admin.port,
+        explicit_proxy_enabled = config.proxy.explicit_enabled,
+        wg_interface = ?config.wireguard.interface,
+        upstream_proxy = ?config.proxy.upstream_proxy,
+        tunnel_endpoint = ?config.proxy.tunnel_endpoint,
+        obfuscation_profiles = ?config.obfuscation.enabled_profiles,
         "port assignment"
     );
 
     // Transparent proxy listener — receives connections redirected by iptables REDIRECT
-    let tproxy_addr = SocketAddr::from(([0, 0, 0, 0], config.tproxy_port));
+    let tproxy_addr = SocketAddr::from(([0, 0, 0, 0], config.proxy.transparent_port));
     let tproxy_listener = tokio::net::TcpListener::bind(tproxy_addr)
         .await
         .unwrap_or_else(|e| {
@@ -296,7 +312,7 @@ async fn main() {
 
     let mut tasks: JoinSet<()> = JoinSet::new();
 
-    if config.explicit_proxy_enabled {
+    if config.proxy.explicit_enabled {
         warn!(
             "EXPLICIT_PROXY_ENABLED=true — legacy explicit proxy listeners are active; plaintext HTTP CONNECT leaks target hostnames on the client-to-proxy leg"
         );
@@ -307,23 +323,16 @@ async fn main() {
             .layer(cors)
             .with_state(state.clone());
 
-        let proxy_creds: Option<std::sync::Arc<(String, String)>> = match (
-            &config.proxy_username,
-            &config.proxy_password,
-        ) {
-            (Some(u), Some(p)) => {
-                info!(username = %u, "explicit proxy authentication enabled");
-                Some(std::sync::Arc::new((u.clone(), p.clone())))
-            }
-            _ => {
-                warn!(
-                        "PROXY_USERNAME / PROXY_PASSWORD not set — explicit proxy has NO authentication"
-                    );
-                None
-            }
-        };
+        let proxy_creds: Option<std::sync::Arc<(String, String)>> =
+            config.proxy.credentials.as_ref().map(|creds| {
+                info!(username = %creds.username, "explicit proxy authentication enabled");
+                std::sync::Arc::new((creds.username.clone(), creds.password.clone()))
+            });
+        if proxy_creds.is_none() {
+            warn!("PROXY_USERNAME / PROXY_PASSWORD not set — explicit proxy has NO authentication");
+        }
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], config.proxy_port));
+        let addr = SocketAddr::from(([0, 0, 0, 0], config.proxy.port));
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .unwrap_or_else(|e| {
@@ -333,7 +342,7 @@ async fn main() {
         info!(%addr, "explicit proxy listener active");
 
         let tls_acceptor: Option<TlsAcceptor> = if let (Some(cert_path), Some(key_path)) =
-            (&config.tls_cert_path, &config.tls_key_path)
+            (&config.tls.cert_path, &config.tls.key_path)
         {
             let cert_pem = std::fs::read(cert_path).expect("failed to read TLS cert");
             let key_pem = std::fs::read(key_path).expect("failed to read TLS key");
@@ -466,7 +475,6 @@ async fn main() {
                                 }
                                 Err(e) => {
                                     debug!(%peer, %e, "TLS handshake failed");
-                                    return;
                                 }
                             }
                         } else {
@@ -478,10 +486,10 @@ async fn main() {
         }
     } else {
         info!(
-            proxy_port = config.proxy_port,
+            proxy_port = config.proxy.port,
             "explicit proxy listener disabled; WireGuard is the supported client ingress"
         );
-        if config.tls_cert_path.is_some() || config.tls_key_path.is_some() {
+        if config.tls.cert_path.is_some() || config.tls.key_path.is_some() {
             warn!(
                 "TLS_CERT_PATH / TLS_KEY_PATH set while EXPLICIT_PROXY_ENABLED=false — skipping HTTPS and QUIC explicit-proxy listeners"
             );
@@ -508,4 +516,29 @@ async fn main() {
     .await;
     let _ = tokio::time::timeout(tokio::time::Duration::from_secs(2), tproxy_handle).await;
     info!("shutdown complete");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{admin_api_key_matches, constant_time_eq};
+
+    #[test]
+    fn constant_time_eq_rejects_same_prefix_with_different_lengths() {
+        assert!(!constant_time_eq("prefix", "prefix-suffix"));
+    }
+
+    #[test]
+    fn constant_time_eq_handles_long_inputs() {
+        let a = "a".repeat(300);
+        let b = "a".repeat(300);
+
+        assert!(constant_time_eq(&a, &b));
+    }
+
+    #[test]
+    fn admin_api_key_matches_rejects_empty_keys() {
+        assert!(!admin_api_key_matches("", ""));
+        assert!(!admin_api_key_matches("test-key", ""));
+        assert!(admin_api_key_matches("test-key", "test-key"));
+    }
 }

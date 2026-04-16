@@ -1,8 +1,15 @@
+//! QUIC/HTTP3 explicit proxy listener.
+//!
+//! This module accepts HTTP/3 CONNECT requests over QUIC and proxies the
+//! resulting tunnel to the upstream destination. It does not handle admin
+//! traffic or non-CONNECT HTTP methods beyond returning `405`.
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
+use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
@@ -10,18 +17,22 @@ use tracing::{debug, error, info};
 use crate::blocklist;
 use crate::check_proxy_auth;
 use crate::config::Config;
+use crate::events::{self, EmitPayload};
 use crate::obfuscation;
 use crate::state::SharedState;
+use crate::tunnel::parse_host_port;
 
 /// Build a `rustls::ServerConfig` from the TLS cert/key paths in `Config`.
 /// Panics if the files are missing or malformed — caller must ensure paths are set.
 fn build_rustls_config(config: &Config) -> Arc<rustls::ServerConfig> {
     let cert_path = config
-        .tls_cert_path
+        .tls
+        .cert_path
         .as_ref()
         .expect("tls_cert_path must be set for QUIC");
     let key_path = config
-        .tls_key_path
+        .tls
+        .key_path
         .as_ref()
         .expect("tls_key_path must be set for QUIC");
 
@@ -47,9 +58,8 @@ fn build_rustls_config(config: &Config) -> Arc<rustls::ServerConfig> {
 
 /// Run the QUIC/HTTP3 listener on `0.0.0.0:443` (UDP).
 ///
-/// For each incoming QUIC connection, spawns a task that processes HTTP/3
-/// requests. CONNECT requests are handled with the same blocklist/policy
-/// logic as the TCP proxy, then bidirectional-copied to the upstream.
+/// For each incoming QUIC connection, spawn a task that processes HTTP/3
+/// requests until shutdown is cancelled.
 pub async fn run_quic_listener(
     state: SharedState,
     config: Config,
@@ -68,7 +78,9 @@ pub async fn run_quic_listener(
     };
     let server_config = quinn::ServerConfig::with_crypto(Arc::new(quinn_config));
 
-    let addr: SocketAddr = "0.0.0.0:443".parse().unwrap();
+    let addr: SocketAddr = "0.0.0.0:443"
+        .parse()
+        .expect("static QUIC listen address must parse");
     let endpoint = match quinn::Endpoint::server(server_config, addr) {
         Ok(ep) => ep,
         Err(e) => {
@@ -180,10 +192,10 @@ async fn handle_h3_request(
     if let Some(ref creds) = proxy_creds {
         if !check_proxy_auth(&req, &creds.0, &creds.1) {
             let resp = axum::http::Response::builder()
-                .status(axum::http::StatusCode::from_u16(407).unwrap())
+                .status(axum::http::StatusCode::PROXY_AUTHENTICATION_REQUIRED)
                 .header("Proxy-Authenticate", "Basic realm=\"proxy\"")
                 .body(())
-                .unwrap();
+                .expect("proxy auth challenge response must build");
             stream.send_response(resp).await.ok();
             stream.finish().await.ok();
             return;
@@ -195,7 +207,7 @@ async fn handle_h3_request(
         let resp = axum::http::Response::builder()
             .status(axum::http::StatusCode::METHOD_NOT_ALLOWED)
             .body(())
-            .unwrap();
+            .expect("405 response must build");
         if let Err(e) = stream.send_response(resp).await {
             debug!(%peer, %e, "failed to send H3 405 response");
         }
@@ -211,7 +223,7 @@ async fn handle_h3_request(
             let resp = axum::http::Response::builder()
                 .status(axum::http::StatusCode::BAD_REQUEST)
                 .body(())
-                .unwrap();
+                .expect("400 response must build");
             stream.send_response(resp).await.ok();
             stream.finish().await.ok();
             return;
@@ -219,31 +231,15 @@ async fn handle_h3_request(
     };
 
     // Parse host with proper IPv6 support
-    let (hostname, port): (String, u16) = if host.contains(']') {
-        // Bracketed IPv6 with optional port: [::1]:8080
-        if let Some(bracket_end) = host.find(']') {
-            let hostname = host[1..bracket_end].to_string();
-            let port = if bracket_end + 1 < host.len() && host.as_bytes()[bracket_end + 1] == b':' {
-                host[bracket_end + 2..].parse().unwrap_or(443)
-            } else {
-                443
-            };
-            (hostname, port)
-        } else {
-            (host.to_string(), 443)
-        }
-    } else if host.chars().filter(|&c| c == ':').count() > 1 {
-        // Bare IPv6 address without brackets
-        (host.to_string(), 443)
-    } else {
-        // IPv4 or hostname with optional port
-        host.rsplit_once(':')
-            .and_then(|(h, p)| p.parse::<u16>().ok().map(|port| (h.to_string(), port)))
-            .unwrap_or_else(|| (host.to_string(), 443))
-    };
+    let (hostname, port) = parse_host_port(&host);
 
     // Blocklist check — same logic as tunnel::handle (lines 801-935)
     if blocklist::is_blocked(&hostname, &state).await {
+        #[derive(Serialize)]
+        struct QuicBlockExtra {
+            kind: &'static str,
+        }
+
         state.record_blocked();
         let approx_bytes = (50 + hostname.len()) as u64;
         state.record_host_block(&hostname, approx_bytes, "quic");
@@ -254,26 +250,31 @@ async fn handle_h3_request(
             host = %host,
             "blocked snitch (QUIC/H3)"
         );
-        let event = serde_json::json!({
-            "type":     "block",
-            "host":     hostname,
-            "kind":     "quic-h3",
-            "time":     chrono::Utc::now().to_rfc3339(),
-        });
-        let _ = state.events_tx.send(event.to_string());
+        events::emit_serializable(
+            &state,
+            "block",
+            &hostname,
+            Some(peer.ip().to_string()),
+            0,
+            0,
+            None,
+            true,
+            None,
+            QuicBlockExtra { kind: "quic-h3" },
+        );
 
         // Return 200 OK then immediately close (fast drop)
         let resp = axum::http::Response::builder()
             .status(axum::http::StatusCode::OK)
             .body(())
-            .unwrap();
+            .expect("blocked QUIC response must build");
         stream.send_response(resp).await.ok();
         stream.finish().await.ok();
         return;
     }
 
     // Classify obfuscation profile after blocklist check
-    let profile = obfuscation::classify_obfuscation(&hostname, &config);
+    let profile = obfuscation::classify_obfuscation(&hostname, &config.obfuscation);
 
     // Record allow for streak reset
     state.record_host_allow(&hostname);
@@ -282,7 +283,7 @@ async fn handle_h3_request(
     let resp = axum::http::Response::builder()
         .status(axum::http::StatusCode::OK)
         .body(())
-        .unwrap();
+        .expect("QUIC CONNECT response must build");
     if let Err(e) = stream.send_response(resp).await {
         debug!(%peer, %e, "failed to send H3 200 response");
         return;
@@ -307,13 +308,13 @@ async fn handle_h3_request(
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
                 error!(%host, %e, "QUIC: failed to connect to tunnel target");
-                let _ = stream.stop_sending(h3::error::Code::H3_INTERNAL_ERROR);
+                stream.stop_sending(h3::error::Code::H3_INTERNAL_ERROR);
                 stream.finish().await.ok();
                 return;
             }
             Err(_) => {
                 error!(%host, "QUIC: tunnel connect timed out");
-                let _ = stream.stop_sending(h3::error::Code::H3_INTERNAL_ERROR);
+                stream.stop_sending(h3::error::Code::H3_INTERNAL_ERROR);
                 stream.finish().await.ok();
                 return;
             }
@@ -341,6 +342,27 @@ async fn handle_h3_request(
         );
     }
     state.record_tunnel_open();
+    events::emit(
+        &state,
+        "tunnel_open",
+        &host,
+        EmitPayload {
+            peer_ip: Some(peer.ip().to_string()),
+            bytes_up: 0,
+            bytes_down: 0,
+            status_code: None,
+            blocked: false,
+            obfuscation_profile: if matches!(profile, crate::obfuscation::Profile::None) {
+                None
+            } else {
+                Some(profile.as_str().to_string())
+            },
+            extra: serde_json::json!({
+                "kind": "quic-h3",
+                "obfuscation_profile": profile.as_str(),
+            }),
+        },
+    );
 
     /// Maximum bytes to capture per direction for payload preview
     const PAYLOAD_PREVIEW_LIMIT: usize = 4096;
@@ -441,38 +463,29 @@ async fn handle_h3_request(
     );
 
     // Emit event with payload preview to oracle
-    let event = serde_json::json!({
-        "type":        "tunnel_close",
-        "host":        host,
-        "time":        chrono::Utc::now().to_rfc3339(),
-        "kind":        "quic-h3",
-        "bytes_up":    up,
-        "bytes_down":  down,
-        "duration_ms": start.elapsed().as_millis(),
-        "obfuscation_profile": profile.as_str(),
-        "payload_preview": payload_preview,
-    });
-
-    let raw = event.to_string();
-    let _ = state.events_tx.send(raw.clone());
-
-    #[cfg(feature = "oracle-db")]
-    crate::db::insert_proxy_event(
-        state.db.clone(),
-        crate::db::ProxyEvent {
-            obfuscation_profile: Some(profile.as_str().to_string()),
-            event_type: "tunnel_close".to_string(),
-            host: host.to_string(),
+    events::emit(
+        &state,
+        "tunnel_close",
+        &host,
+        EmitPayload {
             peer_ip: Some(peer.ip().to_string()),
             bytes_up: up,
             bytes_down: down,
             status_code: None,
             blocked: false,
-            correlation_id: None,
-            parent_event_id: None,
-            event_sequence: None,
-            duration_ms: Some(start.elapsed().as_millis() as i64),
-            raw_json: raw,
+            obfuscation_profile: if matches!(profile, crate::obfuscation::Profile::None) {
+                None
+            } else {
+                Some(profile.as_str().to_string())
+            },
+            extra: serde_json::json!({
+                "kind":        "quic-h3",
+                "bytes_up":    up,
+                "bytes_down":  down,
+                "duration_ms": start.elapsed().as_millis(),
+                "obfuscation_profile": profile.as_str(),
+                "payload_preview": payload_preview,
+            }),
         },
     );
 }

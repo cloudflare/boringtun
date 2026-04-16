@@ -13,6 +13,7 @@ jobs:
       - clippy
       - rustfmt
       - tests
+      - docs
     steps:
       - run: exit 0
 
@@ -40,3 +41,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc --no-deps --document-private-items

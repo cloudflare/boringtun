@@ -1,3 +1,8 @@
+//! Admin API and WebSocket dashboard handlers.
+//!
+//! This module serves health/readiness endpoints, host statistics snapshots, and
+//! broadcast tasks for live stats. It does not proxy client traffic itself.
+
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -68,7 +73,7 @@ pub async fn ready(State(_state): State<SharedState>) -> impl IntoResponse {
         } else {
             StatusCode::SERVICE_UNAVAILABLE
         };
-        return (code, status.readiness_body()).into_response();
+        (code, status.readiness_body()).into_response()
     }
     #[cfg(not(feature = "oracle-db"))]
     (StatusCode::OK, "ok").into_response()
@@ -79,8 +84,8 @@ pub async fn ready(State(_state): State<SharedState>) -> impl IntoResponse {
 #[cfg(feature = "oracle-db")]
 pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::CancellationToken) {
     tokio::spawn(async move {
-        let conn_str = state.config.oracle_conn.clone();
-        let user = state.config.oracle_user.clone();
+        let conn_str = state.config.oracle.conn.clone();
+        let user = state.config.oracle.user.clone();
         let pass = match crate::db::oracle_connect_args(&state.config) {
             Ok(args) => args.pass,
             Err(_) => return,
@@ -345,13 +350,12 @@ async fn stream(mut socket: WebSocket, mut rx: broadcast::Receiver<String>) {
     }
 }
 
-/// Spawns a task that broadcasts live stats to /ws every second.
+/// Spawns a task that broadcasts live stats to `/ws` every second.
 pub fn spawn_stats_poller(state: SharedState, token: tokio_util::sync::CancellationToken) {
     tokio::spawn(async move {
         info!("stats poller started");
         let mut prev_up: u64 = 0;
         let mut prev_down: u64 = 0;
-        let mut ticks: u64 = 0;
         loop {
             let bytes_up = state.bytes_up.load(Ordering::Relaxed);
             let bytes_down = state.bytes_down.load(Ordering::Relaxed);
@@ -359,12 +363,6 @@ pub fn spawn_stats_poller(state: SharedState, token: tokio_util::sync::Cancellat
             let down_kb_s = bytes_down.saturating_sub(prev_down) / 1024;
             prev_up = bytes_up;
             prev_down = bytes_down;
-
-            // Evict hosts silent for >10 minutes, checked once per minute.
-            ticks += 1;
-            if ticks % 60 == 0 {
-                state.evict_stale_hosts(600);
-            }
 
             let stats = serde_json::json!({
                 "active_tunnels": state.active_tunnels.load(Ordering::Relaxed),
@@ -384,6 +382,24 @@ pub fn spawn_stats_poller(state: SharedState, token: tokio_util::sync::Cancellat
             tokio::select! {
                 _ = token.cancelled() => { info!("stats poller shutting down"); return; }
                 _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {}
+            }
+        }
+    });
+}
+
+/// Spawns a low-priority task that evicts stale host stats every five minutes.
+pub fn spawn_host_eviction_task(state: SharedState, token: tokio_util::sync::CancellationToken) {
+    tokio::spawn(async move {
+        info!("host eviction task started");
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => {
+                    info!("host eviction task shutting down");
+                    return;
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(300)) => {
+                    state.evict_stale_hosts(600);
+                }
             }
         }
     });

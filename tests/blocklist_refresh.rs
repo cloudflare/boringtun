@@ -1,104 +1,55 @@
 // Copyright (c) 2026 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Integration test for blocklist refresh mechanism
-//! Verifies refresh task updates in-memory set and seed fallback works
+//! Integration test for blocklist snapshot replacement behavior.
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    use hickory_resolver::TokioAsyncResolver;
     use ssl_proxy::blocklist;
     use ssl_proxy::config::Config;
-    use std::time::Duration;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use ssl_proxy::state::AppState;
+    use tokio::sync::broadcast;
+
+    async fn create_state() -> ssl_proxy::state::SharedState {
+        let (stats_tx, _) = broadcast::channel(16);
+        let (events_tx, _) = broadcast::channel(16);
+        let resolver = TokioAsyncResolver::tokio_from_system_conf()
+            .expect("system resolver should initialize");
+
+        AppState::new(
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build(hyper_util::client::legacy::connect::HttpConnector::new()),
+            resolver,
+            stats_tx,
+            events_tx,
+            Config::default(),
+            #[cfg(feature = "oracle-db")]
+            tokio_util::sync::CancellationToken::new(),
+        )
+    }
 
     #[tokio::test]
     #[ignore]
-    async fn test_blocklist_refresh_and_seed_fallback() {
-        // Start mock CDN server
-        let mock_server = MockServer::start().await;
+    async fn test_blocklist_snapshot_replacement() {
+        let state = create_state().await;
 
-        // Mock successful blocklist response
-        Mock::given(method("GET"))
-            .and(path("/blocklist.txt"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string("example.com\nblocked.net\ntest.org"),
-            )
-            .mount(&mock_server)
-            .await;
+        state
+            .blocklist
+            .store(Arc::new(HashSet::from(["example.com".to_string()])));
 
-        // Create config pointing to mock server
-        let mut config = Config::default();
-        config.blocklist_url = format!("{}/blocklist.txt", mock_server.uri());
-        config.blocklist_refresh_interval = Duration::from_millis(100);
+        assert!(blocklist::is_blocked("example.com", &state).await);
+        assert!(blocklist::is_blocked("sub.example.com", &state).await);
+        assert!(!blocklist::is_blocked("allowed.com", &state).await);
 
-        // Initialize blocklist
-        let blocklist = blocklist::Blocklist::new(&config).await;
+        state
+            .blocklist
+            .store(Arc::new(HashSet::from(["blocked.net".to_string()])));
 
-        // Start refresh task
-        let refresh_handle = blocklist.start_refresh_task();
-
-        // Wait for first refresh with bounded polling
-        let mut attempts = 0;
-        loop {
-            if blocklist.contains("example.com") {
-                break;
-            }
-            attempts += 1;
-            if attempts > 20 {
-                panic!("Timeout waiting for blocklist to refresh");
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-
-        // Verify blocklist was populated
-        assert!(
-            blocklist.contains("example.com"),
-            "example.com should be blocked"
-        );
-        assert!(
-            blocklist.contains("blocked.net"),
-            "blocked.net should be blocked"
-        );
-        assert!(blocklist.contains("test.org"), "test.org should be blocked");
-        assert!(
-            !blocklist.contains("allowed.com"),
-            "allowed.com should not be blocked"
-        );
-
-        // Stop mock server to simulate CDN failure
-        drop(mock_server);
-
-        // Wait for refresh failure with bounded polling
-        let mut attempts = 0;
-        loop {
-            if blocklist.contains("seed-domain-1.com") {
-                break;
-            }
-            attempts += 1;
-            if attempts > 20 {
-                panic!("Timeout waiting for blocklist fallback to activate");
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-
-        // Verify seed fallback activates - seed list should be present
-        assert!(
-            blocklist.contains("seed-domain-1.com"),
-            "Seed domain should be present after fetch failure"
-        );
-        assert!(
-            blocklist.contains("seed-domain-2.net"),
-            "Seed domain should be present after fetch failure"
-        );
-
-        // Verify existing domains still work during fallback
-        assert!(
-            blocklist.contains("example.com"),
-            "Existing domains should remain after fetch failure"
-        );
-
-        // Cleanup
-        refresh_handle.abort();
+        assert!(!blocklist::is_blocked("example.com", &state).await);
+        assert!(blocklist::is_blocked("blocked.net", &state).await);
     }
 }

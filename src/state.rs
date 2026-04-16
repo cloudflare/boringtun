@@ -1,3 +1,10 @@
+//! Shared application state used by proxy, tunnel, and dashboard handlers.
+//!
+//! `AppState` owns all in-process mutable state: counters, blocklist snapshot,
+//! host heuristic statistics, tarpit limits, and DNS cache metadata. It does
+//! not persist these values to disk, so a restart resets the in-memory state.
+
+use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use std::{
     collections::HashSet,
@@ -7,7 +14,7 @@ use std::{
     },
     time::Instant,
 };
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::broadcast;
 use tracing::warn;
 
 use crate::blocklist::SEED;
@@ -15,7 +22,6 @@ use crate::blocklist::SEED;
 /// Metadata cached from a DNS resolution (Epic 2.1).
 #[derive(Clone)]
 pub struct ResolvedMeta {
-    pub ip: String,
     pub resolved_at: Instant,
 }
 
@@ -27,42 +33,7 @@ mod tests {
     use tokio::sync::broadcast;
 
     fn test_config() -> crate::config::Config {
-        crate::config::Config {
-            proxy_port: 3000,
-            tproxy_port: 3001,
-            wg_port: 51820,
-            admin_port: 3002,
-            explicit_proxy_enabled: false,
-            wg_interface: None,
-            max_connections: 4096,
-            tarpit_max_connections: 64,
-            admin_api_key: Some("test-key".to_string()),
-            cors_allowed_origins: vec![],
-            log_format: "human".to_string(),
-            oracle_conn: "".to_string(),
-            oracle_user: "".to_string(),
-            oracle_pass: None,
-            oracle_pass_file: "".to_string(),
-            tns_admin: None,
-            obfuscation_profiles: "".to_string(),
-            obfuscation_enabled: true,
-            obfuscation_profile: vec![
-                "fox-news".to_string(),
-                "fox-sports".to_string(),
-                "fox-general".to_string(),
-                "fox-cdn".to_string(),
-                "fx-network".to_string(),
-            ],
-            fox_ua_override: "Mozilla/5.0 (Test UA)".to_string(),
-            tls_cert_path: None,
-            tls_key_path: None,
-            proxy_username: None,
-            proxy_password: None,
-            proxy_password_file: String::new(),
-            tunnel_endpoint: None,
-            upstream_proxy: None,
-            enable_dns_lookups: false,
-        }
+        crate::config::Config::for_tests()
     }
 
     async fn create_test_state() -> SharedState {
@@ -78,8 +49,6 @@ mod tests {
             resolver,
             stats_tx,
             events_tx,
-            None,
-            64,
             config,
             #[cfg(feature = "oracle-db")]
             tokio_util::sync::CancellationToken::new(),
@@ -109,7 +78,7 @@ mod tests {
         assert!(verdict_change.is_some());
         assert_eq!(verdict_change.unwrap(), ("BLOCKED", "TARPIT"));
 
-        // Increase frequency further to trigger TARPIT
+        // A subsequent equally aggressive update should keep the verdict stable.
         {
             let mut stats = state.host_stats.get_mut(host).unwrap();
             stats.blocked_attempts = 100;
@@ -117,8 +86,8 @@ mod tests {
         }
 
         let verdict_change = state.record_host_block(host, 100, "telemetry");
-        assert!(verdict_change.is_some());
-        assert_eq!(verdict_change.unwrap(), ("AGGRESSIVE_POLLING", "TARPIT"));
+        assert!(verdict_change.is_none());
+        assert_eq!(state.host_stats.get(host).unwrap().verdict(), "TARPIT");
     }
 
     #[tokio::test]
@@ -147,6 +116,7 @@ mod tests {
     }
 }
 
+/// Shared application state handle passed through Axum and tunnel tasks.
 pub type SharedState = Arc<AppState>;
 
 /// Per-host heuristic counters — kept in RAM only, never written to disk.
@@ -239,6 +209,7 @@ impl HostStats {
     }
 }
 
+/// Process-wide application state shared by all handlers and background tasks.
 pub struct AppState {
     pub client: crate::proxy::ProxyClient,
     pub resolver: hickory_resolver::TokioAsyncResolver,
@@ -252,13 +223,11 @@ pub struct AppState {
     pub allowed_count: AtomicU64,
     pub obfuscated_count: AtomicU64,
     pub host_stats_dropped: AtomicU64,
-    pub blocklist: RwLock<HashSet<String>>,
+    pub blocklist: ArcSwap<HashSet<String>>,
     pub host_stats: DashMap<String, HostStats>,
     pub tarpit_sem: std::sync::Arc<tokio::sync::Semaphore>,
     /// DNS resolution cache with 5-minute TTL (Epic 2.1).
     pub dns_cache: DashMap<String, ResolvedMeta>,
-    /// WireGuard TUN device name for diagnostics (optional).
-    pub wg_interface: Option<String>,
     pub config: crate::config::Config,
     #[cfg(feature = "oracle-db")]
     pub db: std::sync::Arc<crate::db::EventSender>,
@@ -272,8 +241,6 @@ impl AppState {
         resolver: hickory_resolver::TokioAsyncResolver,
         stats_tx: broadcast::Sender<String>,
         events_tx: broadcast::Sender<String>,
-        wg_interface: Option<String>,
-        max_tarpit: usize,
         config: crate::config::Config,
         #[cfg(feature = "oracle-db")] shutdown: tokio_util::sync::CancellationToken,
     ) -> SharedState {
@@ -315,11 +282,10 @@ impl AppState {
             allowed_count: AtomicU64::new(0),
             obfuscated_count: AtomicU64::new(0),
             host_stats_dropped: AtomicU64::new(0),
-            blocklist: RwLock::new(seed),
+            blocklist: ArcSwap::from_pointee(seed),
             host_stats: DashMap::new(),
-            tarpit_sem: crate::tunnel::tarpit_semaphore(max_tarpit),
+            tarpit_sem: crate::tunnel::tarpit_semaphore(config.proxy.tarpit_max_connections),
             dns_cache: DashMap::new(),
-            wg_interface,
             config,
             #[cfg(feature = "oracle-db")]
             db,

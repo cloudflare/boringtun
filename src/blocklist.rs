@@ -1,8 +1,16 @@
+//! DNS blocklist loading and hot-path membership checks.
+//!
+//! This module owns the in-memory set of blocked domains, seeded at startup and
+//! refreshed from a remote list in the background. It does not decide how a
+//! blocked connection is handled after a match is found.
+
 use std::collections::HashSet;
+use std::sync::Arc;
 use tracing::{error, info};
 
 use crate::state::SharedState;
 
+/// Remote source of the periodically refreshed domain blocklist.
 pub const BLOCKLIST_URL: &str =
     "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/ultimate.txt";
 
@@ -38,21 +46,26 @@ pub const SEED: &[&str] = &[
 ];
 
 /// Spawns a task that fetches the remote blocklist immediately then refreshes
-/// every 24 hours. The seed stays active while the download is in progress.
+/// every 24 hours.
+///
+/// The seed entries remain active while the download is in progress and are
+/// re-applied on every successful refresh. On fetch failure the current list is
+/// preserved; if the set is empty, the seed list is restored.
 pub fn spawn_refresh_task(state: SharedState, token: tokio_util::sync::CancellationToken) {
     tokio::spawn(async move {
         loop {
+            #[cfg(feature = "oracle-db")]
             let started = std::time::Instant::now();
             match fetch().await {
                 Ok(remote) => {
-                    let mut bl = state.blocklist.write().await;
-                    let old_len = bl.len();
-                    bl.clear();
-                    bl.extend(SEED.iter().map(|s| s.to_string()));
-                    bl.extend(remote);
-                    let loaded = bl.len() as i64;
+                    let old_len = state.blocklist.load().len();
+                    let mut merged: HashSet<String> = SEED.iter().map(|s| s.to_string()).collect();
+                    merged.extend(remote);
+                    #[cfg(feature = "oracle-db")]
+                    let loaded = merged.len() as i64;
+                    state.blocklist.store(Arc::new(merged));
                     info!(
-                        entries = bl.len(),
+                        entries = state.blocklist.load().len(),
                         previous = old_len,
                         "blocklist refreshed"
                     );
@@ -71,10 +84,11 @@ pub fn spawn_refresh_task(state: SharedState, token: tokio_util::sync::Cancellat
                 }
                 Err(e) => {
                     error!(%e, "blocklist fetch failed, keeping existing list");
-                    let mut bl = state.blocklist.write().await;
-                    if bl.is_empty() {
-                        bl.extend(SEED.iter().map(|s| s.to_string()));
-                        info!(entries = bl.len(), "loaded seed blocklist as fallback");
+                    if state.blocklist.load().is_empty() {
+                        let seed: HashSet<String> = SEED.iter().map(|s| s.to_string()).collect();
+                        let entries = seed.len();
+                        state.blocklist.store(Arc::new(seed));
+                        info!(entries, "loaded seed blocklist as fallback");
                     }
                     #[cfg(feature = "oracle-db")]
                     crate::db::insert_blocklist_audit_event(
@@ -100,10 +114,14 @@ pub fn spawn_refresh_task(state: SharedState, token: tokio_util::sync::Cancellat
 
 /// Returns true if `hostname` (no port) matches any entry in the blocklist,
 /// walking up through parent domains so `sub.tracker.com` matches `tracker.com`.
+///
+/// # Cancellation safety
+/// This function performs only an atomic snapshot load plus in-memory lookups,
+/// so cancelling it does not leave shared state in a partial state.
 pub async fn is_blocked(hostname: &str, state: &SharedState) -> bool {
     let normalized = hostname.to_ascii_lowercase();
     let normalized = normalized.trim_end_matches('.');
-    let bl = state.blocklist.read().await;
+    let bl = state.blocklist.load();
     let mut domain = normalized;
     loop {
         if bl.contains(domain) {
@@ -149,37 +167,8 @@ mod tests {
         let (events_tx, _) = broadcast::channel(16);
         let resolver = TokioAsyncResolver::tokio_from_system_conf().unwrap();
 
-        let mut config = crate::config::Config {
-            proxy_port: 3000,
-            tproxy_port: 3001,
-            wg_port: 51820,
-            admin_port: 3002,
-            explicit_proxy_enabled: false,
-            wg_interface: None,
-            max_connections: 4096,
-            tarpit_max_connections: 64,
-            admin_api_key: Some("test-key".to_string()),
-            cors_allowed_origins: vec![],
-            log_format: "human".to_string(),
-            oracle_conn: String::new(),
-            oracle_user: String::new(),
-            oracle_pass: None,
-            oracle_pass_file: String::new(),
-            tns_admin: None,
-            obfuscation_profiles: String::new(),
-            obfuscation_enabled: true,
-            obfuscation_profile: vec![],
-            fox_ua_override: "Mozilla/5.0 (Test UA)".to_string(),
-            tls_cert_path: None,
-            tls_key_path: None,
-            proxy_username: None,
-            proxy_password: None,
-            proxy_password_file: String::new(),
-            tunnel_endpoint: None,
-            upstream_proxy: None,
-            enable_dns_lookups: false,
-        };
-        config.obfuscation_enabled = true;
+        let mut config = crate::config::Config::for_tests();
+        config.obfuscation.enabled = true;
 
         AppState::new(
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
@@ -187,8 +176,6 @@ mod tests {
             resolver,
             stats_tx,
             events_tx,
-            None,
-            64,
             config,
             #[cfg(feature = "oracle-db")]
             tokio_util::sync::CancellationToken::new(),
@@ -200,11 +187,9 @@ mod tests {
         let state = create_test_state().await;
 
         // Add test domain to blocklist
-        {
-            let mut bl = state.blocklist.write().await;
-            bl.clear();
-            bl.insert("tracker.com".to_string());
-        }
+        state
+            .blocklist
+            .store(Arc::new(HashSet::from(["tracker.com".to_string()])));
 
         // Test that subdomains correctly match parent domain
         assert!(is_blocked("tracker.com", &state).await);
@@ -222,11 +207,9 @@ mod tests {
     async fn test_is_blocked_case_insensitive_and_trailing_dot() {
         let state = create_test_state().await;
 
-        {
-            let mut bl = state.blocklist.write().await;
-            bl.clear();
-            bl.insert("tracker.com".to_string());
-        }
+        state
+            .blocklist
+            .store(Arc::new(HashSet::from(["tracker.com".to_string()])));
 
         // Case insensitivity
         assert!(is_blocked("TRACKER.COM", &state).await);
