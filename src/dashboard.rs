@@ -119,6 +119,8 @@ pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::Cancell
             }
             let (cs, u, p) = (conn_str.clone(), user.clone(), pass.clone());
             let flush = tokio::task::spawn_blocking(move || {
+                use oracle::sql_type::OracleType;
+
                 let conn = oracle::Connection::connect(&u, &p, &cs)?;
                 // Bind order: :1 host :2 blocked_attempts :3 blocked_bytes :4 frequency_hz
                 // :5 verdict :6 category :7 risk_score :8 tarpit_held_ms :9 iat_ms
@@ -158,6 +160,14 @@ pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::Cancell
                                    s.iat_ms, s.consecutive_blocks, s.last_verdict, \
                                    s.tls_ver, s.alpn, s.ja3_lite, s.resolved_ip, s.asn_org)";
                 let mut stmt = conn.statement(sql).build()?;
+                let host_type = OracleType::Varchar2(253);
+                let verdict_type = OracleType::Varchar2(32);
+                let category_type = OracleType::Varchar2(64);
+                let tls_ver_type = OracleType::Varchar2(16);
+                let alpn_type = OracleType::Varchar2(64);
+                let ja3_lite_type = OracleType::Varchar2(512);
+                let resolved_ip_type = OracleType::Varchar2(45);
+                let asn_org_type = OracleType::Varchar2(128);
                 let mut flushed = 0usize;
                 for (
                     host,
@@ -179,8 +189,22 @@ pub fn spawn_oracle_flusher(state: SharedState, token: tokio_util::sync::Cancell
                 ) in &rows
                 {
                     match stmt.execute(&[
-                        host, attempts, bytes, hz, verdict, cat, risk, tarpit, iat, streak, lv, tv,
-                        alpn, ja3, ip, asn,
+                        &(host, &host_type),
+                        attempts,
+                        bytes,
+                        hz,
+                        &(verdict, &verdict_type),
+                        &(cat, &category_type),
+                        risk,
+                        tarpit,
+                        iat,
+                        streak,
+                        &(lv, &verdict_type),
+                        &(tv, &tls_ver_type),
+                        &(alpn, &alpn_type),
+                        &(ja3, &ja3_lite_type),
+                        &(ip, &resolved_ip_type),
+                        &(asn, &asn_org_type),
                     ]) {
                         Ok(_) => flushed += 1,
                         Err(e) => tracing::warn!(host = %host, %e, "failed to flush row"),

@@ -568,6 +568,8 @@ fn upsert_tls_fingerprints(
     conn: &oracle::Connection,
     batch: &[&TlsFingerprintEvent],
 ) -> Result<(), oracle::Error> {
+    use oracle::sql_type::OracleType;
+
     let sql = "MERGE INTO tls_fingerprints t \
                USING (SELECT :1 ja3_lite, :2 tls_ver, :3 alpn, :4 cipher_count, :5 verdict_hint FROM DUAL) s \
                ON (t.ja3_lite = s.ja3_lite) \
@@ -582,13 +584,17 @@ fn upsert_tls_fingerprints(
                  (ja3_lite, first_seen, last_seen, seen_count, tls_ver, alpn, cipher_count, verdict_hint) \
                  VALUES (s.ja3_lite, SYSTIMESTAMP, SYSTIMESTAMP, 1, s.tls_ver, s.alpn, s.cipher_count, s.verdict_hint)";
     let mut stmt = conn.statement(sql).build()?;
+    let ja3_lite_type = OracleType::Varchar2(512);
+    let tls_ver_type = OracleType::Varchar2(16);
+    let alpn_type = OracleType::Varchar2(64);
+    let verdict_hint_type = OracleType::Varchar2(32);
     for ev in batch {
         stmt.execute(&[
-            &ev.ja3_lite,
-            &ev.tls_ver,
-            &ev.alpn,
+            &(&ev.ja3_lite, &ja3_lite_type),
+            &(&ev.tls_ver, &tls_ver_type),
+            &(&ev.alpn, &alpn_type),
             &ev.cipher_count,
-            &ev.verdict_hint,
+            &(&ev.verdict_hint, &verdict_hint_type),
         ])?;
     }
     Ok(())

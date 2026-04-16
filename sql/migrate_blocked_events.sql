@@ -10,7 +10,7 @@ ALTER TABLE blocked_events ADD (
     last_verdict      VARCHAR2(32),
     tls_ver           VARCHAR2(16),
     alpn              VARCHAR2(64),
-    ja3_lite          VARCHAR2(128),
+    ja3_lite          VARCHAR2(512),
     resolved_ip       VARCHAR2(45),
     asn_org           VARCHAR2(128)
 );
