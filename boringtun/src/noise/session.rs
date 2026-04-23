@@ -5,14 +5,14 @@ use super::PacketData;
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Session {
     pub(crate) receiving_index: u32,
     sending_index: u32,
     receiver: LessSafeKey,
     sender: LessSafeKey,
-    sending_key_counter: AtomicUsize,
+    sending_key_counter: AtomicU64,
     receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
 }
 
@@ -165,7 +165,7 @@ impl Session {
                 UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
             ),
             sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
-            sending_key_counter: AtomicUsize::new(0),
+            sending_key_counter: AtomicU64::new(0),
             receiving_key_counter: Mutex::new(Default::default()),
         }
     }
