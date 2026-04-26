@@ -880,6 +880,129 @@ impl Handshake {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Experimental: NIZK (Non-Interactive Zero-Knowledge) Mutual Authentication
+//
+// These methods extend the standard WireGuard handshake with a Schnorr PoK
+// so that both the initiator and the responder prove knowledge of their
+// respective static private keys without revealing them directly.
+//
+// Packet layout additions (feature = "experimental-nizk"):
+//   HandshakeInit  append:  64 bytes  (initiator NIZK proof)
+//   HandshakeResp  append:  64 bytes  (responder NIZK proof)
+//
+// The proof `msg` context is the peer's static public key bytes, providing
+// unique per-peer domain separation. A future version may use the Noise
+// chaining hash for full transcript-binding.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "experimental-nizk")]
+impl Handshake {
+    /// Size of a serialised NIZK proof in bytes.
+    pub const NIZK_PROOF_SZ: usize = 64;
+
+    /// Build a handshake initiation packet with an appended 64-byte NIZK proof
+    /// of knowledge of the initiator's static private key.
+    ///
+    /// `dst` must be ≥ `HANDSHAKE_INIT_SZ + NIZK_PROOF_SZ` bytes.
+    pub fn format_handshake_initiation_with_nizk<'a>(
+        &mut self,
+        dst: &'a mut [u8],
+    ) -> Result<&'a mut [u8], crate::noise::errors::WireGuardError> {
+        if dst.len() < super::HANDSHAKE_INIT_SZ + Self::NIZK_PROOF_SZ {
+            return Err(crate::noise::errors::WireGuardError::DestinationBufferTooSmall);
+        }
+
+        // Build the standard handshake initiation
+        let base = self.format_handshake_initiation(&mut dst[..super::HANDSHAKE_INIT_SZ + 32])?;
+        let base_len = base.len(); // == HANDSHAKE_INIT_SZ
+
+        // Prove knowledge of our static private key.
+        // Message = peer's static public key bytes (domain separation per peer).
+        let proof = crate::noise::nizk::prove(
+            &self.params.static_private.to_bytes(),
+            self.params.static_public.as_bytes(),
+            self.params.peer_static_public.as_bytes(),
+        );
+
+        let proof_bytes = proof.to_bytes();
+        let end = base_len + Self::NIZK_PROOF_SZ;
+        dst[base_len..end].copy_from_slice(&proof_bytes);
+
+        tracing::debug!("NIZK: appended initiator proof to handshake init");
+        Ok(&mut dst[..end])
+    }
+
+    /// Process an incoming handshake initiation with NIZK, verify the
+    /// initiator's proof, then return the standard response with the
+    /// responder's proof appended.
+    ///
+    /// `nizk_proof_bytes`: the 64-byte initiator proof (received after the
+    /// standard 148-byte HandshakeInit packet).
+    ///
+    /// `dst` must be ≥ `HANDSHAKE_RESP_SZ + NIZK_PROOF_SZ` bytes.
+    pub fn receive_handshake_initialization_with_nizk<'a>(
+        &mut self,
+        packet: super::HandshakeInit<'_>,
+        nizk_proof_bytes: &[u8; 64],
+        dst: &'a mut [u8],
+    ) -> Result<(&'a mut [u8], super::session::Session), crate::noise::errors::WireGuardError> {
+        if dst.len() < super::HANDSHAKE_RESP_SZ + Self::NIZK_PROOF_SZ {
+            return Err(crate::noise::errors::WireGuardError::DestinationBufferTooSmall);
+        }
+
+        // Verify the initiator's NIZK proof before doing anything else.
+        // This is a fast check that rejects forged / tampered packets early.
+        let peer_pk_bytes = *self.params.peer_static_public.as_bytes();
+        let proof = crate::noise::nizk::NizkProof::from_bytes(nizk_proof_bytes);
+        if !crate::noise::nizk::verify(&peer_pk_bytes, &proof, self.params.static_public.as_bytes()) {
+            tracing::debug!("NIZK: initiator proof verification FAILED");
+            return Err(crate::noise::errors::WireGuardError::WrongKey);
+        }
+        tracing::debug!("NIZK: initiator proof verified OK");
+
+        // Process the standard handshake init and generate the response
+        let (resp_slice, session) = self.receive_handshake_initialization(packet, dst)?;
+        let resp_len = resp_slice.len(); // == HANDSHAKE_RESP_SZ
+
+        // Append the responder's NIZK proof
+        // Message = our own static public key bytes (domain separation)
+        let resp_proof = crate::noise::nizk::prove(
+            &self.params.static_private.to_bytes(),
+            self.params.static_public.as_bytes(),
+            self.params.static_public.as_bytes(),
+        );
+        let resp_proof_bytes = resp_proof.to_bytes();
+        let end = resp_len + Self::NIZK_PROOF_SZ;
+        dst[resp_len..end].copy_from_slice(&resp_proof_bytes);
+
+        tracing::debug!("NIZK: appended responder proof to handshake response");
+        Ok((&mut dst[..end], session))
+    }
+
+    /// Process a handshake response with NIZK and verify the responder's proof.
+    ///
+    /// `nizk_proof_bytes`: the 64-byte responder proof (received after the
+    /// standard 92-byte HandshakeResponse packet).
+    pub fn receive_handshake_response_with_nizk(
+        &mut self,
+        packet: super::HandshakeResponse<'_>,
+        nizk_proof_bytes: &[u8; 64],
+    ) -> Result<super::session::Session, crate::noise::errors::WireGuardError> {
+        // First verify the responder's proof before accepting the session
+        let peer_pk_bytes = *self.params.peer_static_public.as_bytes();
+        let proof = crate::noise::nizk::NizkProof::from_bytes(nizk_proof_bytes);
+        if !crate::noise::nizk::verify(&peer_pk_bytes, &proof, &peer_pk_bytes) {
+            tracing::debug!("NIZK: responder proof verification FAILED");
+            return Err(crate::noise::errors::WireGuardError::WrongKey);
+        }
+        tracing::debug!("NIZK: responder proof verified OK");
+
+        // Accept the session
+        self.receive_handshake_response(packet)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

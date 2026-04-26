@@ -5,6 +5,9 @@ pub mod errors;
 pub mod handshake;
 pub mod rate_limiter;
 
+#[cfg(feature = "experimental-nizk")]
+pub mod nizk;
+
 mod session;
 mod timers;
 
@@ -790,5 +793,49 @@ mod tests {
             unreachable!();
         };
         assert_eq!(sent_packet_buf, recv_packet_buf);
+    }
+
+    #[cfg(feature = "experimental-nizk")]
+    #[test]
+    fn test_nizk_handshake_full_flow() {
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        let mut dst_init = vec![0u8; 1024];
+        let mut dst_resp = vec![0u8; 1024];
+        let mut dst_ka = vec![0u8; 1024];
+
+        // 1. Initiator format init with NIZK
+        let init_packet = my_tun.handshake.format_handshake_initiation_with_nizk(&mut dst_init).unwrap();
+        let (init_base, init_proof) = init_packet.split_at(HANDSHAKE_INIT_SZ);
+        let init_proof: &[u8; 64] = init_proof.try_into().unwrap();
+
+        // 2. Responder receive init with NIZK and format response with NIZK
+        let parsed_init = Tunn::parse_incoming_packet(init_base).unwrap();
+        let init_data = match parsed_init {
+            Packet::HandshakeInit(p) => p,
+            _ => panic!("Expected HandshakeInit"),
+        };
+
+        let (resp_packet, _session_resp) = their_tun.handshake.receive_handshake_initialization_with_nizk(
+            init_data,
+            init_proof,
+            &mut dst_resp
+        ).unwrap();
+        
+        let (resp_base, resp_proof) = resp_packet.split_at(HANDSHAKE_RESP_SZ);
+        let resp_proof: &[u8; 64] = resp_proof.try_into().unwrap();
+
+        // 3. Initiator receive response with NIZK
+        let parsed_resp = Tunn::parse_incoming_packet(resp_base).unwrap();
+        let resp_data = match parsed_resp {
+            Packet::HandshakeResponse(p) => p,
+            _ => panic!("Expected HandshakeResponse"),
+        };
+
+        let _session_init = my_tun.handshake.receive_handshake_response_with_nizk(
+            resp_data,
+            resp_proof
+        ).unwrap();
+
+        // If we reached here, both sides verified proofs and accepted the session.
     }
 }
