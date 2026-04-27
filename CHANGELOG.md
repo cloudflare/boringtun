@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - use a 64-bit nonce counter on 32-bit platforms to avoid the possibility of nonce re-use with large REKEY_AFTER_TIME
+- CLI only: remove vulnerable dependency: `atty`
 
 ### Fixed
 - use portable-atomic to support targets without native 64-bit atomics
