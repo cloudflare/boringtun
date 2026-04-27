@@ -16,7 +16,7 @@ jobs:
     name: semgrep-oss
     runs-on: ubuntu-slim
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - id: cache-semgrep
