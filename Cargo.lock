@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "boringtun"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "aead",
  "base64",
@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "boringtun-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "boringtun",
  "clap",
