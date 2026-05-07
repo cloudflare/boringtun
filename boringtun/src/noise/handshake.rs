@@ -15,6 +15,7 @@ use rand_core::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime};
+use subtle::ConstantTimeEq;
 
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
@@ -521,11 +522,16 @@ impl Handshake {
             &hash,
         )?;
 
-        ring::constant_time::verify_slices_are_equal(
-            self.params.peer_static_public.as_bytes(),
-            &peer_static_public_decrypted,
-        )
-        .map_err(|_| WireGuardError::WrongKey)?;
+        if self
+            .params
+            .peer_static_public
+            .as_bytes()
+            .ct_eq(&peer_static_public_decrypted)
+            .unwrap_u8()
+            != 1
+        {
+            return Err(WireGuardError::WrongKey);
+        }
 
         // initiator.hash = HASH(initiator.hash || msg.encrypted_static)
         hash = b2s_hash(&hash, packet.encrypted_static);
