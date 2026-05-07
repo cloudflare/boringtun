@@ -31,6 +31,15 @@ const DATA_OFFSET: usize = 16;
 /// The overhead of the AEAD
 const AEAD_SIZE: usize = 16;
 
+/// Initiator should rekey after sending this many messages on a session.
+/// Per the WireGuard whitepaper section 5.2.
+#[allow(dead_code)]
+pub(crate) const REKEY_AFTER_MESSAGES: u64 = 1 << 60;
+/// Both initiator and responder must refuse to send or receive on a session
+/// once this many messages have been processed. Per the WireGuard whitepaper
+/// section 5.2.
+pub(crate) const REJECT_AFTER_MESSAGES: u64 = u64::MAX - (1 << 16) - 1;
+
 // Receiving buffer constants
 const WORD_SIZE: u64 = 64;
 const N_WORDS: u64 = 16; // Suffice to reorder 64*16 = 1024 packets; can be increased at will
@@ -192,13 +201,24 @@ impl Session {
 
     /// src - an IP packet from the interface
     /// dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
-    /// returns the size of the formatted packet
-    pub(super) fn format_packet_data<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> &'a mut [u8] {
+    /// returns the formatted packet, or None if the session has reached
+    /// REJECT_AFTER_MESSAGES and must not be used to send any more data.
+    pub(super) fn format_packet_data<'a>(
+        &self,
+        src: &[u8],
+        dst: &'a mut [u8],
+    ) -> Option<&'a mut [u8]> {
         if dst.len() < src.len() + super::DATA_OVERHEAD_SZ {
             panic!("The destination buffer is too small");
         }
 
-        let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
+        let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed);
+        if sending_key_counter >= REJECT_AFTER_MESSAGES {
+            // Per the WireGuard spec, this session has exhausted its nonce
+            // budget and a rekey is mandatory before further traffic. Refuse
+            // to encrypt; the caller will trigger a new handshake.
+            return None;
+        }
 
         let (message_type, rest) = dst.split_at_mut(4);
         let (receiver_index, rest) = rest.split_at_mut(4);
@@ -226,7 +246,7 @@ impl Session {
                 .unwrap()
         };
 
-        &mut dst[..DATA_OFFSET + n]
+        Some(&mut dst[..DATA_OFFSET + n])
     }
 
     /// packet - a data packet we received from the network
@@ -245,6 +265,11 @@ impl Session {
         }
         if packet.receiver_idx != self.receiving_index {
             return Err(WireGuardError::WrongIndex);
+        }
+        // Per the WireGuard spec, sessions must refuse to process any
+        // packets at counter values >= REJECT_AFTER_MESSAGES.
+        if packet.counter >= REJECT_AFTER_MESSAGES {
+            return Err(WireGuardError::InvalidCounter);
         }
         // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
         self.receiving_counter_quick_check(packet.counter)?;
@@ -325,5 +350,19 @@ mod tests {
         assert!(c.mark_did_receive(N_BITS * 3 + 70).is_err());
         assert!(c.mark_did_receive(N_BITS * 3 + 71).is_err());
         assert!(c.mark_did_receive(N_BITS * 3 + 72).is_err());
+    }
+
+    #[test]
+    fn rejects_send_counter_at_or_past_limit() {
+        // Build a Session with arbitrary keys and force the sending counter
+        // to REJECT_AFTER_MESSAGES; format_packet_data must refuse to emit a
+        // packet rather than reusing a nonce past the spec limit.
+        let session = Session::new(0, 0, [0u8; 32], [1u8; 32]);
+        session
+            .sending_key_counter
+            .store(REJECT_AFTER_MESSAGES, Ordering::Relaxed);
+
+        let mut dst = vec![0u8; 256];
+        assert!(session.format_packet_data(&[0u8; 32], &mut dst).is_none());
     }
 }

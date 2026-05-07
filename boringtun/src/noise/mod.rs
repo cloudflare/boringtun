@@ -249,21 +249,27 @@ impl Tunn {
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
     pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
         let current = self.current;
-        if let Some(ref session) = self.sessions[current % N_SESSIONS] {
-            // Send the packet using an established session
-            let packet = session.format_packet_data(src, dst);
+        // Encrypt into dst using the current session, if any. We keep only
+        // the resulting length so the borrow on dst is released here, which
+        // lets us reuse dst for a fresh handshake on the exhausted-session
+        // path below.
+        let written = self.sessions[current % N_SESSIONS]
+            .as_ref()
+            .and_then(|session| session.format_packet_data(src, dst).map(|p| p.len()));
+        if let Some(written) = written {
             self.timer_tick(TimerName::TimeLastPacketSent);
             // Exclude Keepalive packets from timer update.
             if !src.is_empty() {
                 self.timer_tick(TimerName::TimeLastDataPacketSent);
             }
             self.tx_bytes += src.len();
-            return TunnResult::WriteToNetwork(packet);
+            return TunnResult::WriteToNetwork(&mut dst[..written]);
         }
 
-        // If there is no session, queue the packet for future retry
+        // Either no session is established or the current session has
+        // exhausted its REJECT_AFTER_MESSAGES nonce budget. Either way,
+        // queue the packet and trigger a fresh handshake.
         self.queue_packet(src);
-        // Initiate a new handshake if none is in progress
         self.format_handshake_initiation(dst, false)
     }
 
@@ -353,7 +359,11 @@ impl Tunn {
 
         let session = self.handshake.receive_handshake_response(p)?;
 
-        let keepalive_packet = session.format_packet_data(&[], dst);
+        // A freshly established session always has counter 0, well below
+        // REJECT_AFTER_MESSAGES, so format_packet_data must succeed here.
+        let keepalive_packet = session
+            .format_packet_data(&[], dst)
+            .expect("freshly established session must accept the keepalive");
         // Store new session in ring buffer
         let l_idx = session.local_index();
         let index = l_idx % N_SESSIONS;
