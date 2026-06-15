@@ -1,15 +1,16 @@
 [package]
 name = "boringtun"
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
-version = "0.6.0"
+version = "0.7.1"
 authors = [
     "Noah Kennedy <nkennedy@cloudflare.com>",
     "Andy Grover <agrover@cloudflare.com>",
     "Jeff Hiner <jhiner@cloudflare.com>",
 ]
 license = "BSD-3-Clause"
+readme = "../README.md"
 repository = "https://github.com/cloudflare/boringtun"
-documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
+documentation = "https://docs.rs/boringtun/0.7.1/boringtun/"
 edition = "2018"
 
 [features]
@@ -21,17 +22,18 @@ ffi-bindings = ["tracing-subscriber"]
 mock-instant = ["mock_instant"]
 
 [dependencies]
-base64 = "0.13"
+base64 = "0.22"
 hex = "0.4"
 untrusted = "0.9.0"
 libc = "0.2"
 parking_lot = "0.12"
+portable-atomic = { version = "1.13.1", features = ["fallback"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3", features = ["fmt"], optional = true }
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
 ring = "0.17"
-x25519-dalek = { version = "2.0.0", features = [
+x25519-dalek = { version = "2.0.1", features = [
     "reusable_secrets",
     "static_secrets",
 ] }
@@ -43,10 +45,10 @@ hmac = "0.12"
 jni = { version = "0.19.0", optional = true }
 mock_instant = { version = "0.3", optional = true }
 socket2 = { version = "0.4.7", features = ["all"], optional = true }
-thiserror = { version = "1", optional = true }
+thiserror = { version = "2", optional = true }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.25", default-features = false, features = [
+nix = { version = "0.31", default-features = false, features = [
     "time",
     "user",
 ] }
@@ -54,7 +56,7 @@ nix = { version = "0.25", default-features = false, features = [
 [dev-dependencies]
 etherparse = "0.13"
 tracing-subscriber = "0.3"
-criterion = { version = "0.3.5", features = ["html_reports"] }
+criterion = { version = "0.8.2", features = ["html_reports"] }
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
