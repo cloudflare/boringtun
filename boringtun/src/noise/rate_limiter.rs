@@ -2,6 +2,8 @@ use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_2
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
+use std::time::Duration;
+
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 use portable_atomic::{AtomicU64, Ordering};
@@ -13,7 +15,6 @@ use crate::sleepyinstant::Instant;
 use aead::generic_array::GenericArray;
 use aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{Key, XChaCha20Poly1305};
-use parking_lot::Mutex;
 use rand_core::{OsRng, RngCore};
 use ring::constant_time::verify_slices_are_equal;
 
@@ -22,7 +23,7 @@ const COOKIE_SIZE: usize = 16;
 const COOKIE_NONCE_SIZE: usize = 24;
 
 /// How often should reset count in seconds
-const RESET_PERIOD: u64 = 1;
+const RESET_PERIOD: Duration = Duration::from_secs(1);
 
 type Cookie = [u8; COOKIE_SIZE];
 
@@ -47,8 +48,8 @@ pub struct RateLimiter {
     limit: u64,
     /// The counter since last reset
     count: AtomicU64,
-    /// The time last reset was performed on this rate limiter
-    last_reset: Mutex<Instant>,
+    /// The time last reset was performed on this rate limiter, in milliseconds from start_time
+    last_reset: AtomicU64,
 }
 
 impl RateLimiter {
@@ -64,7 +65,7 @@ impl RateLimiter {
             cookie_key: b2s_hash(LABEL_COOKIE, public_key.as_bytes()).into(),
             limit,
             count: AtomicU64::new(0),
-            last_reset: Mutex::new(Instant::now()),
+            last_reset: AtomicU64::new(0),
         }
     }
 
@@ -77,11 +78,22 @@ impl RateLimiter {
     /// Reset packet count (ideally should be called with a period of 1 second)
     pub fn reset_count(&self) {
         // The rate limiter is not very accurate, but at the scale we care about it doesn't matter much
-        let current_time = Instant::now();
-        let mut last_reset_time = self.last_reset.lock();
-        if current_time.duration_since(*last_reset_time).as_secs() >= RESET_PERIOD {
-            self.count.store(0, Ordering::SeqCst);
-            *last_reset_time = current_time;
+        let now = Instant::now().duration_since(self.start_time);
+        let last_msec = self.last_reset.load(Ordering::Acquire);
+        let last_reset = Duration::from_millis(last_msec);
+        if now - last_reset >= RESET_PERIOD {
+            if self
+                .last_reset
+                .compare_exchange(
+                    last_msec,
+                    now.as_millis() as u64,
+                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                self.count.store(0, Ordering::SeqCst);
+            }
         }
     }
 

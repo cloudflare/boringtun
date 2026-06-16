@@ -11,7 +11,7 @@ use crate::x25519::{PublicKey, StaticSecret};
 use base64::{decode, encode};
 use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use rand_core::OsRng;
 use tracing;
 use tracing_subscriber::fmt;
@@ -247,7 +247,7 @@ pub unsafe extern "C" fn new_tunnel(
     preshared_key: *const c_char,
     keep_alive: u16,
     index: u32,
-) -> *mut Mutex<Tunn> {
+) -> *mut RwLock<Tunn> {
     let c_str = CStr::from_ptr(static_private);
     let static_private = match c_str.to_str() {
         Err(_) => return ptr::null_mut(),
@@ -292,7 +292,7 @@ pub unsafe extern "C" fn new_tunnel(
         Some(keep_alive)
     };
 
-    let tunnel = Box::new(Mutex::new(Tunn::new(
+    let tunnel = Box::new(RwLock::new(Tunn::new(
         private_key,
         public_key,
         preshared_key,
@@ -313,7 +313,7 @@ pub unsafe extern "C" fn new_tunnel(
 
 /// Drops the Tunn object
 #[no_mangle]
-pub unsafe extern "C" fn tunnel_free(tunnel: *mut Mutex<Tunn>) {
+pub unsafe extern "C" fn tunnel_free(tunnel: *mut RwLock<Tunn>) {
     drop(Box::from_raw(tunnel));
 }
 
@@ -321,33 +321,59 @@ pub unsafe extern "C" fn tunnel_free(tunnel: *mut Mutex<Tunn>) {
 /// For more details check noise::tunnel_to_network functions.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_write(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const RwLock<Tunn>,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.encapsulate(src, dst))
+
+    // Try handling the packet with only a read lock, this covers the common
+    // case where we are encrypting data packets and a valid session exists.
+    {
+        let rotunnel = tunnel.as_ref().unwrap().read();
+        let result = rotunnel.try_encapsulate(src, dst);
+        if !matches!(result, TunnResult::Done) {
+            return wireguard_result::from(result);
+        }
+    }
+
+    // Otherwise, acquire a write lock to queue the packet and start a new
+    // handshake if there isn't already one in progress.
+    let mut tunnel = tunnel.as_ref().unwrap().write();
+    tunnel.queue_packet(src);
+    wireguard_result::from(tunnel.format_handshake_initiation(dst, false))
 }
 
 /// Read a UDP packet from the server.
 /// For more details check noise::network_to_tunnel functions.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_read(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const RwLock<Tunn>,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
+
+    // Try handling the packet with only a read lock, this covers the common
+    // case where we are processing data packets and doing validity checks.
+    {
+        let rotunnel = tunnel.as_ref().unwrap().read();
+        if let Some(result) = rotunnel.try_decapsulate(None, src, dst) {
+            return wireguard_result::from(result);
+        }
+    }
+
+    // Otherwise, we must acquire a write lock to continue processing this
+    // packet. This is likely a verified handshake packet of some sort.
+    let mut tunnel = tunnel.as_ref().unwrap().write();
     wireguard_result::from(tunnel.decapsulate(None, src, dst))
 }
 
@@ -355,11 +381,11 @@ pub unsafe extern "C" fn wireguard_read(
 /// Recommended interval: 100ms.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_tick(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const RwLock<Tunn>,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let mut tunnel = tunnel.as_ref().unwrap().lock();
+    let mut tunnel = tunnel.as_ref().unwrap().write();
     // Slices are not owned, and therefore will not be freed by Rust
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
     wireguard_result::from(tunnel.update_timers(dst))
@@ -368,11 +394,11 @@ pub unsafe extern "C" fn wireguard_tick(
 /// Force the tunnel to initiate a new handshake, dst buffer must be at least 148 byte long.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_force_handshake(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const RwLock<Tunn>,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
-    let mut tunnel = tunnel.as_ref().unwrap().lock();
+    let mut tunnel = tunnel.as_ref().unwrap().write();
     // Slices are not owned, and therefore will not be freed by Rust
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
     wireguard_result::from(tunnel.format_handshake_initiation(dst, true))
@@ -383,8 +409,8 @@ pub unsafe extern "C" fn wireguard_force_handshake(
 /// Number of data bytes encapsulated
 /// Number of data bytes decapsulated
 #[no_mangle]
-pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<Tunn>) -> stats {
-    let tunnel = tunnel.as_ref().unwrap().lock();
+pub unsafe extern "C" fn wireguard_stats(tunnel: *const RwLock<Tunn>) -> stats {
+    let tunnel = tunnel.as_ref().unwrap().read();
     let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt) = tunnel.stats();
     stats {
         time_since_last_handshake: time.map(|t| t.as_secs() as i64).unwrap_or(-1),

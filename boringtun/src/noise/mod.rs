@@ -14,6 +14,7 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::x25519;
 
+use portable_atomic::{AtomicUsize, Ordering};
 use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -63,13 +64,13 @@ pub struct Tunn {
     /// The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
     sessions: [Option<session::Session>; N_SESSIONS],
     /// Index of most recently used session
-    current: usize,
+    current: AtomicUsize,
     /// Queue to store blocked packets
     packet_queue: VecDeque<Vec<u8>>,
     /// Keeps tabs on the expiring timers
     timers: timers::Timers,
-    tx_bytes: usize,
-    rx_bytes: usize,
+    tx_bytes: AtomicUsize,
+    rx_bytes: AtomicUsize,
     rate_limiter: Arc<RateLimiter>,
 }
 
@@ -241,14 +242,14 @@ impl Tunn {
         }
     }
 
-    /// Encapsulate a single packet from the tunnel interface.
+    /// Encapsulate a single packet from the tunnel interface or queue it.
     /// Returns TunnResult.
     ///
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
     pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
-        let current = self.current;
+        let current = self.current.load(Ordering::Relaxed);
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
             let packet = session.format_packet_data(src, dst);
@@ -257,7 +258,7 @@ impl Tunn {
             if !src.is_empty() {
                 self.timer_tick(TimerName::TimeLastDataPacketSent);
             }
-            self.tx_bytes += src.len();
+            self.tx_bytes.fetch_add(src.len(), Ordering::Relaxed);
             return TunnResult::WriteToNetwork(packet);
         }
 
@@ -265,6 +266,30 @@ impl Tunn {
         self.queue_packet(src);
         // Initiate a new handshake if none is in progress
         self.format_handshake_initiation(dst, false)
+    }
+
+    /// Encapsulate a single packet from the tunnel interface.
+    /// Returns TunnResult::WriteToNetwork if there is a valid session, or
+    /// TunnResult::Done if the packet could not be handled yet.
+    ///
+    /// # Panics
+    /// Panics if dst buffer is too small.
+    /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
+    pub fn try_encapsulate<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+        let current = self.current.load(Ordering::Relaxed);
+        if let Some(ref session) = self.sessions[current % N_SESSIONS] {
+            // Send the packet using an established session
+            let packet = session.format_packet_data(src, dst);
+            self.timer_tick(TimerName::TimeLastPacketSent);
+            // Exclude Keepalive packets from timer update.
+            if !src.is_empty() {
+                self.timer_tick(TimerName::TimeLastDataPacketSent);
+            }
+            self.tx_bytes.fetch_add(src.len(), Ordering::Relaxed);
+            return TunnResult::WriteToNetwork(packet);
+        }
+
+        TunnResult::Done
     }
 
     /// Receives a UDP datagram from the network and parses it.
@@ -299,6 +324,47 @@ impl Tunn {
         };
 
         self.handle_verified_packet(packet, dst)
+    }
+
+    /// Receives a UDP datagram from the network and parses it.
+    /// Returns TunnResult.
+    ///
+    /// This is a subset of decapsulate that operates on a read only tunnel.
+    /// Will return Some(TunnResult) if the packet was handled successfully, or
+    /// None if processing requires a mutable reference to the tunnel.
+    ///
+    /// This method can handle the common case of data packet decryption and
+    /// cookie verification without needing to hold a write lock on the tunnel.
+    pub fn try_decapsulate<'a>(
+        &self,
+        src_addr: Option<IpAddr>,
+        datagram: &[u8],
+        dst: &'a mut [u8],
+    ) -> Option<TunnResult<'a>> {
+        // Packet dequeue operations require a write lock.
+        if datagram.is_empty() {
+            return if self.packet_queue.is_empty() {
+                Some(TunnResult::Done)
+            } else {
+                None
+            };
+        }
+
+        let mut cookie = [0u8; COOKIE_REPLY_SZ];
+        match self
+            .rate_limiter
+            .verify_packet(src_addr, datagram, &mut cookie)
+        {
+            Ok(Packet::PacketData(p)) => {
+                Some(self.handle_data(p, dst).unwrap_or_else(TunnResult::from))
+            }
+            Err(TunnResult::WriteToNetwork(cookie)) => {
+                dst[..cookie.len()].copy_from_slice(cookie);
+                return Some(TunnResult::WriteToNetwork(&mut dst[..cookie.len()]));
+            }
+            Err(TunnResult::Err(e)) => return Some(TunnResult::Err(e)),
+            _ => None,
+        }
     }
 
     pub(crate) fn handle_verified_packet<'a>(
@@ -387,24 +453,31 @@ impl Tunn {
     }
 
     /// Update the index of the currently used session, if needed
-    fn set_current_session(&mut self, new_idx: usize) {
-        let cur_idx = self.current;
+    fn set_current_session(&self, new_idx: usize) {
+        let cur_idx = self.current.load(Ordering::Relaxed);
         if cur_idx == new_idx {
             // There is nothing to do, already using this session, this is the common case
             return;
         }
+
         if self.sessions[cur_idx % N_SESSIONS].is_none()
             || self.timers.session_timers[new_idx % N_SESSIONS]
                 >= self.timers.session_timers[cur_idx % N_SESSIONS]
         {
-            self.current = new_idx;
-            tracing::debug!(message = "New session", session = new_idx);
+            if let Ok(idx) = self.current.compare_exchange(
+                cur_idx,
+                new_idx,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            ) {
+                tracing::debug!(message = "New session", session = idx);
+            }
         }
     }
 
     /// Decrypts a data packet, and stores the decapsulated packet in dst.
     fn handle_data<'a>(
-        &mut self,
+        &self,
         packet: PacketData,
         dst: &'a mut [u8],
     ) -> Result<TunnResult<'a>, WireGuardError> {
@@ -461,7 +534,7 @@ impl Tunn {
 
     /// Check if an IP packet is v4 or v6, truncate to the length indicated by the length field
     /// Returns the truncated packet and the source IP as TunnResult
-    fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a> {
+    fn validate_decapsulated_packet<'a>(&self, packet: &'a mut [u8]) -> TunnResult<'a> {
         let (computed_len, src_ip_address) = match packet.len() {
             0 => return TunnResult::Done, // This is keepalive, and not an error
             _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => {
@@ -498,7 +571,7 @@ impl Tunn {
         }
 
         self.timer_tick(TimerName::TimeLastDataPacketReceived);
-        self.rx_bytes += computed_len;
+        self.rx_bytes.fetch_add(computed_len, Ordering::Relaxed);
 
         match src_ip_address {
             IpAddr::V4(addr) => TunnResult::WriteToTunnelV4(&mut packet[..computed_len], addr),
@@ -521,7 +594,7 @@ impl Tunn {
     }
 
     /// Push packet to the back of the queue
-    fn queue_packet(&mut self, packet: &[u8]) {
+    pub fn queue_packet(&mut self, packet: &[u8]) {
         if self.packet_queue.len() < MAX_QUEUE_DEPTH {
             // Drop if too many are already in queue
             self.packet_queue.push_back(packet.to_vec());
@@ -541,7 +614,7 @@ impl Tunn {
     }
 
     fn estimate_loss(&self) -> f32 {
-        let session_idx = self.current;
+        let session_idx = self.current.load(Ordering::Relaxed);
 
         let mut weight = 9.0;
         let mut cur_avg = 0.0;
@@ -576,8 +649,8 @@ impl Tunn {
     /// * Data bytes received
     pub fn stats(&self) -> (Option<Duration>, usize, usize, f32, Option<u32>) {
         let time = self.time_since_last_handshake();
-        let tx_bytes = self.tx_bytes;
-        let rx_bytes = self.rx_bytes;
+        let tx_bytes = self.tx_bytes.load(Ordering::Relaxed);
+        let rx_bytes = self.rx_bytes.load(Ordering::Relaxed);
         let loss = self.estimate_loss();
         let rtt = self.handshake.last_rtt;
 

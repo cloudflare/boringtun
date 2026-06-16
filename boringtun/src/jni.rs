@@ -12,7 +12,7 @@ use jni::objects::{JByteBuffer, JClass, JString};
 use jni::strings::JNIStr;
 use jni::sys::{jbyteArray, jint, jlong, jshort, jstring};
 use jni::JNIEnv;
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 
 use crate::ffi::new_tunnel;
 use crate::ffi::wireguard_read;
@@ -194,7 +194,7 @@ pub unsafe extern "C" fn encrypt_raw_packet(
     };
 
     let output: wireguard_result = wireguard_write(
-        tunnel as *const Mutex<Tunn>,
+        tunnel as *const RwLock<Tunn>,
         env.convert_byte_array(src).unwrap().as_mut_ptr(),
         src_size as u32,
         dst_ptr,
@@ -229,7 +229,7 @@ pub unsafe extern "C" fn decrypt_to_raw_packet(
     };
 
     let output: wireguard_result = wireguard_read(
-        tunnel as *const Mutex<Tunn>,
+        tunnel as *const RwLock<Tunn>,
         env.convert_byte_array(src).unwrap().as_mut_ptr(),
         src_size as u32,
         dst_ptr,
@@ -263,7 +263,7 @@ pub unsafe extern "C" fn run_periodic_task(
     };
 
     let output: wireguard_result =
-        wireguard_tick(tunnel as *const Mutex<Tunn>, dst_ptr, dst_size as u32);
+        wireguard_tick(tunnel as *const RwLock<Tunn>, dst_ptr, dst_size as u32);
 
     *op_ptr = output.op as u8;
 
