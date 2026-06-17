@@ -29,7 +29,7 @@ cargo install boringtun-cli
 
 ### Building
 
-- Library only: `cargo build --lib --no-default-features --release [--target $(TARGET_TRIPLE)]`
+- Library only: `cargo build --lib --release [--target $(TARGET_TRIPLE)]`
 - Executable: `cargo build --bin boringtun-cli --release [--target $(TARGET_TRIPLE)]`
 
 By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin boringtun --path .`.
