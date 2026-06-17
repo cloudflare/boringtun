@@ -50,6 +50,17 @@ struct Event<H> {
 
 impl<H> Drop for EventPoll<H> {
     fn drop(&mut self) {
+        // The only other struct that holds EventRef is the Device, which will necessarily be
+        // dropped before EventPoll, so closing all fds is fine.
+        let events = self.events.lock();
+        events
+            .iter()
+            .enumerate()
+            .filter(|(_i, o)| o.is_some()) // This is inefficient but shouldn't be a problem
+            .for_each(|(i, _o)| {
+                unsafe { close(i as _) };
+            });
+
         unsafe { close(self.epoll) };
     }
 }
@@ -80,7 +91,7 @@ impl<H: Sync + Send> EventPoll<H> {
     /// When triggered, one of the threads waiting on the poll will receive the handler via an
     /// appropriate EventGuard. It is guaranteed that only a single thread can have a reference to
     /// the handler at any given time.
-    pub fn new_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
+    pub fn new_event(&self, trigger: RawFd, handler: H) -> Result<(), Error> {
         // Create an event descriptor
         let flags = EPOLLIN | EPOLLONESHOT;
         let ev = Event {
@@ -94,14 +105,15 @@ impl<H: Sync + Send> EventPoll<H> {
             needs_read: false,
         };
 
-        self.register_event(ev)
+        self.register_event(ev)?;
+        Ok(())
     }
 
     /// Add and enable a new write event with the factory.
     /// The event is triggered when a Write operation on the provided trigger becomes possible
     /// For TCP sockets it means that the socket was succesfully connected
     #[allow(dead_code)]
-    pub fn new_write_event(&self, trigger: RawFd, handler: H) -> Result<EventRef, Error> {
+    pub fn new_write_event(&self, trigger: RawFd, handler: H) -> Result<(), Error> {
         // Create an event descriptor
         let flags = EPOLLOUT | EPOLLET | EPOLLONESHOT;
         let ev = Event {
@@ -115,13 +127,14 @@ impl<H: Sync + Send> EventPoll<H> {
             needs_read: false,
         };
 
-        self.register_event(ev)
+        self.register_event(ev)?;
+        Ok(())
     }
 
     /// Add and enable a new timed event with the factory.
     /// The even will be triggered for the first time after period time, and henceforth triggered
     /// every period time. Period is counted from the moment the appropriate EventGuard is released.
-    pub fn new_periodic_event(&self, handler: H, period: Duration) -> Result<EventRef, Error> {
+    pub fn new_periodic_event(&self, handler: H, period: Duration) -> Result<(), Error> {
         // The periodic event on Linux uses the timerfd
         let tfd = match unsafe { timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK) } {
             -1 => match unsafe { timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK) } {
@@ -158,7 +171,8 @@ impl<H: Sync + Send> EventPoll<H> {
             needs_read: true,
         };
 
-        self.register_event(ev)
+        self.register_event(ev)?;
+        Ok(())
     }
 
     /// Add and enable a new notification event with the factory.
@@ -191,7 +205,7 @@ impl<H: Sync + Send> EventPoll<H> {
     }
 
     /// Add and enable a new signal handler
-    pub fn new_signal_event(&self, signal: c_int, handler: H) -> Result<EventRef, Error> {
+    pub fn new_signal_event(&self, signal: c_int, handler: H) -> Result<(), Error> {
         let sfd = match unsafe {
             let mut sigset = std::mem::zeroed();
             sigemptyset(&mut sigset);
@@ -214,7 +228,8 @@ impl<H: Sync + Send> EventPoll<H> {
             needs_read: true,
         };
 
-        self.register_event(ev)
+        self.register_event(ev)?;
+        Ok(())
     }
 
     /// Wait until one of the registered events becomes triggered. Once an event
