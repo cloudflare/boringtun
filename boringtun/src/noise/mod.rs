@@ -14,6 +14,7 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::x25519;
 
+use self::session::Session;
 use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -236,9 +237,7 @@ impl Tunn {
         });
         self.handshake
             .set_static_private(static_private, static_public);
-        for s in &mut self.sessions {
-            *s = None;
-        }
+        self.clear_sessions();
     }
 
     /// Encapsulate a single packet from the tunnel interface.
@@ -248,8 +247,7 @@ impl Tunn {
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
     pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
-        let current = self.current;
-        if let Some(ref session) = self.sessions[current % N_SESSIONS] {
+        if let Some(session) = self.current_session() {
             // Send the packet using an established session
             let packet = session.format_packet_data(src, dst);
             self.timer_tick(TimerName::TimeLastPacketSent);
@@ -328,8 +326,7 @@ impl Tunn {
         let (packet, session) = self.handshake.receive_handshake_initialization(p, dst)?;
 
         // Store new session in ring buffer
-        let index = session.local_index();
-        self.sessions[index % N_SESSIONS] = Some(session);
+        let index = self.set_session(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeLastPacketSent);
@@ -355,13 +352,11 @@ impl Tunn {
 
         let keepalive_packet = session.format_packet_data(&[], dst);
         // Store new session in ring buffer
-        let l_idx = session.local_index();
-        let index = l_idx % N_SESSIONS;
-        self.sessions[index] = Some(session);
+        let index = self.set_session(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick_session_established(true, index); // New session established, we are the initiator
-        self.set_current_session(l_idx);
+        self.set_current_session(index);
 
         tracing::debug!("Sending keepalive");
 
@@ -393,7 +388,7 @@ impl Tunn {
             // There is nothing to do, already using this session, this is the common case
             return;
         }
-        if self.sessions[cur_idx % N_SESSIONS].is_none()
+        if self.session(cur_idx).is_none()
             || self.timers.session_timers[new_idx % N_SESSIONS]
                 >= self.timers.session_timers[cur_idx % N_SESSIONS]
         {
@@ -413,11 +408,11 @@ impl Tunn {
 
         // Get the (probably) right session
         let decapsulated_packet = {
-            let session = self.sessions[idx].as_ref();
-            let session = session.ok_or_else(|| {
+            let session = self.session(idx).ok_or_else(|| {
                 tracing::trace!(message = "No current session available", remote_idx = r_idx);
                 WireGuardError::NoCurrentSession
             })?;
+
             session.receive_packet_data(packet, dst)?
         };
 
@@ -548,7 +543,7 @@ impl Tunn {
         let mut total_weight = 0.0;
 
         for i in 0..N_SESSIONS {
-            if let Some(ref session) = self.sessions[(session_idx.wrapping_sub(i)) % N_SESSIONS] {
+            if let Some(session) = self.session(session_idx.wrapping_sub(i)) {
                 let (expected, received) = session.current_packet_cnt();
 
                 let loss = if expected == 0 {
@@ -582,6 +577,27 @@ impl Tunn {
         let rtt = self.handshake.last_rtt;
 
         (time, tx_bytes, rx_bytes, loss, rtt)
+    }
+
+    fn clear_sessions(&mut self) {
+        for s in &mut self.sessions {
+            *s = None;
+        }
+    }
+
+    fn current_session(&self) -> Option<&Session> {
+        self.session(self.current)
+    }
+
+    fn session(&self, index: usize) -> Option<&Session> {
+        self.sessions[index % N_SESSIONS].as_ref()
+    }
+
+    fn set_session(&mut self, session: Session) -> usize {
+        let index = session.local_index() % N_SESSIONS;
+        self.sessions[index] = Some(session);
+
+        index
     }
 }
 
