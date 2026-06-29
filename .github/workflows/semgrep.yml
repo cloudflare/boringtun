@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 1
       - id: cache-semgrep
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.local
           key: semgrep-1.160.0-${{ runner.os }}
