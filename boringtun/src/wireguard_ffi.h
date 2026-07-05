@@ -103,4 +103,6 @@ struct wireguard_result wireguard_force_handshake(const struct wireguard_tunnel 
                                                   uint8_t *dst,
                                                   uint32_t dst_size);
 
+void wireguard_set_mtu(const struct wireguard_tunnel *tunnel, uint32_t mtu);
+
 struct stats wireguard_stats(const struct wireguard_tunnel *tunnel);

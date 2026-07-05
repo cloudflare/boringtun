@@ -71,6 +71,7 @@ pub struct Tunn {
     tx_bytes: usize,
     rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
+    mtu: Option<usize>,
 }
 
 type MessageType = u32;
@@ -220,7 +221,12 @@ impl Tunn {
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
             }),
+            mtu: None,
         }
+    }
+
+    pub fn set_mtu(&mut self, mtu: usize) {
+        self.mtu = Some(mtu);
     }
 
     /// Update the private key and clear existing sessions
@@ -246,12 +252,13 @@ impl Tunn {
     ///
     /// # Panics
     /// Panics if dst buffer is too small.
-    /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
+    /// Size of dst should be at least src.len() rounded up to a multiple of 16, plus 32,
+    /// and no less than 148 bytes.
     pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
         let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
-            let packet = session.format_packet_data(src, dst);
+            let packet = session.format_packet_data(src, dst, self.mtu);
             self.timer_tick(TimerName::TimeLastPacketSent);
             // Exclude Keepalive packets from timer update.
             if !src.is_empty() {
@@ -353,7 +360,7 @@ impl Tunn {
 
         let session = self.handshake.receive_handshake_response(p)?;
 
-        let keepalive_packet = session.format_packet_data(&[], dst);
+        let keepalive_packet = session.format_packet_data(&[], dst, self.mtu);
         // Store new session in ring buffer
         let l_idx = session.local_index();
         let index = l_idx % N_SESSIONS;
@@ -666,13 +673,23 @@ mod tests {
         (my_tun, their_tun)
     }
 
-    fn create_ipv4_udp_packet() -> Vec<u8> {
+    fn create_ipv4_udp_packet_with_payload(payload: &[u8]) -> Vec<u8> {
         let header =
             etherparse::PacketBuilder::ipv4([192, 168, 1, 2], [192, 168, 1, 3], 5).udp(5678, 23);
-        let payload = [0, 1, 2, 3];
         let mut packet = Vec::<u8>::with_capacity(header.size(payload.len()));
-        header.write(&mut packet, &payload).unwrap();
+        header.write(&mut packet, payload).unwrap();
         packet
+    }
+
+    fn create_ipv4_udp_packet() -> Vec<u8> {
+        create_ipv4_udp_packet_with_payload(&[0, 1, 2, 3])
+    }
+
+    fn encrypted_payload_len(packet: &[u8]) -> usize {
+        match Tunn::parse_incoming_packet(packet).unwrap() {
+            Packet::PacketData(p) => p.encrypted_encapsulated_packet.len(),
+            _ => unreachable!(),
+        }
     }
 
     #[cfg(feature = "mock-instant")]
@@ -790,5 +807,69 @@ mod tests {
             unreachable!();
         };
         assert_eq!(sent_packet_buf, recv_packet_buf);
+    }
+
+    #[test]
+    fn encapsulate_pads_data_packet_to_multiple_of_16() {
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
+        my_tun.set_mtu(1420);
+        let mut my_dst = [0u8; 1024];
+        let mut their_dst = [0u8; 1024];
+
+        let sent_packet_buf = create_ipv4_udp_packet_with_payload(&[1, 2, 3, 4, 5]);
+        assert_ne!(sent_packet_buf.len() % 16, 0);
+
+        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        let data = if let TunnResult::WriteToNetwork(sent) = data {
+            sent
+        } else {
+            unreachable!();
+        };
+
+        let padded_len = (sent_packet_buf.len() + 15) & !15;
+        assert_eq!(encrypted_payload_len(data), padded_len + 16);
+
+        let data = their_tun.decapsulate(None, data, &mut their_dst);
+        let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv, _addr) = data {
+            recv
+        } else {
+            unreachable!();
+        };
+        assert_eq!(sent_packet_buf, recv_packet_buf);
+    }
+
+    #[test]
+    fn encapsulate_does_not_pad_beyond_mtu() {
+        let (mut my_tun, _their_tun) = create_two_tuns_and_handshake();
+        let mut my_dst = [0u8; 1024];
+
+        let sent_packet_buf = create_ipv4_udp_packet_with_payload(&[1, 2, 3, 4, 5]);
+        assert_ne!(sent_packet_buf.len() % 16, 0);
+        my_tun.set_mtu(sent_packet_buf.len());
+
+        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        let data = if let TunnResult::WriteToNetwork(sent) = data {
+            sent
+        } else {
+            unreachable!();
+        };
+
+        assert_eq!(encrypted_payload_len(data), sent_packet_buf.len() + 16);
+    }
+
+    #[test]
+    fn keepalive_is_not_padded() {
+        let (mut my_tun, _their_tun) = create_two_tuns_and_handshake();
+        my_tun.set_mtu(1420);
+        let mut my_dst = [0u8; 1024];
+
+        let data = my_tun.encapsulate(&[], &mut my_dst);
+        let data = if let TunnResult::WriteToNetwork(sent) = data {
+            sent
+        } else {
+            unreachable!();
+        };
+
+        assert_eq!(encrypted_payload_len(data), 16);
     }
 }

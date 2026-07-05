@@ -131,7 +131,11 @@ impl Device {
 
                 // Periodically read the mtu of the interface in case it changes
                 if let Ok(mtu) = d.iface.mtu() {
-                    d.mtu.store(mtu, Ordering::Relaxed);
+                    if d.mtu.swap(mtu, Ordering::Relaxed) != mtu {
+                        for peer in d.peers.values() {
+                            peer.lock().tunnel.set_mtu(mtu);
+                        }
+                    }
                 }
 
                 Action::Continue

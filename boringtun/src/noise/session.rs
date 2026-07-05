@@ -193,8 +193,17 @@ impl Session {
     /// src - an IP packet from the interface
     /// dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
     /// returns the size of the formatted packet
-    pub(super) fn format_packet_data<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> &'a mut [u8] {
-        if dst.len() < src.len() + super::DATA_OVERHEAD_SZ {
+    pub(super) fn format_packet_data<'a>(
+        &self,
+        src: &[u8],
+        dst: &'a mut [u8],
+        mtu: Option<usize>,
+    ) -> &'a mut [u8] {
+        let padded_len = match mtu {
+            Some(mtu) => ((src.len() + 15) & !15).min(mtu).max(src.len()),
+            None => src.len(),
+        };
+        if dst.len() < padded_len + super::DATA_OVERHEAD_SZ {
             panic!("The destination buffer is too small");
         }
 
@@ -208,20 +217,20 @@ impl Session {
         receiver_index.copy_from_slice(&self.sending_index.to_le_bytes());
         counter.copy_from_slice(&sending_key_counter.to_le_bytes());
 
-        // TODO: spec requires padding to 16 bytes, but actually works fine without it
         let n = {
             let mut nonce = [0u8; 12];
             nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
             data[..src.len()].copy_from_slice(src);
+            data[src.len()..padded_len].fill(0);
             self.sender
                 .seal_in_place_separate_tag(
                     Nonce::assume_unique_for_key(nonce),
                     Aad::from(&[]),
-                    &mut data[..src.len()],
+                    &mut data[..padded_len],
                 )
                 .map(|tag| {
-                    data[src.len()..src.len() + AEAD_SIZE].copy_from_slice(tag.as_ref());
-                    src.len() + AEAD_SIZE
+                    data[padded_len..padded_len + AEAD_SIZE].copy_from_slice(tag.as_ref());
+                    padded_len + AEAD_SIZE
                 })
                 .unwrap()
         };

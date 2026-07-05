@@ -378,6 +378,12 @@ pub unsafe extern "C" fn wireguard_force_handshake(
     wireguard_result::from(tunnel.format_handshake_initiation(dst, true))
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn wireguard_set_mtu(tunnel: *const Mutex<Tunn>, mtu: u32) {
+    let mut tunnel = tunnel.as_ref().unwrap().lock();
+    tunnel.set_mtu(mtu as usize);
+}
+
 /// Returns stats from the tunnel:
 /// Time of last handshake in seconds (or -1 if no handshake occurred)
 /// Number of data bytes encapsulated
