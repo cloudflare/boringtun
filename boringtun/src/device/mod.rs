@@ -640,6 +640,8 @@ impl Device {
                         Some(peer) => peer,
                     };
 
+                    let can_roam = !matches!(parsed_packet, Packet::PacketCookieReply(_));
+
                     let mut p = peer.lock();
 
                     // We found a peer, use it to decapsulate the message+
@@ -676,13 +678,15 @@ impl Device {
                     }
 
                     // This packet was OK, that means we want to create a connected socket for this peer
-                    let addr = addr.as_socket().unwrap();
-                    let ip_addr = addr.ip();
-                    p.set_endpoint(addr);
-                    if d.config.use_connected_socket {
-                        if let Ok(sock) = p.connect_endpoint(d.listen_port, d.fwmark) {
-                            d.register_conn_handler(Arc::clone(peer), sock, ip_addr)
-                                .unwrap();
+                    if can_roam {
+                        let addr = addr.as_socket().unwrap();
+                        let ip_addr = addr.ip();
+                        p.set_endpoint(addr);
+                        if d.config.use_connected_socket {
+                            if let Ok(sock) = p.connect_endpoint(d.listen_port, d.fwmark) {
+                                d.register_conn_handler(Arc::clone(peer), sock, ip_addr)
+                                    .unwrap();
+                            }
                         }
                     }
 
