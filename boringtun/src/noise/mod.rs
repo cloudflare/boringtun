@@ -16,7 +16,7 @@ use crate::x25519;
 
 use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -273,9 +273,24 @@ impl Tunn {
     /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
     /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
     /// packet is processed.
+    ///
+    /// If the source port is known, prefer [`Tunn::decapsulate_from`], which binds cookies
+    /// to the full source endpoint; this method stands in a fixed port of 0.
     pub fn decapsulate<'a>(
         &mut self,
         src_addr: Option<IpAddr>,
+        datagram: &[u8],
+        dst: &'a mut [u8],
+    ) -> TunnResult<'a> {
+        self.decapsulate_from(src_addr.map(|ip| SocketAddr::new(ip, 0)), datagram, dst)
+    }
+
+    /// Same as [`Tunn::decapsulate`], but takes the full source socket address so that,
+    /// under load, cookies are bound to the sender's IP and port (WireGuard whitepaper
+    /// section 5.4.7) rather than the IP alone.
+    pub fn decapsulate_from<'a>(
+        &mut self,
+        src_addr: Option<SocketAddr>,
         datagram: &[u8],
         dst: &'a mut [u8],
     ) -> TunnResult<'a> {
@@ -709,6 +724,91 @@ mod tests {
         let resp = create_handshake_response(&mut their_tun, &init);
         let packet = Tunn::parse_incoming_packet(&resp).unwrap();
         assert!(matches!(packet, Packet::HandshakeResponse(_)));
+    }
+
+    #[test]
+    fn under_load_cookie_is_bound_to_source_ip_and_port() {
+        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
+
+        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
+
+        // A rate limiter with a limit of 0 handshakes per second is always under load
+        let their_rate_limiter = Arc::new(RateLimiter::new(&their_public_key, 0));
+
+        let mut my_tun = Tunn::new(
+            my_secret_key,
+            their_public_key,
+            None,
+            None,
+            OsRng.next_u32(),
+            None,
+        );
+        let mut their_tun = Tunn::new(
+            their_secret_key,
+            my_public_key,
+            None,
+            None,
+            OsRng.next_u32(),
+            Some(their_rate_limiter),
+        );
+
+        let src = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), 1234);
+        let same_ip_other_port = SocketAddr::new(src.ip(), 5678);
+
+        // Without a valid mac2, the loaded responder demands a cookie
+        let init = create_handshake_init(&mut my_tun);
+        let mut dst = vec![0u8; 2048];
+        let cookie_reply = match their_tun.decapsulate_from(Some(src), &init, &mut dst) {
+            TunnResult::WriteToNetwork(sent) => sent.to_vec(),
+            unexpected => panic!("expected a cookie reply, got {:?}", unexpected),
+        };
+        assert!(matches!(
+            Tunn::parse_incoming_packet(&cookie_reply).unwrap(),
+            Packet::PacketCookieReply(_)
+        ));
+
+        // The initiator stores the cookie and retries with mac2 set
+        let mut dst = vec![0u8; 2048];
+        assert!(matches!(
+            my_tun.decapsulate(None, &cookie_reply, &mut dst),
+            TunnResult::Done
+        ));
+        let mut dst = vec![0u8; 2048];
+        let init_with_mac2 = match my_tun.format_handshake_initiation(&mut dst, true) {
+            TunnResult::WriteToNetwork(sent) => sent.to_vec(),
+            unexpected => panic!("expected handshake initiation, got {:?}", unexpected),
+        };
+
+        // From the endpoint the cookie was issued to, the handshake proceeds
+        let mut dst = vec![0u8; 2048];
+        let resp = match their_tun.decapsulate_from(Some(src), &init_with_mac2, &mut dst) {
+            TunnResult::WriteToNetwork(sent) => sent.to_vec(),
+            unexpected => panic!("expected handshake response, got {:?}", unexpected),
+        };
+        assert!(matches!(
+            Tunn::parse_incoming_packet(&resp).unwrap(),
+            Packet::HandshakeResponse(_)
+        ));
+
+        // From the same IP but a different port, the stored cookie must not
+        // validate; the responder demands a new cookie instead of processing
+        // the handshake
+        let mut dst = vec![0u8; 2048];
+        let retry = match my_tun.format_handshake_initiation(&mut dst, true) {
+            TunnResult::WriteToNetwork(sent) => sent.to_vec(),
+            unexpected => panic!("expected handshake initiation, got {:?}", unexpected),
+        };
+        let mut dst = vec![0u8; 2048];
+        let reply = match their_tun.decapsulate_from(Some(same_ip_other_port), &retry, &mut dst) {
+            TunnResult::WriteToNetwork(sent) => sent.to_vec(),
+            unexpected => panic!("expected a cookie reply, got {:?}", unexpected),
+        };
+        assert!(matches!(
+            Tunn::parse_incoming_packet(&reply).unwrap(),
+            Packet::PacketCookieReply(_)
+        ));
     }
 
     #[test]

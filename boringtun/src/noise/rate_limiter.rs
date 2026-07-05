@@ -5,7 +5,7 @@ use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, W
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 use portable_atomic::{AtomicU64, Ordering};
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 #[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::Instant;
@@ -85,16 +85,18 @@ impl RateLimiter {
         }
     }
 
-    /// Compute the correct cookie value based on the current secret value and the source IP
-    fn current_cookie(&self, addr: IpAddr) -> Cookie {
-        let mut addr_bytes = [0u8; 16];
+    /// Compute the correct cookie value based on the current secret value and the source IP + port
+    fn current_cookie(&self, addr: SocketAddr) -> Cookie {
+        // 16 bytes for the IP address (max, IPv6) followed by 2 bytes for the UDP port
+        let mut addr_bytes = [0u8; 16 + 2];
 
-        match addr {
+        match addr.ip() {
             IpAddr::V4(a) => addr_bytes[..4].copy_from_slice(&a.octets()[..]),
-            IpAddr::V6(a) => addr_bytes[..].copy_from_slice(&a.octets()[..]),
+            IpAddr::V6(a) => addr_bytes[..16].copy_from_slice(&a.octets()[..]),
         }
+        addr_bytes[16..].copy_from_slice(&addr.port().to_le_bytes());
 
-        // The current cookie for a given IP is the MAC(responder.changing_secret_every_two_minutes, initiator.ip_address)
+        // The current cookie for a given endpoint is MAC(responder.changing_secret_every_two_minutes, initiator.ip_address || initiator.udp_port)
         // First we derive the secret from the current time, the value of cur_counter would change with time.
         let cur_counter = Instant::now().duration_since(self.start_time).as_secs() / COOKIE_REFRESH;
 
@@ -152,7 +154,7 @@ impl RateLimiter {
     /// Verify the MAC fields on the datagram, and apply rate limiting if needed
     pub fn verify_packet<'a, 'b>(
         &self,
-        src_addr: Option<IpAddr>,
+        src_addr: Option<SocketAddr>,
         src: &'a [u8],
         dst: &'b mut [u8],
     ) -> Result<Packet<'a>, TunnResult<'b>> {

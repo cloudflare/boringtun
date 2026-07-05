@@ -28,7 +28,7 @@ pub mod tun;
 use std::collections::HashMap;
 use std::io::{self, Write as _};
 use std::mem::MaybeUninit;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -610,7 +610,7 @@ impl Device {
                     let packet = &t.src_buf[..packet_len];
                     // The rate limiter initially checks mac1 and mac2, and optionally asks to send a cookie
                     let parsed_packet = match rate_limiter.verify_packet(
-                        Some(addr.as_socket().unwrap().ip()),
+                        Some(addr.as_socket().unwrap()),
                         packet,
                         &mut t.dst_buf,
                     ) {
@@ -677,11 +677,10 @@ impl Device {
 
                     // This packet was OK, that means we want to create a connected socket for this peer
                     let addr = addr.as_socket().unwrap();
-                    let ip_addr = addr.ip();
                     p.set_endpoint(addr);
                     if d.config.use_connected_socket {
                         if let Ok(sock) = p.connect_endpoint(d.listen_port, d.fwmark) {
-                            d.register_conn_handler(Arc::clone(peer), sock, ip_addr)
+                            d.register_conn_handler(Arc::clone(peer), sock, addr)
                                 .unwrap();
                         }
                     }
@@ -701,7 +700,7 @@ impl Device {
         &self,
         peer: Arc<Mutex<Peer>>,
         udp: socket2::Socket,
-        peer_addr: IpAddr,
+        peer_addr: SocketAddr,
     ) -> Result<(), Error> {
         self.queue.new_event(
             udp.as_raw_fd(),
@@ -720,7 +719,7 @@ impl Device {
                 while let Ok(read_bytes) = udp.recv(src_buf) {
                     let mut flush = false;
                     let mut p = peer.lock();
-                    match p.tunnel.decapsulate(
+                    match p.tunnel.decapsulate_from(
                         Some(peer_addr),
                         &t.src_buf[..read_bytes],
                         &mut t.dst_buf[..],
