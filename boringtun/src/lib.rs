@@ -4,13 +4,18 @@
 //! Simple implementation of the client-side of the WireGuard protocol.
 //!
 //! <code>git clone https://github.com/cloudflare/boringtun.git</code>
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
-#[cfg(feature = "device")]
+#[cfg(any(feature = "device", docsrs))]
+#[cfg_attr(docsrs, doc(cfg(feature = "device")))]
 pub mod device;
 
-#[cfg(feature = "ffi-bindings")]
+#[cfg(any(feature = "ffi-bindings", docsrs))]
+#[cfg_attr(docsrs, doc(cfg(feature = "ffi-bindings")))]
 pub mod ffi;
-#[cfg(feature = "jni-bindings")]
+
+#[cfg(any(feature = "jni-bindings", docsrs))]
+#[cfg_attr(docsrs, doc(cfg(feature = "jni-bindings")))]
 pub mod jni;
 pub mod noise;
 
