@@ -1,2 +1,5 @@
 [target.'cfg(unix)']
 runner = 'sudo -E'
+
+[build]
+rustdocflags = ["--cfg", "docsrs", "-Dwarnings"]

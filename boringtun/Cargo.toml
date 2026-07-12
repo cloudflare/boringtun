@@ -13,6 +13,10 @@ repository = "https://github.com/cloudflare/boringtun"
 documentation = "https://docs.rs/boringtun/0.7.1/boringtun/"
 edition = "2018"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = []
 device = ["socket2", "thiserror"]
