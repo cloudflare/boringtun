@@ -3,7 +3,7 @@
 
 //! Simple implementation of the client-side of the WireGuard protocol.
 //!
-//! <code>git clone https://github.com/cloudflare/boringtun.git</code>
+//! <code>git clone <https://github.com/cloudflare/boringtun.git></code>
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(any(feature = "device", docsrs))]

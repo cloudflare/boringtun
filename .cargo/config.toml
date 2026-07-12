@@ -2,4 +2,4 @@
 runner = 'sudo -E'
 
 [build]
-rustdocflags = ["--cfg", "docsrs"]
+rustdocflags = ["--cfg", "docsrs", "-Dwarnings"]
