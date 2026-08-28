@@ -4,20 +4,16 @@
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
-#[cfg(not(feature = "mock-instant"))]
-use crate::sleepyinstant::Instant;
+use crate::sleepyinstant::{ClockDuration, Instant};
 use crate::x25519;
-use aead::{Aead, Payload};
+use aead::array::Array;
+use aead::AeadInOut;
+use blake2::digest::consts::{U16, U24};
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
-use rand_core::OsRng;
+use core::convert::{TryFrom, TryInto};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
-use std::convert::TryInto;
-use std::time::{Duration, SystemTime};
-
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
 
 pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
 pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
@@ -67,21 +63,21 @@ pub(crate) fn b2s_hmac2(key: &[u8], data1: &[u8], data2: &[u8]) -> [u8; 32] {
 
 #[inline]
 pub(crate) fn b2s_keyed_mac_16(key: &[u8], data1: &[u8]) -> [u8; 16] {
-    let mut hmac = Blake2sMac::new_from_slice(key).unwrap();
+    let mut hmac = Blake2sMac::<U16>::new_from_slice(key).unwrap();
     blake2::digest::Update::update(&mut hmac, data1);
     hmac.finalize_fixed().into()
 }
 
 #[inline]
 pub(crate) fn b2s_keyed_mac_16_2(key: &[u8], data1: &[u8], data2: &[u8]) -> [u8; 16] {
-    let mut hmac = Blake2sMac::new_from_slice(key).unwrap();
+    let mut hmac = Blake2sMac::<U16>::new_from_slice(key).unwrap();
     blake2::digest::Update::update(&mut hmac, data1);
     blake2::digest::Update::update(&mut hmac, data2);
     hmac.finalize_fixed().into()
 }
 
 pub(crate) fn b2s_mac_24(key: &[u8], data1: &[u8]) -> [u8; 24] {
-    let mut hmac = Blake2sMac::new_from_slice(key).unwrap();
+    let mut hmac = Blake2sMac::<U24>::new_from_slice(key).unwrap();
     blake2::digest::Update::update(&mut hmac, data1);
     hmac.finalize_fixed().into()
 }
@@ -135,6 +131,10 @@ fn aead_chacha20_open(
     Ok(())
 }
 
+/// `aead_chacha20_open_inner` is only ever called during the handshake, on messages no larger
+/// than a single encrypted static public key (`KEY_LEN` bytes) plus the AEAD tag.
+const MAX_AEAD_OPEN_DATA_LEN: usize = KEY_LEN + 16;
+
 #[inline]
 fn aead_chacha20_open_inner(
     buffer: &mut [u8],
@@ -143,14 +143,16 @@ fn aead_chacha20_open_inner(
     data: &[u8],
     aad: &[u8],
 ) -> Result<(), ring::error::Unspecified> {
-    let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key).unwrap());
+    let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key)?);
 
-    let mut inner_buffer = data.to_owned();
+    let mut inner_buffer = [0u8; MAX_AEAD_OPEN_DATA_LEN];
+    let inner_buffer = &mut inner_buffer[..data.len()];
+    inner_buffer.copy_from_slice(data);
 
     let plaintext = key.open_in_place(
         Nonce::assume_unique_for_key(nonce),
         Aad::from(aad),
-        &mut inner_buffer,
+        inner_buffer,
     )?;
 
     buffer.copy_from_slice(plaintext);
@@ -168,7 +170,7 @@ struct Tai64N {
 #[derive(Debug)]
 /// This struct computes a [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp from current system time
 struct TimeStamper {
-    duration_at_start: Duration,
+    duration_at_start: ClockDuration,
     instant_at_start: Instant,
 }
 
@@ -176,9 +178,7 @@ impl TimeStamper {
     /// Create a new TimeStamper
     pub fn new() -> TimeStamper {
         TimeStamper {
-            duration_at_start: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap(),
+            duration_at_start: Instant::now().duration_since_epoch(),
             instant_at_start: Instant::now(),
         }
     }
@@ -188,8 +188,9 @@ impl TimeStamper {
         const TAI64_BASE: u64 = (1u64 << 62) + 37;
         let mut ext_stamp = [0u8; 12];
         let stamp = Instant::now().duration_since(self.instant_at_start) + self.duration_at_start;
+        let whole_secs = ClockDuration::from_secs(stamp.as_secs());
         ext_stamp[0..8].copy_from_slice(&(stamp.as_secs() + TAI64_BASE).to_be_bytes());
-        ext_stamp[8..12].copy_from_slice(&stamp.subsec_nanos().to_be_bytes());
+        ext_stamp[8..12].copy_from_slice(&((stamp - whole_secs).as_nanos() as u32).to_be_bytes());
         ext_stamp
     }
 }
@@ -206,7 +207,7 @@ impl Tai64N {
             return Err(WireGuardError::InvalidTai64nTimestamp);
         }
 
-        let (sec_bytes, nano_bytes) = buf.split_at(std::mem::size_of::<u64>());
+        let (sec_bytes, nano_bytes) = buf.split_at(size_of::<u64>());
         let secs = u64::from_be_bytes(sec_bytes.try_into().unwrap());
         let nano = u32::from_be_bytes(nano_bytes.try_into().unwrap());
 
@@ -244,8 +245,8 @@ struct NoiseParams {
     preshared_key: Option<[u8; KEY_LEN]>,
 }
 
-impl std::fmt::Debug for NoiseParams {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for NoiseParams {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("NoiseParams")
             .field("static_public", &self.static_public)
             .field("static_private", &"<redacted>")
@@ -265,8 +266,8 @@ struct HandshakeInitSentState {
     time_sent: Instant,
 }
 
-impl std::fmt::Debug for HandshakeInitSentState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for HandshakeInitSentState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("HandshakeInitSentState")
             .field("local_index", &self.local_index)
             .field("hash", &self.hash)
@@ -549,7 +550,7 @@ impl Handshake {
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
         hash = b2s_hash(&hash, packet.encrypted_timestamp);
 
-        self.previous = std::mem::replace(
+        self.previous = core::mem::replace(
             &mut self.state,
             HandshakeState::InitReceived {
                 chaining_key,
@@ -662,18 +663,20 @@ impl Handshake {
         // msg.encrypted_cookie = XAEAD(HASH(LABEL_COOKIE || responder.static_public), msg.nonce, cookie, last_received_msg.mac1)
         let key = b2s_hash(LABEL_COOKIE, self.params.peer_static_public.as_bytes()); // TODO: pre-compute
 
-        let payload = Payload {
-            aad: &mac1[0..16],
-            msg: packet.encrypted_cookie,
-        };
-        let plaintext = XChaCha20Poly1305::new_from_slice(&key)
+        let (encrypted_cookie, tag) = packet.encrypted_cookie.split_at(16);
+        let mut cookie = [0u8; 16];
+        cookie.copy_from_slice(encrypted_cookie);
+
+        XChaCha20Poly1305::new_from_slice(&key)
             .unwrap()
-            .decrypt(packet.nonce.into(), payload)
+            .decrypt_inout_detached(
+                <&Array<_, _>>::try_from(packet.nonce).unwrap(),
+                &mac1[0..16],
+                (&mut cookie[..]).into(),
+                <&Array<_, _>>::try_from(tag).unwrap(),
+            )
             .map_err(|_| WireGuardError::InvalidAeadTag)?;
 
-        let cookie = plaintext
-            .try_into()
-            .map_err(|_| WireGuardError::InvalidPacket)?;
         self.cookies.write_cookie = Some(cookie);
         Ok(())
     }
@@ -728,7 +731,7 @@ impl Handshake {
         let mut hash = INITIAL_CHAIN_HASH;
         hash = b2s_hash(&hash, self.params.peer_static_public.as_bytes());
         // initiator.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random_from_rng(OsRng);
+        let ephemeral_private = x25519::ReusableSecret::random();
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
         message_type.copy_from_slice(&super::HANDSHAKE_INIT.to_le_bytes());
@@ -772,7 +775,7 @@ impl Handshake {
         hash = b2s_hash(&hash, encrypted_timestamp);
 
         let time_now = Instant::now();
-        self.previous = std::mem::replace(
+        self.previous = core::mem::replace(
             &mut self.state,
             HandshakeState::InitSent(HandshakeInitSentState {
                 local_index,
@@ -794,7 +797,7 @@ impl Handshake {
             return Err(WireGuardError::DestinationBufferTooSmall);
         }
 
-        let state = std::mem::replace(&mut self.state, HandshakeState::None);
+        let state = core::mem::replace(&mut self.state, HandshakeState::None);
         let (mut chaining_key, mut hash, peer_ephemeral_public, peer_index) = match state {
             HandshakeState::InitReceived {
                 chaining_key,
@@ -814,7 +817,7 @@ impl Handshake {
         let (encrypted_nothing, _) = rest.split_at_mut(16);
 
         // responder.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random_from_rng(OsRng);
+        let ephemeral_private = x25519::ReusableSecret::random();
         let local_index = self.inc_index();
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
@@ -882,7 +885,11 @@ impl Handshake {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
+    use alloc::vec;
+    use std::eprintln;
 
     #[test]
     fn chacha20_seal_rfc7530_test_vector() {

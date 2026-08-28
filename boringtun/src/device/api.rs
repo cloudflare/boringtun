@@ -6,8 +6,9 @@ use super::drop_privileges::get_saved_ids;
 use super::{AllowedIP, Device, Error, SocketAddr};
 use crate::device::Action;
 use crate::serialization::KeyBytes;
+use crate::sleepyinstant::ClockDuration;
 use crate::x25519;
-use hex::encode as encode_hex;
+use hex::encode_to_slice as encode_hex;
 use libc::*;
 use std::fs::{create_dir, remove_file};
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -69,7 +70,7 @@ impl Device {
                         _ => EIO,
                     };
                     // The protocol requires to return an error code as the response, or zero on success
-                    writeln!(writer, "errno={}\n", status).ok();
+                    writeln!(writer, "errno={status}\n").ok();
                 }
                 Action::Continue // Indicates the worker thread should continue as normal
             }),
@@ -99,7 +100,7 @@ impl Device {
                         _ => EIO,
                     };
                     // The protocol requires to return an error code as the response, or zero on success
-                    writeln!(writer, "errno={}\n", status).ok();
+                    writeln!(writer, "errno={status}\n").ok();
                 } else {
                     // The remote side is likely closed; we should trigger an exit.
                     d.trigger_exit();
@@ -157,7 +158,10 @@ impl Device {
 fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
-        writeln!(writer, "own_public_key={}", encode_hex(k.1.as_bytes()));
+        let mut output = [0u8; 64];
+        encode_hex(k.1.as_bytes(), &mut output);
+        let hex_string = ::core::str::from_utf8(&output).unwrap();
+        writeln!(writer, "own_public_key={}", hex_string);
     }
 
     if d.listen_port != 0 {
@@ -165,38 +169,50 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
     }
 
     if let Some(fwmark) = d.fwmark {
-        writeln!(writer, "fwmark={}", fwmark);
+        writeln!(writer, "fwmark={fwmark}");
     }
 
     for (k, p) in d.peers.iter() {
         let p = p.lock();
-        writeln!(writer, "public_key={}", encode_hex(k.as_bytes()));
+
+        let mut output = [0u8; 64];
+        encode_hex(k.as_bytes(), &mut output);
+        let hex_string = ::core::str::from_utf8(&output).unwrap();
+        writeln!(writer, "public_key={}", hex_string);
 
         if let Some(ref key) = p.preshared_key() {
-            writeln!(writer, "preshared_key={}", encode_hex(key));
+            let mut output = [0u8; 64];
+            encode_hex(*key, &mut output);
+            let hex_string = ::core::str::from_utf8(&output).unwrap();
+            writeln!(writer, "preshared_key={}", hex_string);
         }
 
         if let Some(keepalive) = p.persistent_keepalive() {
-            writeln!(writer, "persistent_keepalive_interval={}", keepalive);
+            writeln!(writer, "persistent_keepalive_interval={keepalive}");
         }
 
         if let Some(ref addr) = p.endpoint().addr {
-            writeln!(writer, "endpoint={}", addr);
+            writeln!(writer, "endpoint={addr}");
         }
 
         for (ip, cidr) in p.allowed_ips() {
-            writeln!(writer, "allowed_ip={}/{}", ip, cidr);
+            writeln!(writer, "allowed_ip={ip}/{cidr}");
         }
 
         if let Some(time) = p.time_since_last_handshake() {
+            let whole_secs = ClockDuration::from_secs(time.as_secs());
             writeln!(writer, "last_handshake_time_sec={}", time.as_secs());
-            writeln!(writer, "last_handshake_time_nsec={}", time.subsec_nanos());
+            writeln!(
+                writer,
+                "last_handshake_time_nsec={}",
+                (time - whole_secs).as_nanos()
+            );
         }
 
         let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
 
-        writeln!(writer, "rx_bytes={}", rx_bytes);
-        writeln!(writer, "tx_bytes={}", tx_bytes);
+        writeln!(writer, "rx_bytes={rx_bytes}");
+        writeln!(writer, "tx_bytes={tx_bytes}");
     }
     0
 }
@@ -260,7 +276,7 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
                                     reader,
                                     device,
                                     x25519::PublicKey::from(key_bytes.0),
-                                )
+                                );
                             }
                             Err(_) => return EINVAL,
                         },

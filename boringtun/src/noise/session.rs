@@ -3,9 +3,14 @@
 
 use super::PacketData;
 use crate::noise::errors::WireGuardError;
-use parking_lot::Mutex;
+use lock_api::Mutex;
+#[cfg(feature = "std")]
+use parking_lot::RawMutex;
 use portable_atomic::{AtomicU64, Ordering};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
+
+#[cfg(not(feature = "std"))]
+type RawMutex = spin::Mutex<()>;
 
 pub struct Session {
     pub(crate) receiving_index: u32,
@@ -13,11 +18,11 @@ pub struct Session {
     receiver: LessSafeKey,
     sender: LessSafeKey,
     sending_key_counter: AtomicU64,
-    receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
+    receiving_key_counter: Mutex<RawMutex, ReceivingKeyCounterValidator>,
 }
 
-impl std::fmt::Debug for Session {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Debug for Session {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(
             f,
             "Session: {}<- ->{}",
@@ -198,7 +203,7 @@ impl Session {
             panic!("The destination buffer is too small");
         }
 
-        let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
+        let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed);
 
         let (message_type, rest) = dst.split_at_mut(4);
         let (receiver_index, rest) = rest.split_at_mut(4);

@@ -2,27 +2,30 @@ use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_2
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
+use core::convert::TryFrom;
+use core::net::IpAddr;
 use portable_atomic::{AtomicU64, Ordering};
-use std::net::IpAddr;
 
-#[cfg(not(feature = "mock-instant"))]
-use crate::sleepyinstant::Instant;
+use crate::sleepyinstant::{ClockDuration, Instant};
 
-use aead::generic_array::GenericArray;
-use aead::{AeadInPlace, KeyInit};
+use aead::array::Array;
+use aead::{AeadInOut, KeyInit};
 use chacha20poly1305::{Key, XChaCha20Poly1305};
-use parking_lot::Mutex;
-use rand_core::{OsRng, RngCore};
+use lock_api::Mutex;
+#[cfg(feature = "std")]
+use parking_lot::RawMutex;
+use rand::{rngs::SysRng, TryRng};
 use ring::constant_time::verify_slices_are_equal;
 
-const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can optimize out the division
+#[cfg(not(feature = "std"))]
+type RawMutex = spin::Mutex<()>;
+
+const COOKIE_REFRESH: ClockDuration = ClockDuration::from_secs(128); // Use 128 and not 120 so the compiler can optimize out the division
 const COOKIE_SIZE: usize = 16;
 const COOKIE_NONCE_SIZE: usize = 24;
 
 /// How often should reset count in seconds
-const RESET_PERIOD: u64 = 1;
+const RESET_PERIOD: ClockDuration = ClockDuration::from_secs(1);
 
 type Cookie = [u8; COOKIE_SIZE];
 
@@ -40,7 +43,7 @@ pub struct RateLimiter {
     /// The key we use to derive the cookie
     secret_key: [u8; 16],
     start_time: Instant,
-    /// A single 64 bit counter (should suffice for many years)
+    /// A single usize bit counter (should suffice for many years)
     nonce_ctr: AtomicU64,
     mac1_key: [u8; 32],
     cookie_key: Key,
@@ -48,13 +51,13 @@ pub struct RateLimiter {
     /// The counter since last reset
     count: AtomicU64,
     /// The time last reset was performed on this rate limiter
-    last_reset: Mutex<Instant>,
+    last_reset: Mutex<RawMutex, Instant>,
 }
 
 impl RateLimiter {
     pub fn new(public_key: &crate::x25519::PublicKey, limit: u64) -> Self {
         let mut secret_key = [0u8; 16];
-        OsRng.fill_bytes(&mut secret_key);
+        SysRng.try_fill_bytes(&mut secret_key).unwrap();
         RateLimiter {
             nonce_key: Self::rand_bytes(),
             secret_key,
@@ -70,7 +73,7 @@ impl RateLimiter {
 
     fn rand_bytes() -> [u8; 32] {
         let mut key = [0u8; 32];
-        OsRng.fill_bytes(&mut key);
+        SysRng.try_fill_bytes(&mut key).unwrap();
         key
     }
 
@@ -79,7 +82,7 @@ impl RateLimiter {
         // The rate limiter is not very accurate, but at the scale we care about it doesn't matter much
         let current_time = Instant::now();
         let mut last_reset_time = self.last_reset.lock();
-        if current_time.duration_since(*last_reset_time).as_secs() >= RESET_PERIOD {
+        if current_time.duration_since(*last_reset_time) >= RESET_PERIOD {
             self.count.store(0, Ordering::SeqCst);
             *last_reset_time = current_time;
         }
@@ -96,7 +99,8 @@ impl RateLimiter {
 
         // The current cookie for a given IP is the MAC(responder.changing_secret_every_two_minutes, initiator.ip_address)
         // First we derive the secret from the current time, the value of cur_counter would change with time.
-        let cur_counter = Instant::now().duration_since(self.start_time).as_secs() / COOKIE_REFRESH;
+        let cur_counter =
+            Instant::now().duration_since(self.start_time).as_secs() / COOKIE_REFRESH.as_secs();
 
         // Next we derive the cookie
         b2s_keyed_mac_16_2(&self.secret_key, &cur_counter.to_le_bytes(), &addr_bytes)
@@ -137,11 +141,11 @@ impl RateLimiter {
 
         let cipher = XChaCha20Poly1305::new(&self.cookie_key);
 
-        let iv = GenericArray::from_slice(nonce);
+        let iv = <&Array<_, _>>::try_from(&*nonce).unwrap();
 
         encrypted_cookie[..16].copy_from_slice(&cookie);
         let tag = cipher
-            .encrypt_in_place_detached(iv, mac1, &mut encrypted_cookie[..16])
+            .encrypt_inout_detached(iv, mac1, (&mut encrypted_cookie[..16]).into())
             .map_err(|_| WireGuardError::DestinationBufferTooSmall)?;
 
         encrypted_cookie[16..].copy_from_slice(&tag);

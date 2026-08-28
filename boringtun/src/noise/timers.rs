@@ -3,25 +3,19 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
-use std::mem;
-use std::ops::{Index, IndexMut};
-
-use std::time::Duration;
-
-#[cfg(feature = "mock-instant")]
-use mock_instant::Instant;
-
-#[cfg(not(feature = "mock-instant"))]
+use crate::sleepyinstant::ClockDuration;
 use crate::sleepyinstant::Instant;
+use core::mem;
+use core::ops::{Index, IndexMut};
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
-pub(crate) const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
-const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
-const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
-pub(crate) const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
-const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
-const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
+pub(crate) const REKEY_AFTER_TIME: ClockDuration = ClockDuration::from_secs(120);
+const REJECT_AFTER_TIME: ClockDuration = ClockDuration::from_secs(180);
+const REKEY_ATTEMPT_TIME: ClockDuration = ClockDuration::from_secs(90);
+pub(crate) const REKEY_TIMEOUT: ClockDuration = ClockDuration::from_secs(5);
+const KEEPALIVE_TIMEOUT: ClockDuration = ClockDuration::from_secs(10);
+const COOKIE_EXPIRATION_TIME: ClockDuration = ClockDuration::from_secs(120);
 
 #[derive(Debug)]
 pub enum TimerName {
@@ -48,14 +42,15 @@ pub enum TimerName {
 
 use self::TimerName::*;
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug)]
 pub struct Timers {
     /// Is the owner of the timer the initiator or the responder for the last handshake?
     is_initiator: bool,
     /// Start time of the tunnel
     time_started: Instant,
-    timers: [Duration; TimerName::Top as usize],
-    pub(super) session_timers: [Duration; super::N_SESSIONS],
+    timers: [ClockDuration; TimerName::Top as usize],
+    pub(super) session_timers: [ClockDuration; super::N_SESSIONS],
     /// Did we receive data without sending anything back?
     want_keepalive: bool,
     /// Did we send data without hearing back?
@@ -70,8 +65,8 @@ impl Timers {
         Timers {
             is_initiator: false,
             time_started: Instant::now(),
-            timers: Default::default(),
-            session_timers: Default::default(),
+            timers: [ClockDuration::from_ticks(0); TimerName::Top as usize],
+            session_timers: [ClockDuration::from_ticks(0); super::N_SESSIONS],
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
@@ -96,14 +91,14 @@ impl Timers {
 }
 
 impl Index<TimerName> for Timers {
-    type Output = Duration;
-    fn index(&self, index: TimerName) -> &Duration {
+    type Output = ClockDuration;
+    fn index(&self, index: TimerName) -> &ClockDuration {
         &self.timers[index as usize]
     }
 }
 
 impl IndexMut<TimerName> for Timers {
-    fn index_mut(&mut self, index: TimerName) -> &mut Duration {
+    fn index_mut(&mut self, index: TimerName) -> &mut ClockDuration {
         &mut self.timers[index as usize]
     }
 }
@@ -149,11 +144,11 @@ impl Tunn {
         self.timers.clear();
     }
 
-    fn update_session_timers(&mut self, time_now: Duration) {
+    fn update_session_timers(&mut self, time_now: ClockDuration) {
         let timers = &mut self.timers;
 
         for (i, t) in timers.session_timers.iter_mut().enumerate() {
-            if time_now - *t > REJECT_AFTER_TIME {
+            if time_now.saturating_sub(*t) > REJECT_AFTER_TIME {
                 if let Some(session) = self.sessions[i].take() {
                     tracing::debug!(
                         message = "SESSION_EXPIRED(REJECT_AFTER_TIME)",
@@ -198,14 +193,14 @@ impl Tunn {
 
             // Clear cookie after COOKIE_EXPIRATION_TIME
             if self.handshake.has_cookie()
-                && now - self.timers[TimeCookieReceived] >= COOKIE_EXPIRATION_TIME
+                && now.saturating_sub(self.timers[TimeCookieReceived]) >= COOKIE_EXPIRATION_TIME
             {
                 self.handshake.clear_cookie();
             }
 
             // All ephemeral private keys and symmetric session keys are zeroed out after
             // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
-            if now - session_established >= REJECT_AFTER_TIME * 3 {
+            if now.saturating_sub(session_established) >= REJECT_AFTER_TIME * 3 {
                 tracing::error!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
                 self.handshake.set_expired();
                 self.clear_all();
@@ -214,7 +209,7 @@ impl Tunn {
 
             if let Some(time_init_sent) = self.handshake.timer() {
                 // Handshake Initiation Retransmission
-                if now - handshake_started >= REKEY_ATTEMPT_TIME {
+                if now.saturating_sub(handshake_started) >= REKEY_ATTEMPT_TIME {
                     // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
                     // the retries give up and cease, and clear all existing packets queued
                     // up to be sent. If a packet is explicitly queued up to be sent, then
@@ -242,7 +237,7 @@ impl Tunn {
                     // responder of the handshake, it does not re-initiate a new handshake
                     // after REKEY_AFTER_TIME ms like the original initiator does.
                     if session_established < data_packet_sent
-                        && now - session_established >= REKEY_AFTER_TIME
+                        && now.saturating_sub(session_established) >= REKEY_AFTER_TIME
                     {
                         tracing::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
                         handshake_initiation_required = true;
@@ -253,7 +248,7 @@ impl Tunn {
                     // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
                     // handshake.
                     if session_established < data_packet_received
-                        && now - session_established
+                        && now.saturating_sub(session_established)
                             >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
                     {
                         tracing::warn!(
@@ -269,7 +264,7 @@ impl Tunn {
                 // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
                 // we initiate a new handshake.
                 if data_packet_sent > aut_packet_received
-                    && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
+                    && now.saturating_sub(aut_packet_received) >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                     && mem::replace(&mut self.timers.want_handshake, false)
                 {
                     tracing::warn!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
@@ -280,7 +275,7 @@ impl Tunn {
                     // If a packet has been received from a given peer, but we have not sent one back
                     // to the given peer in KEEPALIVE ms, we send an empty packet.
                     if data_packet_received > aut_packet_sent
-                        && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
+                        && now.saturating_sub(aut_packet_sent) >= KEEPALIVE_TIMEOUT
                         && mem::replace(&mut self.timers.want_keepalive, false)
                     {
                         tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
@@ -289,8 +284,8 @@ impl Tunn {
 
                     // Persistent KEEPALIVE
                     if persistent_keepalive > 0
-                        && (now - self.timers[TimePersistentKeepalive]
-                            >= Duration::from_secs(persistent_keepalive as _))
+                        && (now.saturating_sub(self.timers[TimePersistentKeepalive])
+                            >= ClockDuration::from_secs(persistent_keepalive as u64))
                     {
                         tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
@@ -311,13 +306,13 @@ impl Tunn {
         TunnResult::Done
     }
 
-    pub fn time_since_last_handshake(&self) -> Option<Duration> {
+    pub fn time_since_last_handshake(&self) -> Option<ClockDuration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
             let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
             let duration_since_session_established = self.timers[TimeSessionEstablished];
 
-            Some(duration_since_tun_start - duration_since_session_established)
+            Some(duration_since_tun_start.saturating_sub(duration_since_session_established))
         } else {
             None
         }

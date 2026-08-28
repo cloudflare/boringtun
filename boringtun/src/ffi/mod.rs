@@ -8,22 +8,24 @@
 //! C bindings for the BoringTun library
 use super::noise::{Tunn, TunnResult};
 use crate::x25519::{PublicKey, StaticSecret};
-use base64::{decode, encode};
-use hex::encode as encode_hex;
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use hex::encode_to_slice as encode_hex;
 use libc::{raise, SIGSEGV};
-use parking_lot::Mutex;
-use rand_core::OsRng;
+use lock_api::Mutex;
+use parking_lot::RawMutex;
 use tracing;
 use tracing_subscriber::fmt;
 
 use crate::serialization::KeyBytes;
-use std::ffi::{CStr, CString};
+use core::ffi::CStr;
+use core::ptr;
+use core::ptr::null_mut;
+use core::slice;
+use std::ffi::CString;
 use std::io::{Error, ErrorKind, Write};
 use std::os::raw::c_char;
 use std::panic;
-use std::ptr;
-use std::ptr::null_mut;
-use std::slice;
 use std::sync::Once;
 
 static PANIC_HOOK: Once = Once::new();
@@ -99,7 +101,7 @@ pub struct x25519_key {
 #[no_mangle]
 pub extern "C" fn x25519_secret_key() -> x25519_key {
     x25519_key {
-        key: StaticSecret::random_from_rng(OsRng).to_bytes(),
+        key: StaticSecret::random().to_bytes(),
     }
 }
 
@@ -118,7 +120,7 @@ pub extern "C" fn x25519_public_key(private_key: x25519_key) -> x25519_key {
 /// The memory has to be freed by calling `x25519_key_to_str_free`
 #[no_mangle]
 pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const c_char {
-    let encoded_key = encode(key.key);
+    let encoded_key = BASE64_STANDARD.encode(key.key);
     CString::into_raw(CString::new(encoded_key).unwrap())
 }
 
@@ -127,8 +129,9 @@ pub extern "C" fn x25519_key_to_base64(key: x25519_key) -> *const c_char {
 /// The memory has to be freed by calling `x25519_key_to_str_free`
 #[no_mangle]
 pub extern "C" fn x25519_key_to_hex(key: x25519_key) -> *const c_char {
-    let encoded_key = encode_hex(key.key);
-    CString::into_raw(CString::new(encoded_key).unwrap())
+    let mut encoded_key = [0u8; 64];
+    encode_hex(key.key, &mut encoded_key).expect("buffer is exactly sized for the input");
+    CString::into_raw(CString::new(&encoded_key[..]).unwrap())
 }
 
 /// Frees memory of the string given by `x25519_key_to_hex` or `x25519_key_to_base64`
@@ -147,7 +150,7 @@ pub unsafe extern "C" fn check_base64_encoded_x25519_key(key: *const c_char) -> 
         Ok(string) => string,
     };
 
-    if let Ok(key) = decode(utf8_key) {
+    if let Ok(key) = BASE64_STANDARD.decode(utf8_key) {
         let len = key.len();
         let mut zero = 0u8;
         for b in key {
@@ -247,7 +250,7 @@ pub unsafe extern "C" fn new_tunnel(
     preshared_key: *const c_char,
     keep_alive: u16,
     index: u32,
-) -> *mut Mutex<Tunn> {
+) -> *mut Mutex<RawMutex, Tunn> {
     let c_str = CStr::from_ptr(static_private);
     let static_private = match c_str.to_str() {
         Err(_) => return ptr::null_mut(),
@@ -313,7 +316,7 @@ pub unsafe extern "C" fn new_tunnel(
 
 /// Drops the Tunn object
 #[no_mangle]
-pub unsafe extern "C" fn tunnel_free(tunnel: *mut Mutex<Tunn>) {
+pub unsafe extern "C" fn tunnel_free(tunnel: *mut Mutex<RawMutex, Tunn>) {
     drop(Box::from_raw(tunnel));
 }
 
@@ -321,7 +324,7 @@ pub unsafe extern "C" fn tunnel_free(tunnel: *mut Mutex<Tunn>) {
 /// For more details check noise::tunnel_to_network functions.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_write(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const Mutex<RawMutex, Tunn>,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
@@ -338,7 +341,7 @@ pub unsafe extern "C" fn wireguard_write(
 /// For more details check noise::network_to_tunnel functions.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_read(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const Mutex<RawMutex, Tunn>,
     src: *const u8,
     src_size: u32,
     dst: *mut u8,
@@ -355,7 +358,7 @@ pub unsafe extern "C" fn wireguard_read(
 /// Recommended interval: 100ms.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_tick(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const Mutex<RawMutex, Tunn>,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
@@ -368,7 +371,7 @@ pub unsafe extern "C" fn wireguard_tick(
 /// Force the tunnel to initiate a new handshake, dst buffer must be at least 148 byte long.
 #[no_mangle]
 pub unsafe extern "C" fn wireguard_force_handshake(
-    tunnel: *const Mutex<Tunn>,
+    tunnel: *const Mutex<RawMutex, Tunn>,
     dst: *mut u8,
     dst_size: u32,
 ) -> wireguard_result {
@@ -383,7 +386,7 @@ pub unsafe extern "C" fn wireguard_force_handshake(
 /// Number of data bytes encapsulated
 /// Number of data bytes decapsulated
 #[no_mangle]
-pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<Tunn>) -> stats {
+pub unsafe extern "C" fn wireguard_stats(tunnel: *const Mutex<RawMutex, Tunn>) -> stats {
     let tunnel = tunnel.as_ref().unwrap().lock();
     let (time, tx_bytes, rx_bytes, estimated_loss, estimated_rtt) = tunnel.stats();
     stats {

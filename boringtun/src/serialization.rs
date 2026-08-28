@@ -1,6 +1,8 @@
+use base64::Engine;
+
 pub(crate) struct KeyBytes(pub [u8; 32]);
 
-impl std::str::FromStr for KeyBytes {
+impl core::str::FromStr for KeyBytes {
     type Err = &'static str;
 
     /// Can parse a secret key from a hex or base64 encoded string.
@@ -17,10 +19,8 @@ impl std::str::FromStr for KeyBytes {
             }
             43 | 44 => {
                 // Try to parse as base64
-                if let Ok(decoded_key) = base64::decode(s) {
-                    if decoded_key.len() == internal.len() {
-                        internal[..].copy_from_slice(&decoded_key);
-                    } else {
+                if let Ok(len) = base64::prelude::BASE64_STANDARD.decode_slice(s, &mut internal) {
+                    if len != internal.len() {
                         return Err("Illegal character in key");
                     }
                 }

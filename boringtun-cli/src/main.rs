@@ -128,7 +128,7 @@ fn main() {
         let log = matches.get_one::<String>("log").unwrap();
 
         let log_file =
-            File::create(log).unwrap_or_else(|_| panic!("Could not create log file {}", log));
+            File::create(log).unwrap_or_else(|_| panic!("Could not create log file {log}"));
 
         let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
 

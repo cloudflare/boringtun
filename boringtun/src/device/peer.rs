@@ -4,11 +4,11 @@
 use parking_lot::RwLock;
 use socket2::{Domain, Protocol, Type};
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
-use std::str::FromStr;
-
 use crate::device::{AllowedIps, Error};
 use crate::noise::{Tunn, TunnResult};
+use crate::sleepyinstant::ClockDuration;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::str::FromStr;
 
 #[derive(Default, Debug)]
 pub struct Endpoint {
@@ -152,7 +152,7 @@ impl Peer {
         self.allowed_ips.iter().map(|(_, ip, cidr)| (ip, cidr))
     }
 
-    pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
+    pub fn time_since_last_handshake(&self) -> Option<ClockDuration> {
         self.tunnel.time_since_last_handshake()
     }
 
