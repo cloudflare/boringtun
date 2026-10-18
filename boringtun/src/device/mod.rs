@@ -640,6 +640,14 @@ impl Device {
                         Some(peer) => peer,
                     };
 
+                    // Cookie replies are not authenticated peer traffic: their source
+                    // address must not be used to update the peer endpoint (roaming) or
+                    // to create a connected socket. Parity with wireguard-go and the
+                    // Linux kernel (see also Mullvad's gotatun, which removed this
+                    // behavior for the same reason).
+                    let is_cookie_reply =
+                        matches!(&parsed_packet, Packet::PacketCookieReply(_));
+
                     let mut p = peer.lock();
 
                     // We found a peer, use it to decapsulate the message+
@@ -676,13 +684,15 @@ impl Device {
                     }
 
                     // This packet was OK, that means we want to create a connected socket for this peer
-                    let addr = addr.as_socket().unwrap();
-                    let ip_addr = addr.ip();
-                    p.set_endpoint(addr);
-                    if d.config.use_connected_socket {
-                        if let Ok(sock) = p.connect_endpoint(d.listen_port, d.fwmark) {
-                            d.register_conn_handler(Arc::clone(peer), sock, ip_addr)
-                                .unwrap();
+                    if !is_cookie_reply {
+                        let addr = addr.as_socket().unwrap();
+                        let ip_addr = addr.ip();
+                        p.set_endpoint(addr);
+                        if d.config.use_connected_socket {
+                            if let Ok(sock) = p.connect_endpoint(d.listen_port, d.fwmark) {
+                                d.register_conn_handler(Arc::clone(peer), sock, ip_addr)
+                                    .unwrap();
+                            }
                         }
                     }
 
