@@ -309,16 +309,19 @@ impl Device {
         allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
-    ) {
+    ) -> bool {
         if remove {
             // Completely remove a peer
-            return self.remove_peer(&pub_key);
+            self.remove_peer(&pub_key);
+            return true;
         }
 
-        // Update an existing peer
+        // Updating an existing peer is not supported yet. Return an error to the
+        // caller instead of panicking: a routine UAPI "set" request must not take
+        // down the device loop.
         if self.peers.get(&pub_key).is_some() {
-            // We already have a peer, we need to merge the existing config into the newly created one
-            panic!("Modifying existing peers is not yet supported. Remove and add again instead.");
+            tracing::warn!("Refusing to modify an existing peer; remove and add again instead");
+            return false;
         }
 
         let next_index = self.next_index();
@@ -348,6 +351,7 @@ impl Device {
         }
 
         tracing::info!("Peer added");
+        true
     }
 
     pub fn new(name: &str, config: DeviceConfig) -> Result<Device, Error> {

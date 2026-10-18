@@ -293,7 +293,7 @@ fn api_set_peer(
     while reader.read_line(&mut cmd).is_ok() {
         cmd.pop(); // remove newline if any
         if cmd.is_empty() {
-            d.update_peer(
+            if !d.update_peer(
                 public_key,
                 remove,
                 replace_ips,
@@ -301,7 +301,9 @@ fn api_set_peer(
                 allowed_ips.as_slice(),
                 keepalive,
                 preshared_key,
-            );
+            ) {
+                return EOPNOTSUPP;
+            }
             allowed_ips.clear(); //clear the vector content after update
             return 0; // Done
         }
@@ -340,7 +342,7 @@ fn api_set_peer(
                 },
                 "public_key" => {
                     // Indicates a new peer section. Commit changes for current peer, and continue to next peer
-                    d.update_peer(
+                    if !d.update_peer(
                         public_key,
                         remove,
                         replace_ips,
@@ -348,7 +350,9 @@ fn api_set_peer(
                         allowed_ips.as_slice(),
                         keepalive,
                         preshared_key,
-                    );
+                    ) {
+                        return EOPNOTSUPP;
+                    }
                     allowed_ips.clear(); //clear the vector content after update
                     match val.parse::<KeyBytes>() {
                         Ok(key_bytes) => public_key = key_bytes.0.into(),
